@@ -396,8 +396,24 @@ as it always has, and a ticket that names no agent runs on the runner's own prom
 ### The discussion on a ticket
 
 The comments of a ticket go into the prompt, oldest first, which closes the loop the
-`blocked` status opens: a run asks a question, you answer it in a comment, you move the
-ticket back to ready — and the next run reads your answer instead of asking again.
+`blocked` status opens: a run asks a question, you answer it in a comment — and the next
+run reads your answer instead of asking again.
+
+**Answering is the whole gesture.** The reply itself puts the ticket back in the queue:
+nothing to move on the board, the runner claims it and it goes to *in progress* for as
+long as the new run lasts. Which is narrow on purpose, because not every comment is an
+instruction:
+
+- only tickets **the runner has already reported on** wake up. A comment on a ticket no
+  run of ours ever touched is a conversation of yours, and one handled by another machine
+  is that machine's to pick up — a report is signed `ticket-runner@<host>`;
+- only when **someone else has had the last word** since that report. The report the next
+  run posts is also what closes the ticket again;
+- and never a **done** ticket. Done is done: comment on a finished ticket and nothing
+  happens. A ticket already ready, or one in flight, is left where it is too.
+
+So it is `blocked` and `failed` that come back to life, which is where a run leaves a
+ticket it could not finish, and precisely where an answer is expected.
 
 The runner's own reports are included too, trimmed to their verdict and reason; the branch
 names, session IDs and log paths they carry are of no use to a session. At most the last
@@ -406,7 +422,8 @@ does not spend more of its prompt on its own history than on the work.
 
 This needs one capability the integration does not have by default:
 [notion.so/my-integrations](https://www.notion.so/my-integrations) → your integration →
-**Capabilities** → *Read comments*. Without it the runner says so once and carries on.
+**Capabilities** → *Read comments*. Without it the runner says so once and carries on —
+and no ticket ever wakes up, since it cannot see the answer.
 
 ### The statuses
 
@@ -419,11 +436,11 @@ ticket.
 
 | Key | Default | What it means |
 | --- | --- | --- |
-| `ready` | **Ready** | the description is precise enough for an agent to handle it alone. **The only gesture that triggers work.** |
+| `ready` | **Ready** | the description is precise enough for an agent to handle it alone. **The gesture that triggers work** — the other being a comment answering a ticket already handled once. |
 | `running` | **In progress** | claimed by the runner. Stops the next run from taking it again. |
 | `done` | **In review** | branch pushed, pull request opened. Yours to review. |
 | `failed` | **Failed** | something broke: the session, the push, the worktree. |
-| `blocked` | **Blocked** | the agent would not guess and asked a question instead — or its project could not be located. |
+| `blocked` | **Blocked** | the agent would not guess and asked a question instead — or its project could not be located. Answer in a comment and the ticket runs again. |
 
 Two of those names are deliberate. *In review* rather than *Done*, because nothing is
 done when the runner lets go of a ticket: a pull request is waiting for a human, and a
@@ -512,7 +529,9 @@ often.
 | `object not found` on the database | the page is not shared with the integration (`···` → Connections). Sharing the page that holds the workspace covers everything under it |
 | “no page named … in the workspace” | the row is called something else. `doctor` lists what it did find — rename the row, set `[notion.pages]`, or run `ticket-runner init` to create it |
 | the agent knows nothing about you | no `Context` row in the workspace, or the page is empty. `doctor` says which, and the run says so once |
-| “comments not readable” | the integration lacks *Read comments* (my-integrations → Capabilities). The ticket runs, without its discussion |
+| “comments not readable” | the integration lacks *Read comments* (my-integrations → Capabilities). The ticket runs, without its discussion, and answering it in a comment no longer wakes it |
+| a comment on a ticket changes nothing | the ticket is *done*, or no run of this host ever reported on it — those two never wake |
+| a ticket keeps running again and again | its report never gets posted, so your answer stays the last word: the integration lost *Insert comments* |
 | a ticket ignores its agent | the `Agent` column is missing or is not a relation — `doctor` names it |
 | “project not found on disk” | the project names a repository that is not there: fix its `Path` or `Repository` property, or add `"Notion name" = "/path"` under `[projects]` |
 | a ticket became a document when you wanted code | its project names no repository. Give the project page a `Path` or a `Repository` |
@@ -590,8 +609,9 @@ database someone else can edit — it is a different proposition. What makes it 
   runner already writes to;
 - **editing rights on the tickets database limited** to the people you would let run a
   command on that machine — which is the honest way to read that permission. Since the
-  comments of a ticket reach the prompt too, that now includes **comment-only**
-  collaborators: on a shared board, they are the same permission.
+  comments of a ticket reach the prompt too, and since answering a ticket the runner has
+  already handled starts a run of its own, that includes **comment-only** collaborators:
+  on a shared board, they are the same permission.
 
 Setting `permission_mode = "acceptEdits"` narrows it further, at the cost of sessions that
 stall the first time one needs to run the test suite. It is the right setting for a shared
