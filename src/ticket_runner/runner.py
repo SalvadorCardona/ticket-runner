@@ -124,14 +124,17 @@ class Runner:
                 )
             self.say(f"    ! Notion refused the comment: {error}{hint}")
 
-    def _fail(self, ticket: Ticket, reason: str, detail: str = "") -> dict:
+    def _fail(
+        self, ticket: Ticket, reason: str, detail: str = "", *, blocked: bool = False
+    ) -> dict:
+        outcome = "blocked" if blocked else "failed"
         self.say(f"    ✗ {ticket.title} — {reason}")
-        self._set(ticket, **{self.config.notion.prop("status"): self.config.notion.state("failed")})
+        self._set(ticket, **{self.config.notion.prop("status"): self.config.notion.state(outcome)})
         self._comment(
             ticket,
-            f"{self.agent_label} — failed.\n{reason}" + (f"\n\n{detail}" if detail else ""),
+            f"{self.agent_label} — {outcome}.\n{reason}" + (f"\n\n{detail}" if detail else ""),
         )
-        return {"ticket": ticket.title, "id": ticket.id, "status": "failed", "reason": reason}
+        return {"ticket": ticket.title, "id": ticket.id, "status": outcome, "reason": reason}
 
     # -- preparation ---------------------------------------------------------
 
@@ -139,12 +142,16 @@ class Runner:
         """Locate the project and claim the ticket. None if it is unusable."""
         relation = notion.read(ticket.page, self.config.notion.prop("project")) or []
         if not relation:
-            self._fail(ticket, "no project linked: the runner has no repository to work in")
+            self._fail(
+                ticket,
+                "no project linked: the runner has no repository to work in",
+                blocked=True,
+            )
             return None
         try:
             project = self.resolver.resolve(self.client, relation[0])
         except (LookupError, notion.NotionError) as error:
-            self._fail(ticket, "project not found on disk", str(error))
+            self._fail(ticket, "project not found on disk", str(error), blocked=True)
             return None
 
         base = self.config.runner.base_branch or git.default_branch(project.path)
@@ -231,13 +238,16 @@ class Runner:
 
         if not outcome.ok:
             reason = "the agent stopped without deciding" if outcome.blocked else "the session failed"
+            # An agent that asked a question is waiting for you; a session that
+            # crashed is waiting for someone to look at the log. Different rows
+            # on the board, when the board has somewhere to put them.
             detail = (outcome.summary if outcome.blocked else outcome.error) or ""
             kept = ""
             if self.config.runner.keep_worktree_on_failure:
                 kept = f"\nWorktree kept: `{job.worktree}` (branch `{job.branch}`)"
             else:
                 git.remove_worktree(project.path, job.worktree)
-            return self._fail(ticket, reason, f"{detail}\n\n{trace}{kept}")
+            return self._fail(ticket, reason, f"{detail}\n\n{trace}{kept}", blocked=outcome.blocked)
 
         commits = git.commits_ahead(job.worktree, job.base)
         if commits == 0:
@@ -247,6 +257,7 @@ class Runner:
                 ticket,
                 "the session declared itself done without a single commit",
                 f"{outcome.summary}\n\n{trace}",
+                blocked=True,
             )
 
         pull_request = ""

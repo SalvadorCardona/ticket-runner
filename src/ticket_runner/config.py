@@ -45,6 +45,12 @@ class Notion:
         return self.properties.get(key, _DEFAULT_PROPERTIES[key])
 
     def state(self, key: str) -> str:
+        # "blocked" is optional: without it, a ticket the agent could not settle
+        # lands wherever a technical failure lands. Naming it separately is what
+        # lets "the agent asked a question" and "something broke" be told apart
+        # at a glance on the board.
+        if key == "blocked" and "blocked" not in self.status:
+            return self.state("failed")
         return self.status.get(key, _DEFAULT_STATUS[key])
 
 
@@ -99,6 +105,7 @@ _DEFAULT_STATUS = {
     "running": "In progress",
     "done": "Done",
     "failed": "Draft",
+    "blocked": "Draft",
 }
 
 
@@ -144,7 +151,9 @@ def load(path: Path | None = None) -> Config:
         token=str(notion_raw.get("token", "")).strip(),
         tickets_database=_database_id(str(notion_raw.get("tickets_database", ""))),
         properties={**_DEFAULT_PROPERTIES, **notion_raw.get("properties", {})},
-        status={**_DEFAULT_STATUS, **notion_raw.get("status", {})},
+        # Not merged with the defaults: `state()` needs to know which keys the
+        # file actually sets, to let "blocked" fall back on "failed".
+        status=dict(notion_raw.get("status", {})),
     )
 
     runner_raw = raw.get("runner", {})

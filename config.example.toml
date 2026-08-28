@@ -23,17 +23,27 @@ agent = "Agent"
 pull_request = "Pull Request"
 session = "Session"
 
-# The four states that drive the whole system.
+# The states that drive the whole system. Point them at whatever your board
+# calls them — `ticket-runner doctor` checks that each one really exists.
 #   ready    what the runner picks up — move a ticket here once its description
 #            is precise enough to be handled without you
 #   running  claimed, work in progress (stops a second pass from taking it)
 #   done     branch pushed, pull request opened, waiting for your review
-#   failed   failure or ticket too ambiguous: the reason is in a comment
+#   failed   something broke: the session, the push, the worktree
+#   blocked  optional. The agent could not settle the ticket and asked a
+#            question instead of guessing — or the project could not be located.
+#            Without this key, such tickets land wherever `failed` points, which
+#            works but mixes "waiting for you" with "something is wrong".
 [notion.status]
 ready = "Not started"
 running = "In progress"
 done = "Done"
 failed = "Draft"
+
+# A board with room for both reads much better:
+#   done = "Need Review"
+#   failed = "Blocked"
+#   blocked = "Blocked"
 
 [runner]
 # Where to look for repositories. Projects are matched by their origin remote.

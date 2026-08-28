@@ -182,16 +182,34 @@ order:
 `ticket-runner projects` shows you the outcome for every referenced project — worth
 running once after installation; it is what saves you from surprises.
 
-### The four statuses
+### The statuses
 
-This is where your control over the system lives.
+This is where your control over the system lives. The names are yours — map them under
+`[notion.status]`, and `ticket-runner doctor` checks each one actually exists on the
+board, because a status the database does not offer would only fail at the very end of a
+ticket.
 
-| Status | What it means |
-| --- | --- |
-| **Draft** | not ready. The runner leaves it alone. It is also where a **failed ticket lands**, with the reason in a comment. |
-| **Not started** | ready. The description is precise enough for an agent to handle it alone. **The only gesture that triggers work.** |
-| **In progress** | claimed by the runner. Stops the next run from taking it again. |
-| **Done** | branch pushed, pull request opened. Yours to review. |
+Out of the box the runner uses the four a plain Notion status property gives you:
+
+| Key | Default | What it means |
+| --- | --- | --- |
+| `ready` | **Not started** | the description is precise enough for an agent to handle it alone. **The only gesture that triggers work.** |
+| `running` | **In progress** | claimed by the runner. Stops the next run from taking it again. |
+| `done` | **Done** | branch pushed, pull request opened. Yours to review. |
+| `failed` | **Draft** | something broke: the session, the push, the worktree. |
+| `blocked` | *follows `failed`* | the agent would not guess and asked a question instead — or its project could not be located. |
+
+Add two statuses to your board and the picture gets a lot clearer:
+
+```toml
+[notion.status]
+done = "Need Review"     # a pull request is waiting for you
+failed = "Blocked"       # something went wrong, the comment says what
+blocked = "Blocked"      # the agent asked a question
+```
+
+*Done* then means what you decide it means — merged, accepted — and *Draft* goes back to
+its real job: a ticket not yet ready to be handed over.
 
 Nothing is ever merged automatically.
 
@@ -235,8 +253,8 @@ on the program's normal path:
   commits at all. A session that declares itself done without committing anything is
   treated as a failure.
 - **An ambiguous ticket is not guessed.** The prompt explicitly asks the agent to answer
-  `RESULT: blocked` and stop rather than decide in your place. The ticket returns to
-  *Draft* with the question in a comment.
+  `RESULT: blocked` and stop rather than decide in your place. The ticket goes to the
+  `blocked` status with the question in a comment.
 - **A failing ticket takes only itself down.** The others in the same run carry on. Its
   worktree is kept for the post-mortem, and the session ID reopens the conversation
   exactly where it stopped: `claude --resume <id>`.

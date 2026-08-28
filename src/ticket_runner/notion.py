@@ -42,7 +42,7 @@ class Client:
     def __init__(self, token: str, timeout: int = 30) -> None:
         self._token = token
         self._timeout = timeout
-        self._schemas: dict[str, dict[str, str]] = {}
+        self._databases: dict[str, dict] = {}
 
     # -- transport -----------------------------------------------------------
 
@@ -86,15 +86,30 @@ class Client:
 
     # -- reading -------------------------------------------------------------
 
+    def database(self, database_id: str) -> dict:
+        """The raw database object, fetched once per run."""
+        if database_id not in self._databases:
+            self._databases[database_id] = self._request("GET", f"/databases/{database_id}")
+        return self._databases[database_id]
+
     def schema(self, database_id: str) -> dict[str, str]:
         """{property name: type}, cached for the lifetime of the run."""
-        if database_id not in self._schemas:
-            database = self._request("GET", f"/databases/{database_id}")
-            self._schemas[database_id] = {
-                name: prop.get("type", "")
-                for name, prop in database.get("properties", {}).items()
-            }
-        return self._schemas[database_id]
+        return {
+            name: prop.get("type", "")
+            for name, prop in self.database(database_id).get("properties", {}).items()
+        }
+
+    def options(self, database_id: str, name: str) -> list[str]:
+        """The values a status or select property accepts, in Notion's order.
+
+        A status the configuration names but the database does not offer is
+        rejected at the end of a ticket, when the runner tries to write it —
+        which is the worst possible moment to discover a typo. `doctor` uses
+        this to catch it beforehand.
+        """
+        prop = self.database(database_id).get("properties", {}).get(name, {})
+        kind = prop.get("type", "")
+        return [option.get("name", "") for option in prop.get(kind, {}).get("options", [])]
 
     def find_database(self, name: str) -> str:
         """The ID of the database whose title matches `name`.

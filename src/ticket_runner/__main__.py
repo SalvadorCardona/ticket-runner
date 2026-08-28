@@ -41,6 +41,11 @@ def title(message: str) -> None:
     print(f"{BOLD}{message}{RESET}")
 
 
+def _colour(status: str) -> str:
+    """Blocked is not a failure: it is a ticket waiting for you."""
+    return {"done": GREEN, "failed": RED, "blocked": YELLOW}.get(status, DIM)
+
+
 def load_config() -> config_module.Config:
     try:
         configuration = config_module.load()
@@ -121,7 +126,7 @@ def command_history(args: argparse.Namespace) -> int:
         return 0
     for entry in entries:
         status = entry.get("status", "?")
-        colour = GREEN if status == "done" else RED if status == "failed" else DIM
+        colour = _colour(status)
         line = f"  {colour}{status:<7}{RESET} {entry.get('at', '')}  {entry.get('ticket', '')}"
         print(line)
         detail = entry.get("pull_request") or entry.get("reason") or ""
@@ -174,8 +179,7 @@ def command_status(args: argparse.Namespace) -> int:
         print(f"  {DIM}none{RESET}")
     for entry in entries:
         status = entry.get("status", "?")
-        colour = GREEN if status == "done" else RED if status == "failed" else DIM
-        print(f"  {colour}{status:<7}{RESET} {entry.get('ticket', '')}")
+        print(f"  {_colour(status)}{status:<7}{RESET} {entry.get('ticket', '')}")
     return 0
 
 
@@ -324,6 +328,20 @@ def command_doctor(args: argparse.Namespace) -> int:
     session_property = configuration.notion.prop("session")
     if session_property not in schema:
         warn(f"property “{session_property}” missing — the session ID will go in a comment")
+
+    title("Statuses")
+    options = client.options(database, configuration.notion.prop("status"))
+    if not options:
+        warn("the status property offers no options — nothing to check against")
+    else:
+        for key in ("ready", "running", "done", "failed", "blocked"):
+            wanted = configuration.notion.state(key)
+            if wanted in options:
+                ok(f"{key:<8} → “{wanted}”")
+            else:
+                bad(f"{key:<8} → “{wanted}” is not offered by the database")
+                problems += 1
+        print(f"  {DIM}available: {', '.join(options)}{RESET}")
 
     title("Model")
     ok(f"claude: {session.available() or 'missing'}")
