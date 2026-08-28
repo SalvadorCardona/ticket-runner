@@ -70,6 +70,13 @@ class Notion:
         # whole reason the runner distinguishes them.
         if key == "blocked" and "blocked" not in self.status and "failed" in self.status:
             return self.state("failed")
+        # "review" reads the same way, against a named `done`: a file that says
+        # where a finished ticket goes but not where it waits for its pull
+        # request has one column for both, and nothing to watch for a merge. A
+        # file that names neither gets the defaults, which are two — the pull
+        # request being open and it being merged are not the same day.
+        if key == "review" and "review" not in self.status and "done" in self.status:
+            return self.state("done")
         return self.status.get(key, _DEFAULT_STATUS[key])
 
 
@@ -175,7 +182,8 @@ PRIORITIES = ("Urgent", "High", "Normal", "Low")
 _DEFAULT_STATUS = {
     "ready": "Ready",
     "running": "In progress",
-    "done": "In review",
+    "review": "In review",
+    "done": "Done",
     "failed": "Failed",
     "blocked": "Blocked",
 }

@@ -26,6 +26,7 @@ In progress   ◀───────────┤
                           └─ has none ──────────▶  scratch dir, ANSWER.md
                                                    published as Notion blocks ──▶  the page itself
 In review     ◀───────────
+Done          ◀───────────  once you merge that pull request
 ```
 
 Which of the two you get is decided by the project, not by a setting: a project that names
@@ -409,8 +410,9 @@ instruction:
   is that machine's to pick up — a report is signed `ticket-runner@<host>`;
 - only when **someone else has had the last word** since that report. The report the next
   run posts is also what closes the ticket again;
-- and never a **done** ticket. Done is done: comment on a finished ticket and nothing
-  happens. A ticket already ready, or one in flight, is left where it is too.
+- and never a ticket that came back with its pull request. *In review* and *Done* are
+  both answers already: comment on one and nothing happens — the discussion belongs to
+  the pull request. A ticket already ready, or one in flight, is left where it is too.
 
 So it is `blocked` and `failed` that come back to life, which is where a run leaves a
 ticket it could not finish, and precisely where an answer is expected.
@@ -432,32 +434,49 @@ This is where your control over the system lives. The names are yours — map th
 board, because a status the database does not offer would only fail at the very end of a
 ticket.
 
-`ticket-runner init` creates these five:
+`ticket-runner init` creates these six:
 
 | Key | Default | What it means |
 | --- | --- | --- |
 | `ready` | **Ready** | the description is precise enough for an agent to handle it alone. **The gesture that triggers work** — the other being a comment answering a ticket already handled once. |
 | `running` | **In progress** | claimed by the runner. Stops the next run from taking it again. |
-| `done` | **In review** | branch pushed, pull request opened. Yours to review. |
+| `review` | **In review** | branch pushed, pull request opened. Yours to review. |
+| `done` | **Done** | that pull request has been merged — or the ticket produced a document, which has nothing to wait for. |
 | `failed` | **Failed** | something broke: the session, the push, the worktree. |
 | `blocked` | **Blocked** | the agent would not guess and asked a question instead — or its project could not be located. Answer in a comment and the ticket runs again. |
 
-Two of those names are deliberate. *In review* rather than *Done*, because nothing is
+Three of those names are deliberate. *In review* rather than *Done*, because nothing is
 done when the runner lets go of a ticket: a pull request is waiting for a human, and a
-board that calls that *Done* stops being believed by the second week. And *Blocked* is
-its own column rather than a shade of *Failed*, because the runner works hard to tell
-them apart — a ticket waiting for **you** and a session that crashed are different days,
-and pouring both into one column throws that away.
+board that calls that *Done* stops being believed by the second week. *Done* is then kept
+for what it says — merged. And *Blocked* is its own column rather than a shade of
+*Failed*, because the runner works hard to tell them apart — a ticket waiting for **you**
+and a session that crashed are different days, and pouring both into one column throws
+that away.
 
-One column for both is still a fine board, if yours is small. Name `failed` and leave
-`blocked` out, and questions land wherever failures do:
+One column for two states is still a fine board, if yours is small. Name `failed` and
+leave `blocked` out, and questions land wherever failures do; name `done` and leave
+`review` out, and a ticket stops at its open pull request:
 
 ```toml
 [notion.status]
+done = "Shipped"
 failed = "Needs you"
 ```
 
-Nothing is ever merged automatically.
+### Merging is the only gesture
+
+A ticket that came back as a pull request waits in *In review*. Every run then asks
+GitHub — through `gh` — what became of those pull requests, and a ticket whose own has
+been **merged** moves to *Done*, with a comment saying so. So you merge, and the board
+catches up on its own; nothing else to close by hand.
+
+The cadence is the runner's own: `interval_seconds`, not a second timer to install and
+forget. A ticket whose pull request is still open, closed without merging, or unreachable
+because `gh` is not authenticated simply stays in review — the next run asks again. A
+board whose `review` and `done` are one column has nowhere for a ticket to wait, so
+nothing is watched.
+
+Nothing is ever merged automatically. The merge is yours; only its consequence is not.
 
 ---
 

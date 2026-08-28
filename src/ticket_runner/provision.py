@@ -1,7 +1,7 @@
 """Building the Notion side of the runner from one page link.
 
 Setting this up by hand means four databases, a dozen properties, two relations
-and five status options spelled *exactly* as the configuration spells them. Get
+and six status options spelled *exactly* as the configuration spells them. Get
 one character wrong and the runner finds nothing, for ever, without saying why.
 So the machine does it: you share one page with the integration, and everything
 under it is created here.
@@ -34,6 +34,7 @@ from .config import PRIORITIES, Notion
 _STATUS_COLOURS = {
     "ready": "blue",
     "running": "yellow",
+    "review": "purple",
     "done": "green",
     "failed": "red",
     "blocked": "orange",
@@ -108,11 +109,11 @@ def status_options(settings: Notion) -> list[dict]:
     """The status column's options, in board order, without duplicates.
 
     A configuration is free to point two states at one column — `failed` and
-    `blocked` on a single "Needs you" is a reasonable board — and Notion refuses
-    a select that lists the same option twice.
+    `blocked` on a single "Needs you", `review` and `done` on a single "Done" —
+    and Notion refuses a select that lists the same option twice.
     """
     seen: dict[str, str] = {}
-    for key in ("ready", "running", "done", "failed", "blocked"):
+    for key in ("ready", "running", "review", "done", "failed", "blocked"):
         name = settings.state(key).strip()
         if name and name not in seen:
             seen[name] = _STATUS_COLOURS[key]

@@ -120,9 +120,31 @@ def blocked_falls_back_on_failed_but_only_when_unset():
     assert config.notion.state("blocked") == "Blocked"
 
     config = _config("")
-    assert config.notion.state("done") == "In review"
+    assert config.notion.state("review") == "In review"
+    assert config.notion.state("done") == "Done"
     assert config.notion.state("blocked") == "Blocked", "its own column, not the failure one"
     assert config.notion.state("failed") == "Failed"
+
+
+@case
+def review_falls_back_on_done_but_only_when_done_is_named():
+    """A file that names `done` and not `review` has one column for both.
+
+    Which is also what turns the merge watch off: there is no column for a
+    ticket to wait in, so there is nothing to watch. A file that names neither
+    gets the defaults, which are two — an open pull request and a merged one
+    are not the same day.
+    """
+    config = _config('[notion.status]\ndone = "Shipped"\n')
+    assert config.notion.state("review") == config.notion.state("done") == "Shipped"
+
+    config = _config("")
+    assert config.notion.state("review") == "In review"
+    assert config.notion.state("done") == "Done", "the defaults keep them apart"
+
+    config = _config('[notion.status]\nreview = "Waiting on you"\ndone = "Shipped"\n')
+    assert config.notion.state("review") == "Waiting on you"
+    assert config.notion.state("done") == "Shipped"
 
 
 @case
@@ -382,9 +404,9 @@ def a_bare_page_becomes_the_whole_board():
     assert schema["Agent"]["relation"]["database_id"] == "db-agents"
 
     # A status property cannot be created through the API; a select can, and the
-    # runner reads both. The five columns must all be there.
+    # runner reads both. The six columns must all be there.
     options = [option["name"] for option in schema["Status"]["select"]["options"]]
-    assert options == ["Ready", "In progress", "In review", "Failed", "Blocked"]
+    assert options == ["Ready", "In progress", "In review", "Done", "Failed", "Blocked"]
 
     assert board.appended, "the context page is seeded rather than left blank"
 
@@ -469,7 +491,11 @@ def two_states_on_one_column_produce_one_option():
     settings.status = {"failed": "Needs you", "blocked": "Needs you"}
     names = [option["name"] for option in provision.status_options(settings)]
     assert names.count("Needs you") == 1
-    assert len(names) == 4
+    assert len(names) == 5
+
+    settings.status = {"review": "Done", "done": "Done"}
+    names = [option["name"] for option in provision.status_options(settings)]
+    assert names.count("Done") == 1
 
 
 @case
@@ -659,7 +685,7 @@ def a_ticket_no_run_of_ours_ever_touched_is_left_alone():
 
 @case
 def waking_looks_everywhere_but_where_a_status_already_speaks():
-    """Done stays done, ready is on its way, running is in flight."""
+    """Done stays done, in review waits on a merge, ready is on its way."""
     runner = Runner.__new__(Runner)
     runner.config = _config("")
     runner._workspace = workspace.Workspace(tickets="db")
@@ -667,11 +693,11 @@ def waking_looks_everywhere_but_where_a_status_already_speaks():
     excluded = {
         condition["status"]["does_not_equal"] for condition in runner._woken_filter()["and"]
     }
-    assert excluded == {"In review", "Ready", "In progress"}
+    assert excluded == {"In review", "Done", "Ready", "In progress"}
     assert all(condition["property"] == "Status" for condition in runner._woken_filter()["and"])
-    # Three names spoken, and everything else — failed, blocked, whatever the
+    # Four names spoken, and everything else — failed, blocked, whatever the
     # board adds later — left in, because that is where an answer is expected.
-    assert len(runner._woken_filter()["and"]) == 3
+    assert len(runner._woken_filter()["and"]) == 4
 
 
 @case
@@ -956,6 +982,104 @@ def a_template_only_body_counts_as_blank():
     assert is_blank("   \n\n---\n")
     assert not is_blank("## Ce qu'il faut faire\nRetirer le header.")
     assert not is_blank("Une seule ligne de texte")
+
+
+# -- a merged pull request closes its ticket ---------------------------------
+
+
+class _BoardClient:
+    """A tickets database that answers queries and remembers what was written."""
+
+    def __init__(self, pages: list[notion.Page]):
+        self._pages = pages
+        self.written: list[tuple[str, dict]] = []
+        self.comments_written: list[str] = []
+
+    def schema(self, database_id: str) -> dict[str, str]:
+        return {"Status": "status", "Pull Request": "url"}
+
+    def query(self, database_id: str, filter_=None) -> list[notion.Page]:
+        wanted = (filter_ or {}).get("status", {}).get("equals")
+        return [page for page in self._pages if notion.read(page, "Status") == wanted]
+
+    def update(self, database_id: str, page_id: str, values: dict) -> None:
+        self.written.append((page_id, values))
+
+    def comment(self, page_id: str, text: str) -> None:
+        self.comments_written.append(text)
+
+
+def _reviewed(page_id: str, status: str, pull_request: str | None) -> notion.Page:
+    properties = {"Status": {"type": "status", "status": {"name": status}}}
+    if pull_request is not None:
+        properties["Pull Request"] = {"type": "url", "url": pull_request}
+    return notion.Page(id=page_id, url="", title=page_id, properties=properties)
+
+
+def _closing(pages: list[notion.Page], states: dict[str, str], status: dict[str, str]):
+    """Run `close_merged` against a fake board and a fake GitHub."""
+    from ticket_runner import git as git_module
+
+    runner = Runner.__new__(Runner)
+    runner.client = _BoardClient(pages)
+    runner.config = C.Config(
+        notion=C.Notion(properties=dict(C._DEFAULT_PROPERTIES), status=status),
+        runner=C.Runner(),
+        projects={},
+        path=Path("/nowhere"),
+    )
+    runner._workspace = workspace.Workspace(tickets="db")
+    runner.agent_label = "ticket-runner@laptop"
+    runner.quiet = True
+    runner.dry_run = False
+    original = git_module.pull_request_state
+    git_module.pull_request_state = lambda url: states.get(url, "")
+    try:
+        return runner.client, runner.close_merged()
+    finally:
+        git_module.pull_request_state = original
+
+
+@case
+def a_merged_pull_request_moves_its_ticket_to_done():
+    client, closed = _closing(
+        [
+            _reviewed("p-merged", "In review", "https://github.com/x/y/pull/1"),
+            _reviewed("p-open", "In review", "https://github.com/x/y/pull/2"),
+            _reviewed("p-ready", "Not started", None),
+        ],
+        {"https://github.com/x/y/pull/1": "MERGED", "https://github.com/x/y/pull/2": "OPEN"},
+        {"review": "In review", "done": "Done"},
+    )
+    assert closed == 1
+    assert client.written == [("p-merged", {"Status": "Done"})]
+    assert "merged" in client.comments_written[0]
+
+
+@case
+def a_ticket_is_never_closed_on_an_answer_github_did_not_give():
+    """No pull request, or no `gh` to ask: the ticket stays where it is."""
+    client, closed = _closing(
+        [
+            _reviewed("p-nothing", "In review", None),
+            _reviewed("p-empty", "In review", ""),
+            _reviewed("p-unreachable", "In review", "https://github.com/x/y/pull/3"),
+        ],
+        {},  # as when gh is missing or not authenticated
+        {"review": "In review", "done": "Done"},
+    )
+    assert closed == 0 and client.written == []
+
+
+@case
+def a_board_without_a_review_column_is_never_even_queried():
+    """`review` following `done` means there is nowhere for a ticket to wait."""
+    client, closed = _closing(
+        [_reviewed("p-done", "Done", "https://github.com/x/y/pull/1")],
+        {"https://github.com/x/y/pull/1": "MERGED"},
+        {"done": "Done"},
+    )
+    assert closed == 0 and client.written == []
 
 
 def main() -> int:
