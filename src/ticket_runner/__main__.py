@@ -516,6 +516,7 @@ def command_doctor(args: argparse.Namespace) -> int:
         ("priority", "select", "which ready ticket runs first"),
         ("cost", "number", "what the run cost, written back"),
         ("duration", "number", "how long it took, in minutes"),
+        ("progress", "rich_text", "what the session is doing, while it does it"),
         ("due", "date", "hold the ticket until that date, then run it"),
         ("role", "relation", "which agent handles the ticket; its page is the role"),
     )
@@ -548,6 +549,11 @@ def command_doctor(args: argparse.Namespace) -> int:
     interval = configuration.runner.interval_seconds
     print(f"  {DIM}one run every {interval}s (ticket-runner enable to apply a change){RESET}")
     print(f"  {DIM}permission_mode = {configuration.runner.permission_mode}{RESET}")
+    if configuration.runner.progress:
+        every = configuration.runner.progress_interval_seconds
+        print(f"  {DIM}live steps written into the ticket every {every}s{RESET}")
+    else:
+        print(f"  {DIM}runner.progress = false — the ticket says nothing until the end{RESET}")
 
     if problems:
         print(f"\n{RED}{problems} problem(s) to fix.{RESET}")

@@ -66,12 +66,16 @@ agent = "Runner"
 # opens the session; as a text column it holds the bare identifier.
 session = "Session"
 
-# All four are optional — a database without them behaves exactly as before.
+# All five are optional — a database without them behaves exactly as before.
 model = "Model"          # select: pick the model per ticket, over runner.model
 priority = "Priority"    # select: Urgent, High, Normal, Low — which one runs first
 cost = "Cost"            # number: what the run cost, written back
 duration = "Duration"    # number: how long it took, in minutes
 role = "Agent"           # relation → your agents database: who handles the ticket
+
+# text: what the session is doing right now, rewritten every ten seconds while
+# it runs and cleared when it ends — see runner.progress below.
+progress = "Progress"
 
 # A date here is a start gate, not a deadline: the ticket is left alone until
 # that moment, then picked up on the first pass after it.
@@ -173,6 +177,19 @@ session_host = ""
 # One desktop notification per finished ticket. The point of the runner is that
 # you are not watching it; without this you discover your pull request tomorrow.
 notify = true
+
+# The steps of a running session, written into its own ticket while it happens.
+# The run opens one toggle on the page — “⏳ Live — 12 step(s) · 3 min” — and
+# drops a line under it per file read, per command run, per sentence the agent
+# says. The `Progress` column of the board carries the last one, so a glance at
+# the board is enough to see a ticket move.
+#
+# A cadence, not a stream: a session emits several events a second, and writing
+# each one would rewrite the page continuously for nothing. Ten seconds reads as
+# live; five is the floor. The log stays the place for everything else:
+#   ticket-runner logs -f
+progress = true
+progress_interval_seconds = 10
 
 # Keep the installation on the latest version, on its own. A run looks at the
 # clock before it looks at the tickets: once every update_interval_seconds it

@@ -283,10 +283,35 @@ class Client:
         from . import markdown as converter
 
         blocks = converter.to_blocks(markdown)
-        for batch in converter.chunked(blocks):
-            if batch:
-                self._request("PATCH", f"/blocks/{page_id}/children", {"children": batch})
+        self.append_blocks(page_id, blocks)
         return len(blocks)
+
+    def append_blocks(self, block_id: str, blocks: list[dict]) -> list[str]:
+        """Append blocks under a page *or* under a block, and return their IDs.
+
+        Notion takes a hundred at a time, hence the batching; and it answers
+        with what it created, which is how the live report gets hold of the
+        toggle it will then keep filling.
+        """
+        from . import markdown as converter
+
+        created: list[str] = []
+        for batch in converter.chunked(blocks):
+            if not batch:
+                continue
+            payload = self._request(
+                "PATCH", f"/blocks/{block_id}/children", {"children": batch}
+            )
+            created += [item.get("id", "") for item in payload.get("results", [])]
+        return created
+
+    def update_block(self, block_id: str, payload: dict) -> None:
+        """Rewrite a block in place — its text, not its type.
+
+        Used by the live report to keep a toggle's title current: the count and
+        the elapsed time belong on the line you see when it is collapsed.
+        """
+        self._request("PATCH", f"/blocks/{block_id}", payload)
 
     def comment(self, page_id: str, text: str) -> None:
         self._request(

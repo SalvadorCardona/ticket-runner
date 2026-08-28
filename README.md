@@ -235,6 +235,7 @@ presence of each status — and names whichever of those was missed.
 | `Model` | select | *optional* — `opus`, `sonnet`, `haiku`. This ticket's model, over its agent's and over `runner.model` |
 | `Cost` | number | *optional* — written back, in dollars |
 | `Duration` | number | *optional* — written back, in minutes |
+| `Progress` | text | *optional* — **what the session is doing right now**, rewritten every ten seconds |
 | `Scheduled` | date | *optional* — **hold the ticket until that moment**, then run it |
 
 `Scheduled` is what turns the board into a calendar. A ticket without one starts within
@@ -252,7 +253,7 @@ Precision is to the minute, and that limit is Notion's rather than the runner's:
 `14:48:27` as `14:48`. With a ten-second cadence a ticket therefore starts within a few
 seconds of the minute you named, which is as close as the board can express.
 
-The last five are optional in the strict sense: a database without them behaves exactly as
+The last six are optional in the strict sense: a database without them behaves exactly as
 before, because the runner only ever writes properties the schema declares. Add them and
 you get a queue you can steer — a cheap model for a documentation ticket, an expensive one
 for a refactor — and a board that shows what each ticket cost.
@@ -262,6 +263,52 @@ you would tell a developer who does not know the subject: what must change, wher
 how you will know it is done.
 
 ### Following the work
+
+#### Live, on the ticket itself
+
+A run used to say nothing between *In progress* and the pull request. Now it narrates:
+while the session works, its steps are written **into the ticket**, on a ten-second
+cadence.
+
+Two places, and they answer two different questions.
+
+- **The page** gets one toggle per run — `⏳ Live — 12 step(s) · 3 min` — and a line under
+  it per file read, per command run, per sentence the agent says. Open it to watch the
+  work; leave it collapsed and its title alone tells you the session is moving. When the
+  run ends the toggle settles into `✓ 27 step(s) · 6 min · removed the header`, and stays
+  as the story of what happened.
+- **The `Progress` column** carries the last line, so a glance at the board — from a
+  phone, without opening anything — shows which ticket is on `Bash · npm test` and which
+  is still reading. It is cleared when the run ends: the comment, the status and the pull
+  request speak from then on.
+
+```
+⏳ Live — 12 step(s) · 3 min
+   Read    src/app/header.component.html
+   I will remove the banner and its stylesheet rules.
+   Edit    src/app/header.component.html
+   Bash    npm test -- --watch=false
+```
+
+A **cadence, not a stream**: a session emits several events a second, and writing each one
+would rewrite the page continuously, spend the integration's rate limit and produce
+something nobody can read. Ten seconds is the default, five the floor:
+
+```toml
+[runner]
+progress = true
+progress_interval_seconds = 10
+```
+
+What reaches the ticket is a line per step — `Bash · npm test`, never the eight hundred
+lines it printed. Long sessions stop at three hundred steps, with a line saying so: a
+ticket page is not a log file. And a board with no `Progress` column, or an integration
+that refuses the write, costs the report and nothing else — the ticket runs to its end
+either way.
+
+`ticket-runner init` adds the column to an existing board; the toggles need nothing.
+
+#### From the terminal
 
 `Session` is filled **when the ticket is claimed**, not when it finishes — so a ticket
 sitting in *In progress* is exactly the one you can look into:

@@ -146,6 +146,9 @@ def tickets_schema(settings: Notion, projects: str = "", agents: str = "") -> di
         "Name": {"title": {}},
         settings.prop("status"): {"select": {"options": status_options(settings)}},
         settings.prop("agent"): {"rich_text": {}},
+        # What the session is doing right now. Written every few seconds while
+        # the ticket runs, cleared when it ends — a board column that moves.
+        settings.prop("progress"): {"rich_text": {}},
         settings.prop("session"): {"url": {}},
         settings.prop("pull_request"): {"url": {}},
         settings.prop("model"): _select(MODELS),
