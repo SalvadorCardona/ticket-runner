@@ -9,8 +9,8 @@ sequentially keeps two tickets from racing over the same repository index.
 
 **Then, in parallel:** each claimed ticket gets its worktree, its Claude
 session, its branch and its pull request. A ticket that fails takes only itself
-down: it goes back to "draft" with the reason in a comment, while the others
-carry on.
+down: it lands in "failed" — or in "blocked", when the agent asked a question
+rather than guessed — with the reason in a comment, while the others carry on.
 """
 
 from __future__ import annotations
@@ -433,7 +433,7 @@ class Runner:
                 return None
 
         # Both are optional and neither can fail a ticket: a database with no
-        # Role column reads as no agent, and unreadable comments as none.
+        # Agent column reads as no agent, and unreadable comments as none.
         role = notion.read(ticket.page, self.config.notion.prop("role")) or []
         agent = (
             agents.resolve(self.client, role[0], self.config.notion.prop("model"))

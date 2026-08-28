@@ -10,9 +10,17 @@
 # reachable: the page's ··· menu → Connections → your integration.
 token = "ntn_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
-# The URL of your workspace database: one database whose rows are your master
-# pages, each holding its own inline database. Name it once, and the runner
-# finds the rest by the title of a row — see [notion.pages] below.
+# The workspace database: one database whose rows are your master pages, each
+# holding its own inline database. Name it once, and the runner finds the rest
+# by the title of a row — see [notion.pages] below.
+#
+# You do not have to build any of it by hand:
+#
+#     ticket-runner init <url-of-a-notion-page>
+#
+# creates the four databases with their columns, their relations and their
+# status options, and writes the line below for you. Share the page with your
+# integration first — that is the one step no API can take.
 workspace = ""
 
 # Only if you would rather point at one database than share a whole workspace.
@@ -32,21 +40,27 @@ tickets_database = ""
 #             makes a document ticket come back sounding like you rather than
 #             like nobody. Keep it to one screen: you pay it on every ticket.
 #   agents    optional: the page holding a database of agents. A ticket points
-#             at one through its `Role` column, and that agent's page is the
+#             at one through its `Agent` column, and that agent's page is the
 #             role the session plays — its craft, its rules, its model
+#
+# Rows created under the older names — "Master Tickets", "Soul" — are still
+# found, as long as this table does not name them otherwise. Nothing to rename.
 [notion.pages]
-tickets = "Master Tickets"
-projects = "Master project"
-agents = "Master Agents"
-context = "Soul"
+tickets = "Tickets"
+projects = "Projects"
+agents = "Agents"
+context = "Context"
 
 # Rename here if your Notion columns are named differently.
 # A property that does not exist in the database is simply skipped.
 [notion.properties]
 status = "Status"
-project = "Project"
-agent = "Agent"
+project = "Project"          # relation → your projects database
 pull_request = "Pull Request"
+
+# Which machine took the ticket, written as ticket-runner@host. Not the same
+# thing as `role` below, which is the craft the session plays.
+agent = "Runner"
 
 # Written when the ticket is claimed. As a URL column it becomes a link that
 # opens the session; as a text column it holds the bare identifier.
@@ -57,8 +71,16 @@ model = "Model"          # select: pick the model per ticket, over runner.model
 priority = "Priority"    # select: Urgent, High, Normal, Low — which one runs first
 cost = "Cost"            # number: what the run cost, written back
 duration = "Duration"    # number: how long it took, in minutes
-due = "Due Date"         # date: hold the ticket until that moment, then run it
-role = "Role"            # relation → your agents database: who handles the ticket
+role = "Agent"           # relation → your agents database: who handles the ticket
+
+# A date here is a start gate, not a deadline: the ticket is left alone until
+# that moment, then picked up on the first pass after it.
+due = "Scheduled"
+
+# On the projects database, two columns are read by name, either capitalisation:
+#   Repository  the GitHub URL or owner/name — matched against your clones
+#   Path        an explicit path, when the repository is not under workspace_root
+# A project with neither is a project without code: its tickets become documents.
 
 # The model is picked from the narrowest choice that names one:
 #   the ticket's Model, then its agent's Model, then runner.model below.
@@ -68,22 +90,23 @@ role = "Role"            # relation → your agents database: who handles the ti
 #   ready    what the runner picks up — move a ticket here once its description
 #            is precise enough to be handled without you
 #   running  claimed, work in progress (stops a second pass from taking it)
-#   done     branch pushed, pull request opened, waiting for your review
+#   done     branch pushed, pull request opened, waiting for your review. It is
+#            called "In review" and not "Done" because nothing is done: a human
+#            has still to look at it
 #   failed   something broke: the session, the push, the worktree
-#   blocked  optional. The agent could not settle the ticket and asked a
-#            question instead of guessing — or the project could not be located.
-#            Without this key, such tickets land wherever `failed` points, which
-#            works but mixes "waiting for you" with "something is wrong".
+#   blocked  the agent could not settle the ticket and asked a question instead
+#            of guessing — or the project could not be located. Its own column:
+#            "waiting for you" and "something is wrong" are different days
 [notion.status]
-ready = "Not started"
+ready = "Ready"
 running = "In progress"
-done = "Done"
-failed = "Draft"
+done = "In review"
+failed = "Failed"
+blocked = "Blocked"
 
-# A board with room for both reads much better:
-#   done = "Need Review"
-#   failed = "Blocked"
-#   blocked = "Blocked"
+# One column for both is a fine board too — name `failed` and leave `blocked`
+# out, and questions land wherever failures do:
+#   failed = "Needs you"
 
 [runner]
 # Where to look for repositories. Projects are matched by their origin remote.
@@ -155,7 +178,7 @@ prompt_file = ""
 document_prompt_file = ""
 
 # Projects whose repository cannot be guessed: exact Notion name = local path.
-# Without an entry here, the runner matches the project's `github` property
+# Without an entry here, the runner matches the project's Repository property
 # against the remotes found under workspace_root.
 [projects]
 # "Trader Ia" = "~/workspace/labo/trader-ia"

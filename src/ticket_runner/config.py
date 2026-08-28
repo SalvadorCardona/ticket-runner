@@ -8,6 +8,7 @@ middle of a ticket.
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,12 +51,24 @@ class Notion:
         """The title of the workspace row holding that database or page."""
         return self.pages.get(key, _DEFAULT_PAGES[key])
 
+    def page_aliases(self, key: str) -> tuple[str, ...]:
+        """Every title that row may carry: the configured one, then the old ones.
+
+        Only when the configuration does not name it: someone who wrote the
+        title down meant that title, and guessing past it would find the wrong
+        row on a board that has both.
+        """
+        if key in self.pages:
+            return (self.pages[key],)
+        return (_DEFAULT_PAGES[key], *_LEGACY_PAGES.get(key, ()))
+
     def state(self, key: str) -> str:
-        # "blocked" is optional: without it, a ticket the agent could not settle
-        # lands wherever a technical failure lands. Naming it separately is what
-        # lets "the agent asked a question" and "something broke" be told apart
-        # at a glance on the board.
-        if key == "blocked" and "blocked" not in self.status:
+        # "blocked" is optional, and only *against a named `failed`*: a file that
+        # says where failures go but not where questions go meant one column for
+        # both. A file that names neither gets the defaults, which are two —
+        # telling "the agent asked you something" from "something broke" is the
+        # whole reason the runner distinguishes them.
+        if key == "blocked" and "blocked" not in self.status and "failed" in self.status:
             return self.state("failed")
         return self.status.get(key, _DEFAULT_STATUS[key])
 
@@ -102,14 +115,17 @@ class Config:
         if missing:
             raise ConfigError(
                 f"{', '.join(missing)} must be set in {self.path}\n"
-                "  ticket-runner config   opens the file in your editor"
+                "  ticket-runner init <page-url>   builds the databases and fills this in\n"
+                "  ticket-runner config            opens the file in your editor"
             )
 
 
 _DEFAULT_PROPERTIES = {
     "status": "Status",
     "project": "Project",
-    "agent": "Agent",
+    # Which machine took the ticket, as ticket-runner@host. Not to be confused
+    # with `role` below: this one is a runner, that one is a craft.
+    "agent": "Runner",
     "pull_request": "Pull Request",
     "session": "Session",
     # Optional. A database without them behaves exactly as before: the runner
@@ -118,28 +134,50 @@ _DEFAULT_PROPERTIES = {
     "priority": "Priority",    # which ready ticket goes first
     "cost": "Cost",            # written back, in dollars
     "duration": "Duration",    # written back, in minutes
-    "due": "Due Date",         # hold the ticket until that moment, then run it
-    "role": "Role",            # relation: which agent handles this ticket
+    # A date here holds the ticket until that moment. It is a start gate, not a
+    # deadline — "Due Date" said the opposite of what the runner does with it.
+    "due": "Scheduled",
+    # Relation to the Agents database. It carries the same word as the database
+    # it points at, because it is the same thing.
+    "role": "Agent",
 }
 
 # The rows the runner looks for in the workspace database, by their title.
-# Only `tickets` is required; the other two change nothing by their absence.
+# Only `tickets` is required; the others change nothing by their absence.
 _DEFAULT_PAGES = {
-    "tickets": "Master Tickets",
-    "projects": "Master project",
-    "agents": "Master Agents",
-    "context": "Soul",
+    "tickets": "Tickets",
+    "projects": "Projects",
+    "agents": "Agents",
+    "context": "Context",
+}
+
+# What those rows used to be called. A board built before the names were settled
+# keeps working: the row is looked up under its current name first, then under
+# the one it was created with. Nothing to rename, nothing to re-provision.
+_LEGACY_PAGES = {
+    "tickets": ("Master Tickets",),
+    "projects": ("Master project", "Master Projects"),
+    "agents": ("Master Agents",),
+    "context": ("Soul",),
 }
 
 # Highest first. Anything else — including an empty cell — sorts as normal.
 PRIORITIES = ("Urgent", "High", "Normal", "Low")
 
+# The five columns of the board, and they are meant to be read in that order.
+#
+# "In review" rather than "Done": nothing is done when the runner lets go of a
+# ticket — a pull request is waiting for a human, and calling that Done is how a
+# board stops being believed. And `failed` and `blocked` are two columns, not
+# one: the agent asking a question is waiting for *you*, a session that crashed
+# is waiting for someone to read a log. The runner tells them apart; the board
+# used to put both in "Draft" and throw that away.
 _DEFAULT_STATUS = {
-    "ready": "Not started",
+    "ready": "Ready",
     "running": "In progress",
-    "done": "Done",
-    "failed": "Draft",
-    "blocked": "Draft",
+    "done": "In review",
+    "failed": "Failed",
+    "blocked": "Blocked",
 }
 
 
@@ -159,6 +197,47 @@ def _database_id(raw: str) -> str:
         candidate = candidate.rsplit("-", 1)[-1]
     candidate = candidate.replace("-", "")
     return candidate if is_identifier(candidate) else raw
+
+
+def identifier(raw: str) -> str:
+    """The 32-character ID inside whatever was pasted — a URL, or an ID.
+
+    Named for what the caller has in hand rather than for what it points at:
+    `init` is given the link of a page, not of a database.
+    """
+    return _database_id(raw)
+
+
+def write_notion_value(path: Path, key: str, value: str) -> bool:
+    """Set one key of the [notion] table, in place, keeping the comments.
+
+    A TOML writer is not in the standard library and this file is one the user
+    reads and edits by hand — rewriting it from a parsed tree would cost every
+    comment in it, which is most of its value. So the line is edited, or added
+    under the table header if it is not there.
+    """
+    text = path.read_text(encoding="utf-8")
+    line = f'{key} = "{value}"'
+    section = re.search(r"^\[notion\]\s*$", text, flags=re.M)
+    if not section:
+        path.write_text(f"{text.rstrip()}\n\n[notion]\n{line}\n", encoding="utf-8")
+        return True
+
+    start = section.end()
+    following = re.search(r"^\[", text[start:], flags=re.M)
+    end = start + (following.start() if following else len(text) - start)
+    body = text[start:end]
+
+    existing = re.search(rf'^{re.escape(key)}\s*=.*$', body, flags=re.M)
+    if existing:
+        if existing.group(0).strip() == line:
+            return False
+        body = body[: existing.start()] + line + body[existing.end():]
+    else:
+        body = "\n" + line + body
+
+    path.write_text(text[:start] + body + text[end:], encoding="utf-8")
+    return True
 
 
 def is_identifier(value: str) -> bool:
@@ -185,7 +264,10 @@ def load(path: Path | None = None) -> Config:
         token=str(notion_raw.get("token", "")).strip(),
         workspace=_database_id(str(notion_raw.get("workspace", ""))),
         tickets_database=_database_id(str(notion_raw.get("tickets_database", ""))),
-        pages={**_DEFAULT_PAGES, **notion_raw.get("pages", {})},
+        # Not merged with the defaults, for the same reason as `status` below:
+        # `page_aliases()` needs to know which titles the file actually names, to
+        # tell "the user calls it this" from "nobody said, so try the old names".
+        pages=dict(notion_raw.get("pages", {})),
         properties={**_DEFAULT_PROPERTIES, **notion_raw.get("properties", {})},
         # Not merged with the defaults: `state()` needs to know which keys the
         # file actually sets, to let "blocked" fall back on "failed".

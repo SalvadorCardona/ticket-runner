@@ -295,6 +295,84 @@ class Client:
             {"parent": {"page_id": page_id}, "rich_text": _rich_text(text)},
         )
 
+    # -- writing the shape, not the content ----------------------------------
+
+    def child_databases(self, page_id: str) -> dict[str, str]:
+        """{title: database id} for the databases living inside a page.
+
+        `resolve_database` already walks these blocks to find *the* database of
+        a page; provisioning needs to know whether the one it is about to
+        create is already there, and under which title.
+        """
+        payload = self._request("GET", f"/blocks/{page_id}/children?page_size=100")
+        found: dict[str, str] = {}
+        for block in payload.get("results", []):
+            if block.get("type") != "child_database":
+                continue
+            title = (block.get("child_database") or {}).get("title", "").strip()
+            found.setdefault(title, block["id"].replace("-", ""))
+        return found
+
+    def create_database(
+        self, parent_page_id: str, title: str, properties: dict, *, inline: bool = True
+    ) -> str:
+        """Create a database inside a page and return its ID.
+
+        Inline by default, because that is the shape the workspace is read as:
+        a row of the directory is a page, and the database it holds lives in it.
+        """
+        payload = self._request(
+            "POST",
+            "/databases",
+            {
+                "parent": {"type": "page_id", "page_id": parent_page_id},
+                "title": _rich_text(title),
+                "is_inline": inline,
+                "properties": properties,
+            },
+        )
+        return payload.get("id", "").replace("-", "")
+
+    def add_properties(self, database_id: str, properties: dict) -> None:
+        """Add or widen properties on an existing database.
+
+        Only ever called with what is missing: a column somebody retyped on
+        purpose is theirs, and provisioning has no business overruling it.
+        """
+        if not properties:
+            return
+        self._request("PATCH", f"/databases/{database_id}", {"properties": properties})
+        self._databases.pop(database_id, None)  # the cached schema just aged
+
+    def create_row(self, database_id: str, title: str, values: dict | None = None) -> str:
+        """Create a page in a database, titled, and return its ID."""
+        schema = self.schema(database_id)
+        name = next((key for key, kind in schema.items() if kind == "title"), "Name")
+        properties: dict[str, Any] = {name: _encode("title", title)}
+        for key, value in (values or {}).items():
+            encoded = _encode(schema.get(key), value)
+            if encoded is not None:
+                properties[key] = encoded
+        payload = self._request(
+            "POST",
+            "/pages",
+            {"parent": {"type": "database_id", "database_id": database_id}, "properties": properties},
+        )
+        return payload.get("id", "").replace("-", "")
+
+    def create_child_page(self, parent_page_id: str, title: str) -> str:
+        """Create a plain page inside a page, and return its ID."""
+        payload = self._request(
+            "POST",
+            "/pages",
+            {
+                "parent": {"type": "page_id", "page_id": parent_page_id},
+                "properties": {"title": {"title": _rich_text(title)}},
+            },
+        )
+        return payload.get("id", "").replace("-", "")
+
+
 
 # -- conversions -------------------------------------------------------------
 

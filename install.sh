@@ -110,17 +110,16 @@ path.write_text(text.replace('token = "ntn_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 PY
             ok "token saved"
         fi
-        printf '    %sURL of your Notion workspace database%s\n' "$BOLD" "$RESET"
-        printf '    %s(the one whose rows are your master pages)%s > ' "$DIM" "$RESET"
-        read -r workspace </dev/tty || workspace=""
-        if [ -n "$workspace" ]; then
-            python3 - "$CONFIG" "$workspace" <<'PY'
-import sys, pathlib
-path, value = pathlib.Path(sys.argv[1]), sys.argv[2].strip()
-text = path.read_text()
-path.write_text(text.replace('workspace = ""', f'workspace = "{value}"', 1))
-PY
-            ok "workspace saved"
+        # Nothing needs to exist in Notion yet: give a page shared with the
+        # integration and `init` builds the four databases under it.
+        printf '    %sURL of a Notion page to build the board under%s\n' "$BOLD" "$RESET"
+        printf '    %s(share it with your integration first: the page ... menu -> Connections)%s > ' "$DIM" "$RESET"
+        read -r page </dev/tty || page=""
+        if [ -n "$page" ] && [ -n "$token" ]; then
+            printf '\n'
+            "$BIN" init "$page" || warn "run it again once the page is shared: ticket-runner init <url>"
+        elif [ -n "$page" ]; then
+            warn "no token yet - then: ticket-runner init $page --token ntn_..."
         fi
         printf '\n'
     fi
@@ -186,6 +185,7 @@ fi
 
 # --- 7. summary -------------------------------------------------------------
 printf '\n%sinstallation complete.%s\n\n' "$BOLD" "$RESET"
+printf '  Build the Notion board (skip if you just did):\n\n    %sticket-runner init <page-url>%s\n\n' "$BOLD" "$RESET"
 printf '  Check everything is in place:\n\n    %sticket-runner doctor%s\n\n' "$BOLD" "$RESET"
 printf '  %sconfiguration%s  %s\n' "$DIM" "$RESET" "$CONFIG"
 printf '  %sready tickets%s  ticket-runner list\n' "$DIM" "$RESET"

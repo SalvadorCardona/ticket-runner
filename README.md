@@ -1,7 +1,7 @@
 # ticket-runner
 
 **Your Notion tickets, played by Claude Code.** You write a ticket, you move it to
-*Not started*, and a few minutes later the work is waiting for you.
+*Ready*, and a few minutes later the work is waiting for you.
 
 Not only the tickets about code. *"Remove that header"* comes back as a pull request on
 its own branch; *"draft me a post about the new release"* comes back written into the
@@ -16,7 +16,7 @@ its own.
 Notion                    ticket-runner                       what you get
 ──────                    ─────────────                       ────────────
 
-Not started   ──────▶     claims it, writes the session link
+Ready         ──────▶     claims it, writes the session link
                           │
 In progress   ◀───────────┤
                           │
@@ -25,7 +25,7 @@ In progress   ◀───────────┤
                           │
                           └─ has none ──────────▶  scratch dir, ANSWER.md
                                                    published as Notion blocks ──▶  the page itself
-Need Review   ◀───────────
+In review     ◀───────────
 ```
 
 Which of the two you get is decided by the project, not by a setting: a project that names
@@ -81,39 +81,54 @@ On [notion.so/my-integrations](https://www.notion.so/my-integrations) → **New
 integration** → give it a name (`ticket-runner`), pick your workspace, type **Internal**.
 Copy the token it shows you; it starts with `ntn_`.
 
-### 2. Give the token and the workspace to the runner
+### 2. Share one page with it
 
-Two lines to fill in, and only two:
+Open any Notion page — an empty one will do — and share it: the `···` menu, top right →
+**Connections** → your integration. That click is the floor: an integration cannot grant
+itself access, so it is the one step no command can take for you.
 
-```toml
-[notion]
-token = "ntn_your_real_token_here"
+### 3. Let the runner build the rest
 
-# The URL of your workspace database is enough — the ID is extracted from it.
-workspace = "https://www.notion.so/workspace/3a8451680af480918afcf0eb9cf70e7b"
+```sh
+ticket-runner init https://www.notion.so/your-page --token ntn_…
 ```
 
-A **workspace** here is one database whose rows are your master pages, each holding its
-own inline database:
+It creates everything under that page and writes the result into your configuration:
 
 ```
-Master workspace          ← the one URL you configure
-├── Master Tickets        ← the tickets database lives inside this page
-├── Master project        ← the projects database lives inside this one
-├── Master Agents         ← optional: the roles a ticket can be handled by
-└── Soul                  ← a plain page: who you are
+your page                 ← the one you shared
+└── ticket-runner         ← the workspace: its rows are the master pages
+    ├── Tickets           ← the tickets database, 12 columns, 2 relations
+    ├── Projects          ← Name, Repository, Path
+    ├── Agents            ← the roles a ticket can be handled by
+    └── Context           ← a plain page: who you are
 ```
+
+Plus a demonstration ticket, left unstarted, so the first thing you do is move something
+to *Ready* and watch it work.
+
+**Running it again is safe** — and is how you upgrade. Nothing is duplicated: what exists
+is kept, what a previous version did not know how to create is added, and a column you
+retyped on purpose is never overruled.
+
+> One Notion quirk shows through: the API cannot create a `status` property, so `Status`
+> is made a **select** with the same five options. The runner reads either — it looks at
+> the declared type and writes accordingly — so this changes nothing but the icon.
 
 You name the directory once; the runner finds the rest by the **title of a row**. Rename
 a row and tell the runner what it is now called, under `[notion.pages]`:
 
 ```toml
 [notion.pages]
-tickets = "Master Tickets"   # required
-projects = "Master project"  # optional — only `doctor` uses it
-agents = "Master Agents"     # optional — see below
-context = "Soul"             # optional — see below
+tickets = "Tickets"     # required
+projects = "Projects"   # optional — only `doctor` uses it
+agents = "Agents"       # optional — see below
+context = "Context"     # optional — see below
 ```
+
+Rows created under the names this shipped with before — `Master Tickets`, `Soul` — are
+still found as long as this table does not name them otherwise. There is nothing to
+rename on an existing board.
 
 If you would rather point at one database than share a whole workspace, `tickets_database`
 still works exactly as before, and wins over the workspace when both are set. The URL of
@@ -132,13 +147,12 @@ curl -LsSf https://raw.githubusercontent.com/SalvadorCardona/ticket-runner/main/
 sed -i 's|^token = .*|token = "ntn_…"|' ~/.config/ticket-runner/config.toml
 ```
 
-### 3. Share the databases with the integration — the step everyone forgets
+### The step everyone forgets
 
 A valid token on a page that was never shared answers `object not found`, and nothing
-about it hints at why. Share **the page holding your workspace database**: the `···` menu,
-top right → **Connections** → your integration. Everything underneath becomes readable in
-one gesture — which is the main reason to point the runner at a workspace rather than at
-each database in turn.
+about it hints at why — which is why step 2 is the sharing. Everything created underneath
+inherits that access in one gesture, and that is also what makes the relations legal: a
+relation can only point at a database the same integration can reach.
 
 > **What you share is what the runner can read.** Anything under that page reaches the
 > prompts it writes, and prompts are kept on disk in `~/.local/state/ticket-runner/`. Keep
@@ -190,19 +204,19 @@ presence of each status — and names whichever of those was missed.
 | Property | Type | Role |
 | --- | --- | --- |
 | `Name` | title | what the agent must do, in one line |
-| `Status` | status | **what drives the whole system** — see below |
+| `Status` | status *or* select | **what drives the whole system** — see below |
 | `Project` | relation | *optional* — to the projects database: decides the repository |
-| `Role` | relation | *optional* — to the agents database: decides who handles it |
-| `Agent` | text | filled by the runner: which machine took the ticket |
+| `Agent` | relation | *optional* — to the agents database: decides who handles it |
+| `Runner` | text | filled by the runner: which machine took the ticket |
 | `Pull Request` | URL | filled by the runner at the end |
 | `Session` | **URL** or text | written as soon as the ticket is claimed. Make it a URL and it becomes a link that opens the session; leave it text and it holds the bare ID |
 | `Priority` | select | *optional* — `Urgent`, `High`, `Normal`, `Low`. Decides which ready ticket runs first |
 | `Model` | select | *optional* — `opus`, `sonnet`, `haiku`. This ticket's model, over its agent's and over `runner.model` |
 | `Cost` | number | *optional* — written back, in dollars |
 | `Duration` | number | *optional* — written back, in minutes |
-| `Due Date` | date | *optional* — **hold the ticket until that moment**, then run it |
+| `Scheduled` | date | *optional* — **hold the ticket until that moment**, then run it |
 
-`Due Date` is what turns the board into a calendar. A ticket without one starts within
+`Scheduled` is what turns the board into a calendar. A ticket without one starts within
 seconds of reaching the ready column, so a date on it can only mean *not yet*: the runner
 leaves it alone until the moment comes, then treats it like any other. Write the release
 post on Monday, run the monthly report on the first — the ticket sits ready and waits.
@@ -283,10 +297,13 @@ A project that names a repository is a **code project**. Its tickets get a git w
 branch, commits and a pull request. Three ways to name it, most explicit first:
 
 1. a `[projects]` entry in your configuration — `"Trader Ia" = "~/workspace/labo/trader-ia"`;
-2. a **`path` property on the project page**, which keeps the mapping on the board rather
+2. a **`Path` property on the project page**, which keeps the mapping on the board rather
    than in a file on one machine;
-3. a **`github` property**, matched against the `origin` remotes of every repository found
-   under `workspace_root`.
+3. a **`Repository` property** — a GitHub URL or `owner/name` — matched against the
+   `origin` remotes of every repository found under `workspace_root`.
+
+Both columns are read by name, whatever their capitalisation, and the `github` column
+earlier versions asked for still works.
 
 A project that names none — and **a ticket with no project at all** — is **document work**.
 It gets a disposable scratch directory instead of a worktree, and the agent's answer is
@@ -318,7 +335,7 @@ running once after installation; it is what saves you from surprises.
 
 ### The context page — who the work is for
 
-One row of the workspace, named `Soul` by default, is a plain page with no database in it.
+One row of the workspace, named `Context` by default, is a plain page with no database in it.
 Whatever you write there goes into **every prompt, on every project**, ahead of the
 project's brief:
 
@@ -355,7 +372,7 @@ A project says *where* the work happens. It says nothing about **who** does it, 
 “fix this regression” and “write this announcement” are not the same craft on the same
 repository.
 
-Add a `Role` relation column on your tickets, pointing at a database of agents. One row
+Add an `Agent` relation column on your tickets, pointing at a database of agents. One row
 per role, and **the body of its page is the role**, exactly as a project page is its brief:
 
 > **Dev front**
@@ -373,7 +390,7 @@ The role is read after your context page and after the project's brief, and **it
 loosen the frame**: committing without pushing, and answering `RESULT: blocked` rather than
 guessing, live in the template, above anything a page can say.
 
-All of it is optional twice over: a tickets database with no `Role` column behaves exactly
+All of it is optional twice over: a tickets database with no `Agent` column behaves exactly
 as it always has, and a ticket that names no agent runs on the runner's own prompt.
 
 ### The discussion on a ticket
@@ -398,27 +415,30 @@ This is where your control over the system lives. The names are yours — map th
 board, because a status the database does not offer would only fail at the very end of a
 ticket.
 
-Out of the box the runner uses the four a plain Notion status property gives you:
+`ticket-runner init` creates these five:
 
 | Key | Default | What it means |
 | --- | --- | --- |
-| `ready` | **Not started** | the description is precise enough for an agent to handle it alone. **The only gesture that triggers work.** |
+| `ready` | **Ready** | the description is precise enough for an agent to handle it alone. **The only gesture that triggers work.** |
 | `running` | **In progress** | claimed by the runner. Stops the next run from taking it again. |
-| `done` | **Done** | branch pushed, pull request opened. Yours to review. |
-| `failed` | **Draft** | something broke: the session, the push, the worktree. |
-| `blocked` | *follows `failed`* | the agent would not guess and asked a question instead — or its project could not be located. |
+| `done` | **In review** | branch pushed, pull request opened. Yours to review. |
+| `failed` | **Failed** | something broke: the session, the push, the worktree. |
+| `blocked` | **Blocked** | the agent would not guess and asked a question instead — or its project could not be located. |
 
-Add two statuses to your board and the picture gets a lot clearer:
+Two of those names are deliberate. *In review* rather than *Done*, because nothing is
+done when the runner lets go of a ticket: a pull request is waiting for a human, and a
+board that calls that *Done* stops being believed by the second week. And *Blocked* is
+its own column rather than a shade of *Failed*, because the runner works hard to tell
+them apart — a ticket waiting for **you** and a session that crashed are different days,
+and pouring both into one column throws that away.
+
+One column for both is still a fine board, if yours is small. Name `failed` and leave
+`blocked` out, and questions land wherever failures do:
 
 ```toml
 [notion.status]
-done = "Need Review"     # a pull request is waiting for you
-failed = "Blocked"       # something went wrong, the comment says what
-blocked = "Blocked"      # the agent asked a question
+failed = "Needs you"
 ```
-
-*Done* then means what you decide it means — merged, accepted — and *Draft* goes back to
-its real job: a ticket not yet ready to be handed over.
 
 Nothing is ever merged automatically.
 
@@ -427,6 +447,7 @@ Nothing is ever merged automatically.
 ## Usage
 
 ```sh
+ticket-runner init <url>   # build (or complete) the Notion board under a page
 ticket-runner list         # the ready tickets, and their project
 ticket-runner run          # one run, right now
 ticket-runner run --dry-run          # what it would do, touching nothing
@@ -489,12 +510,12 @@ often.
 | Symptom | Most likely cause |
 | --- | --- |
 | `object not found` on the database | the page is not shared with the integration (`···` → Connections). Sharing the page that holds the workspace covers everything under it |
-| “no page named … in the workspace” | the row is called something else. `doctor` lists what it did find — rename the row, or set `[notion.pages]` |
-| the agent knows nothing about you | no `Soul` row in the workspace, or the page is empty. `doctor` says which, and the run says so once |
+| “no page named … in the workspace” | the row is called something else. `doctor` lists what it did find — rename the row, set `[notion.pages]`, or run `ticket-runner init` to create it |
+| the agent knows nothing about you | no `Context` row in the workspace, or the page is empty. `doctor` says which, and the run says so once |
 | “comments not readable” | the integration lacks *Read comments* (my-integrations → Capabilities). The ticket runs, without its discussion |
-| a ticket ignores its agent | the `Role` column is missing or is not a relation — `doctor` names it |
-| “project not found on disk” | the project names a repository that is not there: fix its `path` or `github` property, or add `"Notion name" = "/path"` under `[projects]` |
-| a ticket became a document when you wanted code | its project names no repository. Give the project page a `path` or a `github` |
+| a ticket ignores its agent | the `Agent` column is missing or is not a relation — `doctor` names it |
+| “project not found on disk” | the project names a repository that is not there: fix its `Path` or `Repository` property, or add `"Notion name" = "/path"` under `[projects]` |
+| a ticket became a document when you wanted code | its project names no repository. Give the project page a `Path` or a `Repository` |
 | “nothing to work from” | the ticket has neither a title nor a description — a page left on the bare template counts as empty |
 | a ticket sat in *In progress* forever | it no longer can: the next run puts back any ticket this host claimed while no run was alive |
 | no desktop notification | `notify-send` is missing, or the service has no session bus. `runner.notify = false` silences the attempt |
@@ -528,7 +549,7 @@ Environment=GH_TOKEN=ghp_…
 
 Scope it to the repositories the runner may touch, and nothing else.
 
-**Paths differ from your laptop.** A project's `path` property in Notion names one
+**Paths differ from your laptop.** A project's `Path` property in Notion names one
 machine's layout, and the server's is not the same. That is why a `[projects]` entry in
 the local configuration wins over it: each machine overrides what it needs, and the board
 keeps the mapping that suits the machine you use most.
