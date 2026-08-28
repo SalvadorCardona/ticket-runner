@@ -57,6 +57,11 @@ class Notion:
         # at a glance on the board.
         if key == "blocked" and "blocked" not in self.status:
             return self.state("failed")
+        # "review" is optional in the same way: a board that has no column
+        # between "the pull request is open" and "it is merged" keeps landing
+        # its tickets in `done`, and nothing watches for a merge.
+        if key == "review" and "review" not in self.status:
+            return self.state("done")
         return self.status.get(key, _DEFAULT_STATUS[key])
 
 
@@ -137,6 +142,7 @@ PRIORITIES = ("Urgent", "High", "Normal", "Low")
 _DEFAULT_STATUS = {
     "ready": "Not started",
     "running": "In progress",
+    "review": "In review",
     "done": "Done",
     "failed": "Draft",
     "blocked": "Draft",

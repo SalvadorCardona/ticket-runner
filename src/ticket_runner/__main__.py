@@ -436,7 +436,7 @@ def command_doctor(args: argparse.Namespace) -> int:
     if not options:
         warn("the status property offers no options — nothing to check against")
     else:
-        for key in ("ready", "running", "done", "failed", "blocked"):
+        for key in ("ready", "running", "review", "done", "failed", "blocked"):
             wanted = configuration.notion.state(key)
             if wanted in options:
                 ok(f"{key:<8} → “{wanted}”")

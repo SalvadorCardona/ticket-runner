@@ -257,6 +257,45 @@ class Runner:
             recovered += 1
         return recovered
 
+    def close_merged(self) -> int:
+        """Close the tickets whose pull request has been merged.
+
+        A pull request is not the end of a ticket: it is a question asked of
+        you. The ticket waits in "in review" until you answer it by merging —
+        and merging is the answer, so nobody should have to move the ticket by
+        hand afterwards.
+
+        Asked at the start of every run rather than by a watcher of its own: the
+        runner already wakes up on a timer, and a second one would only be a
+        second thing to install, to enable and to forget. `interval_seconds` is
+        the cadence of this too.
+
+        A board whose `review` and `done` are the same status has nowhere for a
+        ticket to wait, so there is nothing to look at.
+        """
+        review = self.config.notion.state("review")
+        if review == self.config.notion.state("done"):
+            return 0
+        status_property = self.config.notion.prop("status")
+        kind = self.client.schema(self.database).get(status_property, "status")
+        pages = self.client.query(
+            self.database, {"property": status_property, kind: {"equals": review}}
+        )
+        closed = 0
+        for page in pages:
+            url = str(notion.read(page, self.config.notion.prop("pull_request")) or "")
+            if not url.startswith("http") or git.pull_request_state(url) != "MERGED":
+                continue
+            ticket = Ticket(page)
+            self.say(f"  ✓ {ticket.title} — pull request merged, moved to done")
+            self._set(ticket, **{status_property: self.config.notion.state("done")})
+            self._comment(
+                ticket,
+                f"{self.agent_label} — done.\nIts pull request has been merged: {url}",
+            )
+            closed += 1
+        return closed
+
     def fetch_one(self, reference: str) -> Ticket:
         page_id = reference.strip()
         if "://" in page_id:
@@ -679,8 +718,14 @@ class Runner:
 
         git.remove_worktree(project.path, job.workdir)
 
+        # With a pull request the ticket is not finished, it is waiting for you:
+        # it goes to "in review", and `close_merged` takes it to done once you
+        # have merged. Without one there is nothing to wait for — and on a board
+        # with no review column, `review` is `done` and nothing changes.
         values: dict[str, object] = {
-            self.config.notion.prop("status"): self.config.notion.state("done"),
+            self.config.notion.prop("status"): self.config.notion.state(
+                "review" if pull_request else "done"
+            ),
             self.config.notion.prop("agent"): self.agent_label,
         }
         if pull_request:
@@ -728,6 +773,7 @@ class Runner:
         else:
             if not self.dry_run:
                 self.sweep()
+                self.close_merged()
             tickets, waiting = self.queue()
             if not tickets:
                 if self.announce_idle:

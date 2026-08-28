@@ -68,7 +68,13 @@ role = "Role"            # relation → your agents database: who handles the ti
 #   ready    what the runner picks up — move a ticket here once its description
 #            is precise enough to be handled without you
 #   running  claimed, work in progress (stops a second pass from taking it)
-#   done     branch pushed, pull request opened, waiting for your review
+#   review   optional. Where a ticket waits while its pull request is open. Each
+#            run asks GitHub about those pull requests and moves to `done` the
+#            tickets whose own has been merged — merging is the only gesture,
+#            nothing else to do afterwards. Without this key a ticket goes
+#            straight to `done`, pull request open, exactly as before.
+#   done     branch pushed, pull request opened, waiting for your review — or,
+#            with `review` set, pull request merged
 #   failed   something broke: the session, the push, the worktree
 #   blocked  optional. The agent could not settle the ticket and asked a
 #            question instead of guessing — or the project could not be located.
@@ -80,8 +86,9 @@ running = "In progress"
 done = "Done"
 failed = "Draft"
 
-# A board with room for both reads much better:
-#   done = "Need Review"
+# A board with room for all of them reads much better:
+#   review = "In review"
+#   done = "Done"
 #   failed = "Blocked"
 #   blocked = "Blocked"
 

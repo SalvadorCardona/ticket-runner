@@ -125,6 +125,21 @@ def blocked_falls_back_on_failed_but_only_when_unset():
 
 
 @case
+def review_falls_back_on_done_so_a_board_without_it_is_unchanged():
+    """A board with no review column must behave exactly as before.
+
+    Which is also what turns the merge watch off: there is no column for a
+    ticket to wait in, so there is nothing to watch.
+    """
+    config = _config("")
+    assert config.notion.state("review") == config.notion.state("done") == "Done"
+
+    config = _config('[notion.status]\nreview = "In review"\ndone = "Done"\n')
+    assert config.notion.state("review") == "In review"
+    assert config.notion.state("done") == "Done"
+
+
+@case
 def the_interval_never_reaches_systemd_as_zero():
     assert _config("[runner]\ninterval_seconds = 0\n").runner.interval_seconds == 1
     assert _config("[runner]\ninterval_seconds = 10\n").runner.interval_seconds == 10
@@ -677,6 +692,104 @@ def a_template_only_body_counts_as_blank():
     assert is_blank("   \n\n---\n")
     assert not is_blank("## Ce qu'il faut faire\nRetirer le header.")
     assert not is_blank("Une seule ligne de texte")
+
+
+# -- a merged pull request closes its ticket ---------------------------------
+
+
+class _BoardClient:
+    """A tickets database that answers queries and remembers what was written."""
+
+    def __init__(self, pages: list[notion.Page]):
+        self._pages = pages
+        self.written: list[tuple[str, dict]] = []
+        self.comments_written: list[str] = []
+
+    def schema(self, database_id: str) -> dict[str, str]:
+        return {"Status": "status", "Pull Request": "url"}
+
+    def query(self, database_id: str, filter_=None) -> list[notion.Page]:
+        wanted = (filter_ or {}).get("status", {}).get("equals")
+        return [page for page in self._pages if notion.read(page, "Status") == wanted]
+
+    def update(self, database_id: str, page_id: str, values: dict) -> None:
+        self.written.append((page_id, values))
+
+    def comment(self, page_id: str, text: str) -> None:
+        self.comments_written.append(text)
+
+
+def _reviewed(page_id: str, status: str, pull_request: str | None) -> notion.Page:
+    properties = {"Status": {"type": "status", "status": {"name": status}}}
+    if pull_request is not None:
+        properties["Pull Request"] = {"type": "url", "url": pull_request}
+    return notion.Page(id=page_id, url="", title=page_id, properties=properties)
+
+
+def _closing(pages: list[notion.Page], states: dict[str, str], status: dict[str, str]):
+    """Run `close_merged` against a fake board and a fake GitHub."""
+    from ticket_runner import git as git_module
+
+    runner = Runner.__new__(Runner)
+    runner.client = _BoardClient(pages)
+    runner.config = C.Config(
+        notion=C.Notion(properties=dict(C._DEFAULT_PROPERTIES), status=status),
+        runner=C.Runner(),
+        projects={},
+        path=Path("/nowhere"),
+    )
+    runner._workspace = workspace.Workspace(tickets="db")
+    runner.agent_label = "ticket-runner@laptop"
+    runner.quiet = True
+    runner.dry_run = False
+    original = git_module.pull_request_state
+    git_module.pull_request_state = lambda url: states.get(url, "")
+    try:
+        return runner.client, runner.close_merged()
+    finally:
+        git_module.pull_request_state = original
+
+
+@case
+def a_merged_pull_request_moves_its_ticket_to_done():
+    client, closed = _closing(
+        [
+            _reviewed("p-merged", "In review", "https://github.com/x/y/pull/1"),
+            _reviewed("p-open", "In review", "https://github.com/x/y/pull/2"),
+            _reviewed("p-ready", "Not started", None),
+        ],
+        {"https://github.com/x/y/pull/1": "MERGED", "https://github.com/x/y/pull/2": "OPEN"},
+        {"review": "In review", "done": "Done"},
+    )
+    assert closed == 1
+    assert client.written == [("p-merged", {"Status": "Done"})]
+    assert "merged" in client.comments_written[0]
+
+
+@case
+def a_ticket_is_never_closed_on_an_answer_github_did_not_give():
+    """No pull request, or no `gh` to ask: the ticket stays where it is."""
+    client, closed = _closing(
+        [
+            _reviewed("p-nothing", "In review", None),
+            _reviewed("p-empty", "In review", ""),
+            _reviewed("p-unreachable", "In review", "https://github.com/x/y/pull/3"),
+        ],
+        {},  # as when gh is missing or not authenticated
+        {"review": "In review", "done": "Done"},
+    )
+    assert closed == 0 and client.written == []
+
+
+@case
+def a_board_without_a_review_column_is_never_even_queried():
+    """`review` following `done` means there is nowhere for a ticket to wait."""
+    client, closed = _closing(
+        [_reviewed("p-done", "Done", "https://github.com/x/y/pull/1")],
+        {"https://github.com/x/y/pull/1": "MERGED"},
+        {"done": "Done"},
+    )
+    assert closed == 0 and client.written == []
 
 
 def main() -> int:

@@ -25,7 +25,8 @@ In progress   ◀───────────┤
                           │
                           └─ has none ──────────▶  scratch dir, ANSWER.md
                                                    published as Notion blocks ──▶  the page itself
-Need Review   ◀───────────
+In review     ◀───────────
+Done          ◀───────────  once you merge that pull request
 ```
 
 Which of the two you get is decided by the project, not by a setting: a project that names
@@ -404,23 +405,35 @@ Out of the box the runner uses the four a plain Notion status property gives you
 | --- | --- | --- |
 | `ready` | **Not started** | the description is precise enough for an agent to handle it alone. **The only gesture that triggers work.** |
 | `running` | **In progress** | claimed by the runner. Stops the next run from taking it again. |
-| `done` | **Done** | branch pushed, pull request opened. Yours to review. |
+| `review` | *follows `done`* | a pull request is open and waiting for you. Set it, and the runner closes the ticket itself once you merge. |
+| `done` | **Done** | branch pushed, pull request opened. Yours to review — or, with `review` set, that pull request merged. |
 | `failed` | **Draft** | something broke: the session, the push, the worktree. |
 | `blocked` | *follows `failed`* | the agent would not guess and asked a question instead — or its project could not be located. |
 
-Add two statuses to your board and the picture gets a lot clearer:
+Add three statuses to your board and the picture gets a lot clearer:
 
 ```toml
 [notion.status]
-done = "Need Review"     # a pull request is waiting for you
+review = "In review"     # a pull request is waiting for you
+done = "Done"            # merged
 failed = "Blocked"       # something went wrong, the comment says what
 blocked = "Blocked"      # the agent asked a question
 ```
 
-*Done* then means what you decide it means — merged, accepted — and *Draft* goes back to
-its real job: a ticket not yet ready to be handed over.
+*Draft* then goes back to its real job: a ticket not yet ready to be handed over.
 
-Nothing is ever merged automatically.
+### Merging is the only gesture
+
+With `review` set, a ticket that came back as a pull request lands there instead of in
+*Done*. Every run then asks GitHub — through `gh` — what became of those pull requests,
+and a ticket whose own has been **merged** moves to *Done*, with a comment saying so. So
+you merge, and the board catches up on its own; nothing else to close by hand.
+
+The cadence is the runner's own: `interval_seconds`, not a second timer to install and
+forget. A ticket whose pull request is still open, closed without merging, or unreachable
+because `gh` is not authenticated simply stays in review — the next run asks again.
+
+Nothing is ever merged automatically. The merge is yours; only its consequence is not.
 
 ---
 
