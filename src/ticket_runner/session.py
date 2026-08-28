@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -229,20 +230,31 @@ TERMINALS = (
 )
 
 
-def deep_link(session_id: str, cwd: Path | str | None = None) -> str:
-    """A clickable link that reopens this session.
+def deep_link(session_id: str, cwd: Path | str | None = None, host: str = "") -> str:
+    """A clickable link that reopens this session, wherever it ran.
 
     Notion accepts any scheme in a URL property, and `install.sh` registers
     `ticket-runner://` with the desktop. Clicking the Session cell of a ticket
     therefore opens a terminal already inside the conversation — which beats
     copying a UUID into a command by some distance.
 
+    When the runner is on a server, the session's transcript is on that server
+    too, and a link that opened a local terminal would find nothing. `host` puts
+    the ssh destination in the link, so the click opens the session **over ssh**
+    from whichever machine you clicked on. That is what keeps the Session column
+    useful once the runner moves off your laptop.
+
     Claude Code registers a `claude-cli://` scheme of its own, but its query
     parameters are undocumented and a wrong guess would produce a link that
     silently does nothing; ours does exactly what this file says it does.
     """
+    query = []
+    if cwd:
+        query.append(f"cwd={quote(str(cwd), safe='/')}")
+    if host:
+        query.append(f"host={quote(host, safe='@.:-')}")
     link = f"{SCHEME}://session/{session_id}"
-    return f"{link}?cwd={quote(str(cwd), safe='/')}" if cwd else link
+    return f"{link}?{'&'.join(query)}" if query else link
 
 
 def open_link(uri: str) -> int:
@@ -256,14 +268,25 @@ def open_link(uri: str) -> int:
     session_id = parsed.path.strip("/").split("/")[-1]
     if not session_id:
         raise ValueError("no session identifier in the link")
-    cwd = (parse_qs(parsed.query).get("cwd") or [str(Path.home())])[0]
-    if not Path(cwd).is_dir():
-        cwd = str(Path.home())
+    query = parse_qs(parsed.query)
+    cwd = (query.get("cwd") or [str(Path.home())])[0]
+    host = (query.get("host") or [""])[0]
 
-    binary = available()
-    if not binary:
-        raise FileNotFoundError("claude not found in PATH")
-    command = [binary, "--resume", session_id]
+    if host:
+        # The session lives on another machine, so resuming means going there.
+        # No local claude is needed — only ssh, and an account that has one.
+        if not shutil.which("ssh"):
+            raise FileNotFoundError(f"ssh not found — cannot reach {host}")
+        remote = f"cd {shlex.quote(cwd)} 2>/dev/null; claude --resume {shlex.quote(session_id)}"
+        command = ["ssh", "-t", host, remote]
+        cwd = str(Path.home())
+    else:
+        if not Path(cwd).is_dir():
+            cwd = str(Path.home())
+        binary = available()
+        if not binary:
+            raise FileNotFoundError("claude not found in PATH")
+        command = [binary, "--resume", session_id]
 
     preferred = os.environ.get("TICKET_RUNNER_TERMINAL", "")
     candidates = list(TERMINALS)

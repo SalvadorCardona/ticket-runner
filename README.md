@@ -378,6 +378,74 @@ session stream), the history in `history.jsonl`, and the timer's own journal in
 
 ---
 
+## On a server
+
+The runner is at its best where it never sleeps. Nothing about it assumes a desktop, but
+five things change when it moves off your laptop.
+
+**Claude Code needs its own credentials there.** This is the real prerequisite, and it is
+worth settling before anything else: a headless machine has no browser to log in with.
+Authenticate once, or provide `ANTHROPIC_API_KEY` — which bills per token rather than
+against a subscription, and changes the economics of a ten-second cadence considerably.
+
+**`gh` has no keyring.** Password-store lookups fail silently in a systemd service and you
+get pushed branches with no pull request. Put a token in the unit instead:
+
+```ini
+# ~/.config/systemd/user/ticket-runner.service
+Environment=GH_TOKEN=ghp_…
+```
+
+Scope it to the repositories the runner may touch, and nothing else.
+
+**Paths differ from your laptop.** A project's `path` property in Notion names one
+machine's layout, and the server's is not the same. That is why a `[projects]` entry in
+the local configuration wins over it: each machine overrides what it needs, and the board
+keeps the mapping that suits the machine you use most.
+
+**The session link must cross the network.** A session that ran on the server left its
+transcript there, so a link opening a local terminal would find nothing. Set
+`session_host` to the ssh destination and the Session cell keeps working from your laptop
+— the click opens the conversation over ssh:
+
+```toml
+[runner]
+session_host = "salva@vps.example.com"
+```
+
+**Desktop notifications are pointless there.** They fail quietly, so nothing breaks, but
+set `notify = false` to stop trying. The Notion comment on each finished ticket is the
+notification that matters on a server.
+
+And the thing to make sure of: **run one runner, not two.** Claiming a ticket is a read
+then a write, not an atomic operation, so two runners watching the same board will
+occasionally start the same ticket twice. If you keep a copy on your laptop, keep it
+stopped (`ticket-runner disable`) and use it for `--ticket` runs on demand.
+
+### Who can write a ticket can run commands on that machine
+
+This deserves saying plainly rather than burying it. The runner starts sessions in
+`bypassPermissions`: the worktree protects your *repository*, not the machine. Anyone who
+can move a ticket to the ready column can therefore have arbitrary commands run under the
+account the runner uses.
+
+On a personal laptop where you are the only author, that is the same trust you already
+give Claude Code. On a server whose board is shared — a Notion workspace with partners, a
+database someone else can edit — it is a different proposition. What makes it sound:
+
+- a **dedicated account** on the server, holding the repositories and nothing else: no
+  other project's secrets, no keys that reach beyond what the runner needs;
+- a **narrowly scoped `GH_TOKEN`**, so the worst case stays inside the repositories the
+  runner already writes to;
+- **editing rights on the tickets database limited** to the people you would let run a
+  command on that machine — which is the honest way to read that permission.
+
+Setting `permission_mode = "acceptEdits"` narrows it further, at the cost of sessions that
+stall the first time one needs to run the test suite. It is the right setting for a shared
+board and the wrong one for a private machine.
+
+---
+
 ## Tests
 
 ```sh

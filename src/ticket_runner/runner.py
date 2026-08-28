@@ -248,7 +248,11 @@ class Runner:
         """
         kind = self.client.schema(self.database).get(self.config.notion.prop("session"))
         if kind == "url":
-            return session.deep_link(session_id, home or self.config.runner.workspace_root)
+            return session.deep_link(
+                session_id,
+                home or self.config.runner.workspace_root,
+                self.config.runner.session_host,
+            )
         return session_id
 
     def _comment(self, ticket: Ticket, text: str) -> None:

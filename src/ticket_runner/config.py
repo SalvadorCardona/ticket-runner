@@ -69,6 +69,7 @@ class Runner:
     open_pull_request: bool = True
     keep_worktree_on_failure: bool = True
     attach_sessions: bool = True
+    session_host: str = ""
     notify: bool = True
     log_retention_days: int = 14
     dry_run: bool = False
@@ -196,6 +197,7 @@ def load(path: Path | None = None) -> Config:
             runner_raw.get("keep_worktree_on_failure", defaults.keep_worktree_on_failure)
         ),
         attach_sessions=bool(runner_raw.get("attach_sessions", defaults.attach_sessions)),
+        session_host=str(runner_raw.get("session_host", defaults.session_host)).strip(),
         notify=bool(runner_raw.get("notify", defaults.notify)),
         log_retention_days=max(
             0, int(runner_raw.get("log_retention_days", defaults.log_retention_days))

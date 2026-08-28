@@ -169,6 +169,24 @@ def project_keys_match_what_claude_code_writes_on_disk():
 
 
 @case
+def a_remote_link_carries_its_host():
+    """Once the runner is on a server, the session is there too.
+
+    A link with a host resolves to an ssh command instead of a local claude,
+    which is what keeps the Session column clickable from a laptop.
+    """
+    from urllib.parse import parse_qs, urlparse
+
+    link = session.deep_link("abc-123", "/srv/work/app", "salva@vps")
+    parsed = urlparse(link)
+    query = parse_qs(parsed.query)
+    assert query["host"] == ["salva@vps"]
+    assert query["cwd"] == ["/srv/work/app"]
+    # Without a host the link stays purely local.
+    assert "host=" not in session.deep_link("abc-123", "/srv/work/app")
+
+
+@case
 def a_deep_link_survives_a_round_trip():
     from urllib.parse import parse_qs, urlparse
 

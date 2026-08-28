@@ -99,6 +99,13 @@ keep_worktree_on_failure = true
 # Tickets with no repository are filed under workspace_root.
 attach_sessions = true
 
+# The ssh destination where sessions actually run. Leave empty when the runner
+# is on this machine. Set it when the runner lives on a server: the Session link
+# then opens the session over ssh from whichever machine you click on, instead
+# of looking for a transcript that is not there.
+#   session_host = "salva@vps.example.com"
+session_host = ""
+
 # One desktop notification per finished ticket. The point of the runner is that
 # you are not watching it; without this you discover your pull request tomorrow.
 notify = true
