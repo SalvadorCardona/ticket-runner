@@ -395,6 +395,62 @@ def comments_the_integration_cannot_read_are_not_a_failure():
     assert lines == []
 
 
+def _answered(texts: list[str], error: str = "") -> bool:
+    """Would a reply on that ticket put it back in the queue?"""
+    runner = Runner.__new__(Runner)
+    runner.client = _CommentClient(texts, error)
+    runner.agent_label = "ticket-runner@laptop"
+    runner.quiet = True
+    ticket = type("T", (), {"page": notion.Page(id="p-ticket", url="", title="t")})()
+    return runner._answered(ticket)
+
+
+REPORT = "ticket-runner@laptop — blocked.\nThe ticket does not say which header."
+DONE = "ticket-runner@laptop — done.\nFait."
+
+
+@case
+def answering_a_ticket_the_runner_handled_puts_it_back_in_the_queue():
+    """The reply is the whole gesture: nothing to move on the board."""
+    assert _answered([REPORT, "Celui du dashboard, pas du site public."])
+    # Several rounds, and the answer is still the last word.
+    assert _answered([REPORT, "réponse", DONE, "et le footer ?"])
+
+
+@case
+def a_ticket_wakes_only_once_per_answer():
+    assert not _answered([REPORT]), "the runner having the last word is not an answer"
+    assert not _answered([REPORT, "réponse", DONE]), (
+        "the report the next run posts is what closes the ticket again"
+    )
+    assert not _answered([])
+
+
+@case
+def a_ticket_no_run_of_ours_ever_touched_is_left_alone():
+    assert not _answered(["Une question posée avant qu'aucun run n'y touche."])
+    assert not _answered(["ticket-runner@vps — done.\nFait.", "et pour le footer ?"]), (
+        "a ticket handled by another host is that host's to pick up"
+    )
+    assert not _answered([REPORT, "réponse"], error="403 API token does not have access")
+
+
+@case
+def waking_looks_everywhere_but_where_a_status_already_speaks():
+    """Done stays done, ready is on its way, running is in flight."""
+    runner = Runner.__new__(Runner)
+    runner.config = _config("")
+    runner._workspace = workspace.Workspace(tickets="db")
+    runner.client = type("S", (), {"schema": lambda self, database: {"Status": "status"}})()
+    excluded = {
+        condition["status"]["does_not_equal"] for condition in runner._woken_filter()["and"]
+    }
+    assert excluded == {"Done", "Not started", "In progress"}
+    assert all(condition["property"] == "Status" for condition in runner._woken_filter()["and"])
+    # Draft holds both failed and blocked: naming it twice would say no more.
+    assert len(runner._woken_filter()["and"]) == 3
+
+
 @case
 def the_role_sits_between_the_project_and_the_mechanics():
     text = prompt.build(

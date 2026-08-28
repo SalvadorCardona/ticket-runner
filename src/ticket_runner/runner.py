@@ -172,6 +172,11 @@ class Runner:
     def queue(self) -> tuple[list[Ticket], list[tuple[Ticket, datetime]]]:
         """The tickets to run now, and those waiting for their date.
 
+        Two ways in: the ready column, and a ticket the runner already handled
+        that has been commented on since (see `woken`). Both are ranked and
+        held back by their date the same way — once a ticket is to be run,
+        what put it there changes nothing.
+
         A ticket carrying a date is **scheduled**, not merely deadlined: it is
         left alone until that moment comes. Which is the only reading that means
         anything here — a ticket without a date starts within seconds of being
@@ -183,6 +188,7 @@ class Runner:
         by a steady trickle of newer work.
         """
         tickets = [Ticket(page) for page in self.client.query(self.database, self._ready_filter())]
+        tickets += self.woken()
         priorities = {name: index for index, name in enumerate(PRIORITIES)}
         default = priorities.get("Normal", len(PRIORITIES))
         now = datetime.now().astimezone()
@@ -215,6 +221,65 @@ class Runner:
         status_property = self.config.notion.prop("status")
         kind = self.client.schema(self.database).get(status_property, "status")
         return {"property": status_property, kind: {"equals": self.config.notion.state("ready")}}
+
+    def _woken_filter(self) -> dict:
+        """Every status but the three that already speak for a ticket.
+
+        Ready is on its way, running is in flight, and done is done: a comment
+        on a finished ticket is a conversation about the work, not a request to
+        do it again. What is left is where a run leaves a ticket it could not
+        finish — which is precisely where an answer is expected.
+        """
+        status_property = self.config.notion.prop("status")
+        kind = self.client.schema(self.database).get(status_property, "status")
+        settled = {self.config.notion.state(key) for key in ("done", "ready", "running")}
+        return {
+            "and": [
+                {"property": status_property, kind: {"does_not_equal": value}}
+                for value in sorted(settled)
+            ]
+        }
+
+    def woken(self) -> list[Ticket]:
+        """Tickets this runner has already reported on, and answered since.
+
+        A comment is how a ticket is answered: a run that ends `blocked` leaves
+        its question on the page, and the reply lands underneath. That reply is
+        now the whole gesture — no need to also move the ticket back to the
+        ready column. It rejoins the queue and is claimed like any other, so it
+        goes to "in progress" for as long as the new run lasts.
+
+        Narrow on purpose, because not every comment is an instruction. A
+        ticket wakes only if this runner reported on it and someone else has
+        had the last word since: a ticket it never touched belongs to a
+        conversation of yours, and one handled by another host is that host's
+        to pick up. The report the next run posts is also what closes the
+        ticket again — without it, the same comment would wake it forever.
+        """
+        woken: list[Ticket] = []
+        for page in self.client.query(self.database, self._woken_filter()):
+            ticket = Ticket(page)
+            if not self._answered(ticket):
+                continue
+            self.say(f"  ↻ {ticket.title} — answered in a comment, picked up again")
+            woken.append(ticket)
+        return woken
+
+    def _answered(self, ticket: Ticket) -> bool:
+        """Did someone have the last word on a ticket this runner reported on?"""
+        try:
+            comments = self.client.comments(ticket.page.id)
+        except notion.NotionError:
+            # Comments the integration cannot read already cost a ticket its
+            # discussion; they are not going to become a reason to run it again.
+            # `discussion` is where that is said out loud, once per ticket.
+            return False
+        reports = [
+            index
+            for index, comment in enumerate(comments)
+            if comment.text.startswith(self.agent_label)
+        ]
+        return bool(reports) and reports[-1] < len(comments) - 1
 
     def sweep(self) -> int:
         """Put back tickets a dead runner left claimed.

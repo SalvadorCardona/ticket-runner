@@ -102,10 +102,7 @@ def command_list(args: argparse.Namespace) -> int:
         print("No ticket ready.")
         return 0
     if tickets:
-        title(
-            f"{len(tickets)} ticket(s) in “{configuration.notion.state('ready')}”, "
-            "in the order they will run"
-        )
+        title(f"{len(tickets)} ticket(s) to handle, in the order they will run")
     for position, ticket in enumerate(tickets, 1):
         relation = notion.read(ticket.page, configuration.notion.prop("project")) or []
         project, kind = "?", ""
