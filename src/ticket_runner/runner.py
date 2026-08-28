@@ -24,7 +24,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import git, notion, notify, prompt as prompt_module, session, state
+from . import agents, git, notion, notify, prompt as prompt_module, session, state
+from . import workspace as workspace_module
 from .config import PRIORITIES, Config, state_dir
 from .projects import Project, Resolver
 
@@ -58,6 +59,8 @@ class Job:
     log: Path | None = None
     session_home: Path | None = None
     model: str = ""
+    agent: agents.Agent = field(default_factory=agents.Agent)
+    comments: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
 
@@ -105,6 +108,11 @@ def is_blank(body: str) -> bool:
     return True
 
 
+# How much of a ticket's own history is worth carrying into the prompt.
+COMMENT_LIMIT = 10
+COMMENT_CHARS = 2000
+
+
 def slugify(text: str, limit: int = 40) -> str:
     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
     text = re.sub(r"[^a-zA-Z0-9]+", "-", text).strip("-").lower()
@@ -130,14 +138,24 @@ class Runner:
         self.client = notion.Client(config.notion.token)
         self.resolver = Resolver(config.runner.workspace_root, config.projects)
         self.agent_label = f"ticket-runner@{socket.gethostname()}"
-        self._database = ""
+        self._workspace: workspace_module.Workspace | None = None
+
+    @property
+    def workspace(self) -> workspace_module.Workspace:
+        """The databases and the standing context, resolved once per run.
+
+        Once, because a run can hold several tickets and they all read the same
+        thing — and because the context page would otherwise be fetched again
+        for every ticket, to be told the same story.
+        """
+        if self._workspace is None:
+            self._workspace = workspace_module.resolve(self.client, self.config.notion)
+        return self._workspace
 
     @property
     def database(self) -> str:
         """The tickets database ID, resolved once for the whole session."""
-        if not self._database:
-            self._database = self.client.resolve_database(self.config.notion.tickets_database)
-        return self._database
+        return self.workspace.tickets
 
     # -- output --------------------------------------------------------------
 
@@ -312,6 +330,46 @@ class Runner:
                 )
             self.say(f"    ! Notion refused the comment: {error}{hint}")
 
+    def discussion(self, ticket: Ticket) -> list[str]:
+        """What was said on the ticket, ready for the prompt, newest last.
+
+        Bounded twice — the last few comments, and a character budget — because
+        a ticket that has been round three times would otherwise spend more of
+        the prompt on its own history than on the work.
+        """
+        try:
+            comments = self.client.comments(ticket.page.id)
+        except notion.NotionError as error:
+            hint = ""
+            if "403" in str(error):
+                hint = (
+                    " — notion.so/my-integrations → your integration → "
+                    "Capabilities → Read comments"
+                )
+            self.say(f"    ! comments not readable: {error}{hint}")
+            return []
+
+        lines: list[str] = []
+        budget = COMMENT_CHARS
+        for comment in reversed(comments[-COMMENT_LIMIT:]):
+            text = comment.text
+            if text.startswith(self.agent_label):
+                # Our own report. Its first two lines hold the verdict and the
+                # reason; the rest is branch names, session IDs and log paths,
+                # which mean nothing to the session about to read them.
+                text = text[len(self.agent_label):].lstrip(" —-")
+                text = " ".join("\n".join(text.splitlines()[:2]).split())
+                who = "a previous run"
+            else:
+                text = " ".join(text.split())
+                who = "the ticket's author"
+            line = f"{who}: {text}"
+            budget -= len(line)
+            if budget < 0:
+                break
+            lines.append(line)
+        return list(reversed(lines))
+
     def _fail(
         self, ticket: Ticket, reason: str, detail: str = "", *, blocked: bool = False
     ) -> dict:
@@ -374,6 +432,15 @@ class Runner:
                 )
                 return None
 
+        # Both are optional and neither can fail a ticket: a database with no
+        # Role column reads as no agent, and unreadable comments as none.
+        role = notion.read(ticket.page, self.config.notion.prop("role")) or []
+        agent = (
+            agents.resolve(self.client, role[0], self.config.notion.prop("model"))
+            if role
+            else agents.Agent()
+        )
+
         job = Job(
             ticket,
             project,
@@ -384,9 +451,13 @@ class Runner:
             session_id=session.new_id(),
             log=state.log_file(short),
             model=str(notion.read(ticket.page, self.config.notion.prop("model")) or ""),
+            agent=agent,
+            comments=self.discussion(ticket),
         )
         where = f"{project.path} · {branch}" if project.is_code else "document → Notion"
-        self.say(f"  → {ticket.title}\n    {project.name or 'no project'} · {where}")
+        said = f" · {len(job.comments)} comment(s)" if job.comments else ""
+        role = f" · as {agent.name}" if agent else ""
+        self.say(f"  → {ticket.title}\n    {project.name or 'no project'} · {where}{role}{said}")
         if not self.dry_run:
             # The session identifier is written now, not at the end: a ticket
             # still in progress is exactly the one you want to look into, and
@@ -423,15 +494,21 @@ class Runner:
             base=job.base,
             url=job.ticket.url,
             brief=job.project.brief,
+            context=self.workspace.context,
+            agent_name=job.agent.name,
+            agent_brief=job.agent.brief,
+            comments=job.comments,
         )
         log = job.log or state.log_file(short_id(job.ticket.id))
-        chosen = job.model or self.config.runner.model
+        # The ticket first, then its agent, then the runner: the narrower the
+        # choice, the more deliberate it was.
+        chosen = job.model or job.agent.model or self.config.runner.model
         self.say(f"    Claude session {job.session_id}{' · ' + chosen if chosen else ''} → {log}")
         outcome = session.run(
             text,
             cwd=job.workdir,
             log=log,
-            model=job.model or self.config.runner.model,
+            model=chosen,
             permission_mode=self.config.runner.permission_mode,
             timeout_minutes=self.config.runner.timeout_minutes,
             session_id=job.session_id,
@@ -659,6 +736,11 @@ class Runner:
                 return []
             later = f", {len(waiting)} scheduled for later" if waiting else ""
             self.say(f"{len(tickets)} ticket(s) ready{later}.")
+
+        # Said here rather than on resolution: at a ten-second cadence, a run
+        # with nothing to do would repeat them forever into the journal.
+        for warning in self.workspace.warnings:
+            self.say(f"  ! {warning}")
 
         ceiling = limit if limit is not None else self.config.runner.max_concurrent
         jobs = [job for job in (self.prepare(ticket) for ticket in tickets[:ceiling]) if job]

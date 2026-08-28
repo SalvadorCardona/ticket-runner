@@ -81,7 +81,7 @@ On [notion.so/my-integrations](https://www.notion.so/my-integrations) → **New
 integration** → give it a name (`ticket-runner`), pick your workspace, type **Internal**.
 Copy the token it shows you; it starts with `ntn_`.
 
-### 2. Give the token to the runner
+### 2. Give the token and the workspace to the runner
 
 Two lines to fill in, and only two:
 
@@ -89,11 +89,36 @@ Two lines to fill in, and only two:
 [notion]
 token = "ntn_your_real_token_here"
 
-# The URL of the database is enough — the ID is extracted from it. If your tickets
-# database is inline inside a page, the page URL works too: the runner looks inside
-# and finds the database on its own.
-tickets_database = "https://www.notion.so/workspace/Tickets-3c3451680af480f5b1aad0785c0322b4"
+# The URL of your workspace database is enough — the ID is extracted from it.
+workspace = "https://www.notion.so/workspace/3a8451680af480918afcf0eb9cf70e7b"
 ```
+
+A **workspace** here is one database whose rows are your master pages, each holding its
+own inline database:
+
+```
+Master workspace          ← the one URL you configure
+├── Master Tickets        ← the tickets database lives inside this page
+├── Master project        ← the projects database lives inside this one
+├── Master Agents         ← optional: the roles a ticket can be handled by
+└── Soul                  ← a plain page: who you are
+```
+
+You name the directory once; the runner finds the rest by the **title of a row**. Rename
+a row and tell the runner what it is now called, under `[notion.pages]`:
+
+```toml
+[notion.pages]
+tickets = "Master Tickets"   # required
+projects = "Master project"  # optional — only `doctor` uses it
+agents = "Master Agents"     # optional — see below
+context = "Soul"             # optional — see below
+```
+
+If you would rather point at one database than share a whole workspace, `tickets_database`
+still works exactly as before, and wins over the workspace when both are set. The URL of
+the database is enough, and if it is inline inside a page, the page URL works too: the
+runner looks inside and finds the database on its own.
 
 Three ways to get them in, whichever you prefer:
 
@@ -109,10 +134,16 @@ sed -i 's|^token = .*|token = "ntn_…"|' ~/.config/ticket-runner/config.toml
 
 ### 3. Share the databases with the integration — the step everyone forgets
 
-A valid token on a database that was never shared answers `object not found`, and nothing
-about it hints at why. On **the tickets database and the projects database alike**: the
-`···` menu, top right → **Connections** → your integration. The first one to read the
-tickets, the second to know which repository to work in.
+A valid token on a page that was never shared answers `object not found`, and nothing
+about it hints at why. Share **the page holding your workspace database**: the `···` menu,
+top right → **Connections** → your integration. Everything underneath becomes readable in
+one gesture — which is the main reason to point the runner at a workspace rather than at
+each database in turn.
+
+> **What you share is what the runner can read.** Anything under that page reaches the
+> prompts it writes, and prompts are kept on disk in `~/.local/state/ticket-runner/`. Keep
+> credentials out of the workspace — a page of environment variables is exactly the kind
+> of thing that should live in a password manager instead.
 
 Then:
 
@@ -143,6 +174,9 @@ presence of each status — and names whichever of those was missed.
 | `runner.attach_sessions` | `true` | file each session under its project, so `claude --resume` there lists it |
 | `runner.prompt_file` | `""` | your own prompt template, for repository tickets |
 | `runner.document_prompt_file` | `""` | the same, for tickets with no repository |
+| `notion.workspace` | `""` | the database whose rows are your master pages |
+| `notion.tickets_database` | `""` | one database instead of a workspace; wins when both are set |
+| `[notion.pages]` | | which row of the workspace is the tickets database, the projects database, the agents database, the context page |
 | `[notion.properties]` | | if your columns have other names |
 | `[notion.status]` | | if your statuses have other names |
 | `[projects]` | | `"Notion name" = "/path"` for repositories that cannot be guessed |
@@ -158,11 +192,12 @@ presence of each status — and names whichever of those was missed.
 | `Name` | title | what the agent must do, in one line |
 | `Status` | status | **what drives the whole system** — see below |
 | `Project` | relation | *optional* — to the projects database: decides the repository |
-| `Agent` | text | filled by the runner: who took the ticket |
+| `Role` | relation | *optional* — to the agents database: decides who handles it |
+| `Agent` | text | filled by the runner: which machine took the ticket |
 | `Pull Request` | URL | filled by the runner at the end |
 | `Session` | **URL** or text | written as soon as the ticket is claimed. Make it a URL and it becomes a link that opens the session; leave it text and it holds the bare ID |
 | `Priority` | select | *optional* — `Urgent`, `High`, `Normal`, `Low`. Decides which ready ticket runs first |
-| `Model` | select | *optional* — `opus`, `sonnet`, `haiku`. This ticket's model, over `runner.model` |
+| `Model` | select | *optional* — `opus`, `sonnet`, `haiku`. This ticket's model, over its agent's and over `runner.model` |
 | `Cost` | number | *optional* — written back, in dollars |
 | `Duration` | number | *optional* — written back, in minutes |
 | `Due Date` | date | *optional* — **hold the ticket until that moment**, then run it |
@@ -281,6 +316,81 @@ not exist is an error, and blocks the ticket rather than silently falling back.
 `ticket-runner projects` shows you which is which for every referenced project — worth
 running once after installation; it is what saves you from surprises.
 
+### The context page — who the work is for
+
+One row of the workspace, named `Soul` by default, is a plain page with no database in it.
+Whatever you write there goes into **every prompt, on every project**, ahead of the
+project's brief:
+
+```
+the context page   who you are, what you work with, how you like things written
+      ↓
+the project page   the conventions of THIS project
+      ↓
+the ticket         the task
+```
+
+From the widest frame to the narrowest, so the specific is read last and wins when the two
+disagree. What belongs there:
+
+> Je suis Salvador Cardona, développeur web depuis 13 ans. Je travaille sur Animalink.
+> Stack: PHP/Symfony, React, Docker. `pnpm`, jamais `npm`.
+> Réponses courtes, pas d'emoji, la commande plutôt que l'explication.
+
+It pays for itself mostly on **document tickets**: there the agent starts in an empty
+directory and knows nothing about you at all, whereas on a code ticket the repository and
+its `CLAUDE.md` already answer most of it.
+
+Two things to keep in mind. **Keep it to one screen** — it is the one text billed on 100 %
+of your tickets, and a long preamble dilutes the ticket itself. And what belongs to a
+single project belongs on that project's page, not here: the test is whether it would
+change the answer on a ticket of *any* project.
+
+The page is optional. Without it the runner behaves exactly as before, and says so once
+per run rather than leaving you to wonder.
+
+### The agents database — who handles the ticket
+
+A project says *where* the work happens. It says nothing about **who** does it, and
+“fix this regression” and “write this announcement” are not the same craft on the same
+repository.
+
+Add a `Role` relation column on your tickets, pointing at a database of agents. One row
+per role, and **the body of its page is the role**, exactly as a project page is its brief:
+
+> **Dev front**
+> Tu touches au CSS avant le JS. Aucune dépendance nouvelle sans raison écrite.
+> Un test qui reproduit le bug avant le correctif.
+
+An agent row may also carry a `Model`, which is how a rewriting ticket runs on a cheaper
+model than a refactor. The narrowest choice wins:
+
+```
+the ticket's Model  →  its agent's Model  →  runner.model
+```
+
+The role is read after your context page and after the project's brief, and **it can never
+loosen the frame**: committing without pushing, and answering `RESULT: blocked` rather than
+guessing, live in the template, above anything a page can say.
+
+All of it is optional twice over: a tickets database with no `Role` column behaves exactly
+as it always has, and a ticket that names no agent runs on the runner's own prompt.
+
+### The discussion on a ticket
+
+The comments of a ticket go into the prompt, oldest first, which closes the loop the
+`blocked` status opens: a run asks a question, you answer it in a comment, you move the
+ticket back to ready — and the next run reads your answer instead of asking again.
+
+The runner's own reports are included too, trimmed to their verdict and reason; the branch
+names, session IDs and log paths they carry are of no use to a session. At most the last
+ten comments and 2000 characters, newest kept, so a ticket that has been round three times
+does not spend more of its prompt on its own history than on the work.
+
+This needs one capability the integration does not have by default:
+[notion.so/my-integrations](https://www.notion.so/my-integrations) → your integration →
+**Capabilities** → *Read comments*. Without it the runner says so once and carries on.
+
 ### The statuses
 
 This is where your control over the system lives. The names are yours — map them under
@@ -378,7 +488,11 @@ often.
 
 | Symptom | Most likely cause |
 | --- | --- |
-| `object not found` on the database | the database is not shared with the integration (`···` → Connections) |
+| `object not found` on the database | the page is not shared with the integration (`···` → Connections). Sharing the page that holds the workspace covers everything under it |
+| “no page named … in the workspace” | the row is called something else. `doctor` lists what it did find — rename the row, or set `[notion.pages]` |
+| the agent knows nothing about you | no `Soul` row in the workspace, or the page is empty. `doctor` says which, and the run says so once |
+| “comments not readable” | the integration lacks *Read comments* (my-integrations → Capabilities). The ticket runs, without its discussion |
+| a ticket ignores its agent | the `Role` column is missing or is not a relation — `doctor` names it |
 | “project not found on disk” | the project names a repository that is not there: fix its `path` or `github` property, or add `"Notion name" = "/path"` under `[projects]` |
 | a ticket became a document when you wanted code | its project names no repository. Give the project page a `path` or a `github` |
 | “nothing to work from” | the ticket has neither a title nor a description — a page left on the bare template counts as empty |
@@ -454,7 +568,9 @@ database someone else can edit — it is a different proposition. What makes it 
 - a **narrowly scoped `GH_TOKEN`**, so the worst case stays inside the repositories the
   runner already writes to;
 - **editing rights on the tickets database limited** to the people you would let run a
-  command on that machine — which is the honest way to read that permission.
+  command on that machine — which is the honest way to read that permission. Since the
+  comments of a ticket reach the prompt too, that now includes **comment-only**
+  collaborators: on a shared board, they are the same permission.
 
 Setting `permission_mode = "acceptEdits"` narrows it further, at the cost of sessions that
 stall the first time one needs to run the test suite. It is the right setting for a shared

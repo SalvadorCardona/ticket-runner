@@ -110,16 +110,17 @@ path.write_text(text.replace('token = "ntn_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 PY
             ok "token saved"
         fi
-        printf '    %sURL of the Notion tickets database%s > ' "$BOLD" "$RESET"
-        read -r database </dev/tty || database=""
-        if [ -n "$database" ]; then
-            python3 - "$CONFIG" "$database" <<'PY'
+        printf '    %sURL of your Notion workspace database%s\n' "$BOLD" "$RESET"
+        printf '    %s(the one whose rows are your master pages)%s > ' "$DIM" "$RESET"
+        read -r workspace </dev/tty || workspace=""
+        if [ -n "$workspace" ]; then
+            python3 - "$CONFIG" "$workspace" <<'PY'
 import sys, pathlib
 path, value = pathlib.Path(sys.argv[1]), sys.argv[2].strip()
 text = path.read_text()
-path.write_text(text.replace('tickets_database = ""', f'tickets_database = "{value}"'))
+path.write_text(text.replace('workspace = ""', f'workspace = "{value}"', 1))
 PY
-            ok "tickets database saved"
+            ok "workspace saved"
         fi
         printf '\n'
     fi

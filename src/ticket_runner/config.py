@@ -37,12 +37,18 @@ class ConfigError(Exception):
 @dataclass
 class Notion:
     token: str = ""
+    workspace: str = ""
     tickets_database: str = ""
+    pages: dict[str, str] = field(default_factory=dict)
     properties: dict[str, str] = field(default_factory=dict)
     status: dict[str, str] = field(default_factory=dict)
 
     def prop(self, key: str) -> str:
         return self.properties.get(key, _DEFAULT_PROPERTIES[key])
+
+    def page(self, key: str) -> str:
+        """The title of the workspace row holding that database or page."""
+        return self.pages.get(key, _DEFAULT_PAGES[key])
 
     def state(self, key: str) -> str:
         # "blocked" is optional: without it, a ticket the agent could not settle
@@ -89,8 +95,10 @@ class Config:
         missing = []
         if not self.notion.token or self.notion.token == PLACEHOLDER:
             missing.append("notion.token")
-        if not self.notion.tickets_database:
-            missing.append("notion.tickets_database")
+        # Either way of naming the tickets database will do: the workspace page
+        # that holds it, or the database itself.
+        if not self.notion.workspace and not self.notion.tickets_database:
+            missing.append("notion.workspace (or notion.tickets_database)")
         if missing:
             raise ConfigError(
                 f"{', '.join(missing)} must be set in {self.path}\n"
@@ -111,6 +119,16 @@ _DEFAULT_PROPERTIES = {
     "cost": "Cost",            # written back, in dollars
     "duration": "Duration",    # written back, in minutes
     "due": "Due Date",         # hold the ticket until that moment, then run it
+    "role": "Role",            # relation: which agent handles this ticket
+}
+
+# The rows the runner looks for in the workspace database, by their title.
+# Only `tickets` is required; the other two change nothing by their absence.
+_DEFAULT_PAGES = {
+    "tickets": "Master Tickets",
+    "projects": "Master project",
+    "agents": "Master Agents",
+    "context": "Soul",
 }
 
 # Highest first. Anything else — including an empty cell — sorts as normal.
@@ -165,7 +183,9 @@ def load(path: Path | None = None) -> Config:
     notion_raw = raw.get("notion", {})
     notion = Notion(
         token=str(notion_raw.get("token", "")).strip(),
+        workspace=_database_id(str(notion_raw.get("workspace", ""))),
         tickets_database=_database_id(str(notion_raw.get("tickets_database", ""))),
+        pages={**_DEFAULT_PAGES, **notion_raw.get("pages", {})},
         properties={**_DEFAULT_PROPERTIES, **notion_raw.get("properties", {})},
         # Not merged with the defaults: `state()` needs to know which keys the
         # file actually sets, to let "blocked" fall back on "failed".

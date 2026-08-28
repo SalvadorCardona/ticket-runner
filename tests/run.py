@@ -23,7 +23,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ticket_runner import config as C  # noqa: E402
-from ticket_runner import markdown, notion, session  # noqa: E402
+from ticket_runner import agents, markdown, notion, prompt, session, workspace  # noqa: E402
+from ticket_runner.runner import Runner  # noqa: E402
 from ticket_runner.__main__ import _names  # noqa: E402
 from ticket_runner.runner import short_id, slugify  # noqa: E402
 from ticket_runner.projects import _normalise  # noqa: E402
@@ -136,6 +137,295 @@ def optional_properties_have_names_even_when_absent():
     for key in ("status", "project", "agent", "pull_request", "session", "model",
                 "priority", "cost", "duration"):
         assert config.notion.prop(key), key
+
+
+@case
+def a_workspace_is_named_once_and_the_rest_is_found():
+    config = _config("")
+    assert config.notion.page("tickets") == "Master Tickets"
+    assert config.notion.page("context") == "Soul"
+    renamed = _config('[notion.pages]\ncontext = "Qui je suis"\n')
+    assert renamed.notion.page("context") == "Qui je suis"
+    assert renamed.notion.page("tickets") == "Master Tickets", "defaults survive a partial block"
+
+
+@case
+def a_workspace_alone_is_enough_to_run():
+    path = Path(tempfile.mkdtemp()) / "config.toml"
+    path.write_text(
+        '[notion]\ntoken = "ntn_real"\n'
+        'workspace = "https://www.notion.so/w/3a8451680af480918afcf0eb9cf70e7b?v=1"\n'
+    )
+    config = C.load(path)
+    assert config.notion.workspace == "3a8451680af480918afcf0eb9cf70e7b", "URL reduced to an ID"
+    assert not config.notion.tickets_database
+    config.require_usable()  # neither raises nor needs a tickets database
+
+
+@case
+def neither_a_workspace_nor_a_database_is_refused():
+    path = Path(tempfile.mkdtemp()) / "config.toml"
+    path.write_text('[notion]\ntoken = "ntn_real"\n')
+    try:
+        C.load(path).require_usable()
+    except C.ConfigError as error:
+        assert "notion.workspace" in str(error)
+    else:
+        raise AssertionError("a configuration naming no tickets database must be refused")
+
+
+# -- the workspace -----------------------------------------------------------
+
+
+class _FakeClient:
+    """Just enough Notion to resolve a workspace, and nothing that reaches out."""
+
+    def __init__(self, rows: dict[str, str], text: str = "", broken: set[str] = frozenset()):
+        self._rows = rows
+        self._text = text
+        self._broken = broken
+
+    def resolve_database(self, identifier: str) -> str:
+        if identifier in self._broken:
+            raise notion.NotionError(f"{identifier}: object not found")
+        return f"db-of-{identifier}"
+
+    def query(self, database_id: str, filter_=None) -> list[notion.Page]:
+        return [notion.Page(id=page, url="", title=title) for title, page in self._rows.items()]
+
+    def blocks_text(self, page_id: str, depth: int = 0) -> str:
+        if page_id in self._broken:
+            raise notion.NotionError(f"{page_id}: object not found")
+        return self._text
+
+
+def _settings(**overrides) -> C.Notion:
+    values = {"token": "ntn_real", "workspace": "space", "pages": dict(C._DEFAULT_PAGES)}
+    values.update(overrides)
+    return C.Notion(**values)
+
+
+@case
+def the_rows_of_a_workspace_become_the_runners_databases():
+    client = _FakeClient(
+        {"Master Tickets": "p-tickets", "Master project": "p-projects", "Soul": "p-soul"},
+        text="Je suis Salvador Cardona.",
+    )
+    space = workspace.resolve(client, _settings())
+    assert space.tickets == "db-of-p-tickets"
+    assert space.projects == "db-of-p-projects"
+    assert space.context == "Je suis Salvador Cardona."
+    assert not space.warnings
+
+
+@case
+def a_row_is_found_however_its_title_is_capitalised():
+    client = _FakeClient({"master tickets": "p-tickets", "SOUL": "p-soul"}, text="x")
+    space = workspace.resolve(client, _settings())
+    assert space.tickets == "db-of-p-tickets"
+    assert space.context == "x"
+
+
+@case
+def a_missing_context_page_warns_but_never_fails_a_run():
+    client = _FakeClient({"Master Tickets": "p-tickets"})
+    space = workspace.resolve(client, _settings())
+    assert space.tickets == "db-of-p-tickets"
+    assert space.context == "" and space.projects == ""
+    assert any("Soul" in warning for warning in space.warnings)
+
+    # Present but unreadable, and present but empty, are both worth saying too.
+    unreadable = _FakeClient({"Master Tickets": "p-t", "Soul": "p-soul"}, broken={"p-soul"})
+    assert any("unreadable" in warning for warning in workspace.resolve(unreadable, _settings()).warnings)
+    empty = _FakeClient({"Master Tickets": "p-t", "Soul": "p-soul"}, text="   ")
+    assert any("empty" in warning for warning in workspace.resolve(empty, _settings()).warnings)
+
+
+@case
+def a_missing_tickets_page_is_the_one_thing_that_fails():
+    client = _FakeClient({"Soul": "p-soul", "Master project": "p-projects"})
+    try:
+        workspace.resolve(client, _settings())
+    except notion.NotionError as error:
+        assert "Master Tickets" in str(error)
+        assert "Soul" in str(error), "the message lists what was actually found"
+    else:
+        raise AssertionError("a workspace without a tickets page must not resolve")
+
+
+@case
+def an_explicit_database_still_wins_over_the_workspace():
+    client = _FakeClient({"Master Tickets": "p-tickets"})
+    space = workspace.resolve(client, _settings(tickets_database="chosen"))
+    assert space.tickets == "db-of-chosen"
+
+    # And a configuration written before workspaces existed resolves the same.
+    legacy = workspace.resolve(client, _settings(workspace="", tickets_database="chosen"))
+    assert legacy.tickets == "db-of-chosen"
+    assert legacy.rows == {} and not legacy.warnings
+
+
+# -- the prompt --------------------------------------------------------------
+
+
+@case
+def the_prompt_reads_from_the_widest_frame_to_the_narrowest():
+    text = prompt.build(
+        prompt.DEFAULT,
+        project="Animalink",
+        title="Retirer l'entête",
+        body="Le header prend trop de place.",
+        repo="/home/x/animalink",
+        branch="ticket/x",
+        base="main",
+        url="https://notion.so/x",
+        brief="Ton: direct, pas d'emoji.",
+        context="Je suis Salvador Cardona, développeur web.",
+    )
+    assert text.index("Salvador Cardona") < text.index("Ton: direct"), "the global frame comes first"
+    assert text.index("Ton: direct") < text.index("# Context"), "then the project, then the mechanics"
+    assert "Le header prend trop de place." in text
+
+
+@case
+def a_workspace_without_a_context_page_changes_nothing():
+    common = dict(
+        project="Animalink", title="t", body="b", repo="/r", branch="br", base="main", url="u"
+    )
+    bare = prompt.build(prompt.DEFAULT, **common)
+    assert "# Who you are working for" not in bare
+    assert prompt.build(prompt.DOCUMENT, **common, context="   ") == prompt.build(
+        prompt.DOCUMENT, **common
+    ), "whitespace is not a context"
+
+
+# -- the role a ticket is handled by -----------------------------------------
+
+
+class _AgentClient:
+    def __init__(self, page: notion.Page | None, brief: str = "", broken: bool = False):
+        self._page, self._brief, self._broken = page, brief, broken
+
+    def page(self, page_id: str) -> notion.Page:
+        if self._page is None:
+            raise notion.NotionError("object not found")
+        return self._page
+
+    def blocks_text(self, page_id: str, depth: int = 0) -> str:
+        if self._broken:
+            raise notion.NotionError("object not found")
+        return self._brief
+
+
+def _agent_page(title: str, model: str = "") -> notion.Page:
+    properties = {"Name": {"type": "title", "title": [{"plain_text": title}]}}
+    if model:
+        properties["Model"] = {"type": "select", "select": {"name": model}}
+    return notion.Page(id="p-agent", url="", title=title, properties=properties)
+
+
+@case
+def an_agent_is_a_page_and_may_name_its_model():
+    client = _AgentClient(_agent_page("Rédacteur", "haiku"), brief="Ton direct, pas d'emoji.")
+    agent = agents.resolve(client, "p-agent")
+    assert agent.name == "Rédacteur"
+    assert agent.brief == "Ton direct, pas d'emoji."
+    assert agent.model == "haiku"
+    assert agent, "a named agent is truthy"
+
+
+@case
+def an_unreadable_agent_is_no_agent_rather_than_a_failed_ticket():
+    assert not agents.resolve(_AgentClient(None), "p-agent").name
+    # The page reads but its body does not: the role is lost, the run is not.
+    partial = agents.resolve(_AgentClient(_agent_page("Rédacteur"), broken=True), "p-agent")
+    assert partial.name == "Rédacteur" and partial.brief == ""
+    assert not agents.Agent(), "no agent at all is falsy"
+
+
+# -- the discussion on a ticket ----------------------------------------------
+
+
+class _CommentClient:
+    def __init__(self, texts: list[str], error: str = ""):
+        self._texts, self._error = texts, error
+
+    def comments(self, page_id: str) -> list[notion.Comment]:
+        if self._error:
+            raise notion.NotionError(self._error)
+        return [notion.Comment(text) for text in self._texts]
+
+
+def _runner_reading(texts: list[str], error: str = "") -> tuple[Runner, list[str]]:
+    """A Runner with its Notion replaced, and nothing else touched."""
+    runner = Runner.__new__(Runner)
+    runner.client = _CommentClient(texts, error)
+    runner.agent_label = "ticket-runner@laptop"
+    runner.quiet = True
+    ticket = type("T", (), {"page": notion.Page(id="p-ticket", url="", title="t")})()
+    return runner, runner.discussion(ticket)
+
+
+@case
+def a_question_a_run_asked_comes_back_with_its_answer():
+    _, lines = _runner_reading([
+        "ticket-runner@laptop — blocked.\nThe ticket does not say which header.\n\n"
+        "Session: `abc-123` — `claude --resume abc-123`\nLog: /home/x/log.jsonl",
+        "Celui du dashboard, pas du site public.",
+    ])
+    assert lines == [
+        "a previous run: blocked. The ticket does not say which header.",
+        "the ticket's author: Celui du dashboard, pas du site public.",
+    ], lines
+    assert "Session:" not in "".join(lines), "the machinery of a past run is not context"
+
+
+@case
+def a_long_discussion_is_cut_from_the_oldest_end():
+    _, lines = _runner_reading([f"comment number {index} " + "x" * 300 for index in range(20)])
+    assert len(lines) <= 10, "at most the last ten"
+    assert sum(len(line) for line in lines) <= 2000
+    assert "number 19" in lines[-1], "the newest survives"
+    assert "number 0" not in " ".join(lines), "the oldest is what goes"
+
+
+@case
+def comments_the_integration_cannot_read_are_not_a_failure():
+    _, lines = _runner_reading([], error="403 API token does not have access")
+    assert lines == []
+
+
+@case
+def the_role_sits_between_the_project_and_the_mechanics():
+    text = prompt.build(
+        prompt.DEFAULT,
+        project="Animalink", title="t", body="b", repo="/r", branch="br", base="main", url="u",
+        context="Je suis Salvador.",
+        brief="Ton: direct.",
+        agent_name="Rédacteur",
+        agent_brief="Deux ou trois angles, toujours.",
+        comments=["the ticket's author: plutôt court."],
+    )
+    order = [text.index(mark) for mark in (
+        "b",                        # the ticket itself
+        "already been said",        # then what was said about it
+        "Je suis Salvador.",        # then the widest frame
+        "Ton: direct.",             # then the project
+        "Deux ou trois angles",     # then the role
+        "# Context",                # then the mechanics
+    )]
+    assert order == sorted(order), order
+    assert "# Your role — Rédacteur" in text
+
+
+@case
+def a_ticket_with_no_agent_and_no_comments_reads_as_before():
+    common = dict(
+        project="Animalink", title="t", body="b", repo="/r", branch="br", base="main", url="u"
+    )
+    bare = prompt.build(prompt.DEFAULT, **common)
+    assert "# Your role" not in bare and "already been said" not in bare
+    assert prompt.build(prompt.DEFAULT, **common, comments=[], agent_brief="  ") == bare
 
 
 # -- session outcome ---------------------------------------------------------
