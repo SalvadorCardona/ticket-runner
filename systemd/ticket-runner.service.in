@@ -15,3 +15,10 @@ TimeoutStartSec=infinity
 # nor gh, nor node would be found.
 Environment=PATH=@PATH@
 Environment=PYTHONUNBUFFERED=1
+
+# At a ten-second cadence, systemd's own "Starting…/Finished…" pair writes some
+# seventeen thousand lines a day and buries the runs that matter. LogLevelMax
+# drops them — but a service's stdout is journalled at info level too, so
+# without the line below it would take the runner's own output down with it.
+LogLevelMax=notice
+SyslogLevel=notice
