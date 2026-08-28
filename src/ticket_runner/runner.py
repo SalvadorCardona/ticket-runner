@@ -61,6 +61,24 @@ class Job:
     notes: list[str] = field(default_factory=list)
 
 
+def scheduled_for(value: object) -> datetime | None:
+    """When a ticket may start, from its Notion date property.
+
+    A bare date means the start of that day, read in this machine's timezone: a
+    ticket due "30 August" becomes eligible at midnight, not at noon UTC. A date
+    with a time is taken as written, offset included. Anything unparseable is
+    treated as no date at all — a ticket is never held back by a value the
+    runner failed to read.
+    """
+    if not value:
+        return None
+    try:
+        moment = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    return moment.astimezone() if moment.tzinfo is None else moment
+
+
 def short_id(page_id: str) -> str:
     """Eight characters that actually tell two tickets apart.
 
@@ -133,23 +151,47 @@ class Runner:
 
     # -- reading -------------------------------------------------------------
 
-    def ready(self) -> list[Ticket]:
-        """Ready tickets, most urgent first, then oldest first.
+    def queue(self) -> tuple[list[Ticket], list[tuple[Ticket, datetime]]]:
+        """The tickets to run now, and those waiting for their date.
 
-        Order matters as soon as more tickets are ready than `max_concurrent`
-        allows: without it, which ticket runs is whatever Notion returned first.
-        Age breaks ties so that nothing can be starved by a steady trickle of
-        newer work.
+        A ticket carrying a date is **scheduled**, not merely deadlined: it is
+        left alone until that moment comes. Which is the only reading that means
+        anything here — a ticket without a date starts within seconds of being
+        made ready, so a date can only be there to say "not yet".
+
+        Among the tickets that may run, order settles who goes first when more
+        are ready than `max_concurrent` allows: priority, then the one whose
+        date passed longest ago, then age. Age last, so that nothing is starved
+        by a steady trickle of newer work.
         """
         tickets = [Ticket(page) for page in self.client.query(self.database, self._ready_filter())]
         priorities = {name: index for index, name in enumerate(PRIORITIES)}
         default = priorities.get("Normal", len(PRIORITIES))
+        now = datetime.now().astimezone()
 
-        def rank(ticket: Ticket) -> tuple[int, str]:
+        eligible: list[Ticket] = []
+        waiting: list[tuple[Ticket, datetime]] = []
+        moments: dict[str, float] = {}
+        for ticket in tickets:
+            moment = scheduled_for(notion.read(ticket.page, self.config.notion.prop("due")))
+            if moment and moment > now:
+                waiting.append((ticket, moment))
+                continue
+            moments[ticket.id] = moment.timestamp() if moment else float("inf")
+            eligible.append(ticket)
+
+        def rank(ticket: Ticket) -> tuple[int, float, str]:
             value = notion.read(ticket.page, self.config.notion.prop("priority"))
-            return (priorities.get(str(value), default), ticket.page.raw.get("created_time", ""))
+            return (
+                priorities.get(str(value), default),
+                moments[ticket.id],
+                ticket.page.raw.get("created_time", ""),
+            )
 
-        return sorted(tickets, key=rank)
+        return sorted(eligible, key=rank), sorted(waiting, key=lambda pair: pair[1])
+
+    def ready(self) -> list[Ticket]:
+        return self.queue()[0]
 
     def _ready_filter(self) -> dict:
         status_property = self.config.notion.prop("status")
@@ -609,12 +651,14 @@ class Runner:
         else:
             if not self.dry_run:
                 self.sweep()
-            tickets = self.ready()
+            tickets, waiting = self.queue()
             if not tickets:
                 if self.announce_idle:
-                    self.say("No ticket ready.")
+                    later = f", {len(waiting)} waiting for their date" if waiting else ""
+                    self.say(f"No ticket ready{later}.")
                 return []
-            self.say(f"{len(tickets)} ticket(s) ready.")
+            later = f", {len(waiting)} scheduled for later" if waiting else ""
+            self.say(f"{len(tickets)} ticket(s) ready{later}.")
 
         ceiling = limit if limit is not None else self.config.runner.max_concurrent
         jobs = [job for job in (self.prepare(ticket) for ticket in tickets[:ceiling]) if job]

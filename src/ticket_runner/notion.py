@@ -307,6 +307,13 @@ def read(page: Page, name: str) -> Any:
         return prop.get("checkbox")
     if kind == "number":
         return prop.get("number")
+    if kind == "date":
+        # A Notion date may be a range. The deadline is where it ends.
+        value = prop.get("date") or {}
+        return value.get("end") or value.get("start")
+    if kind == "formula":
+        inner = prop.get("formula") or {}
+        return inner.get(inner.get("type", ""), None)
     return prop.get(kind)
 
 
@@ -325,6 +332,8 @@ def _encode(kind: str | None, value: Any) -> dict | None:
         return {"checkbox": bool(value)}
     if kind == "number":
         return {"number": value}
+    if kind == "date":
+        return {"date": {"start": str(value)}}
     return None
 
 

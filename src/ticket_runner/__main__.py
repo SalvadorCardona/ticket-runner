@@ -15,6 +15,8 @@ import sys
 import time
 from pathlib import Path
 
+from datetime import datetime
+
 from . import __version__, config as config_module, git, notion, session, state
 from .projects import Resolver
 from .runner import Runner
@@ -94,11 +96,15 @@ def command_run(args: argparse.Namespace) -> int:
 def command_list(args: argparse.Namespace) -> int:
     configuration = load_config()
     runner = Runner(configuration, quiet=True)
-    tickets = runner.ready()
-    if not tickets:
+    tickets, waiting = runner.queue()
+    if not tickets and not waiting:
         print("No ticket ready.")
         return 0
-    title(f"{len(tickets)} ticket(s) in “{configuration.notion.state('ready')}”, in the order they will run")
+    if tickets:
+        title(
+            f"{len(tickets)} ticket(s) in “{configuration.notion.state('ready')}”, "
+            "in the order they will run"
+        )
     for position, ticket in enumerate(tickets, 1):
         relation = notion.read(ticket.page, configuration.notion.prop("project")) or []
         project, kind = "?", ""
@@ -115,6 +121,16 @@ def command_list(args: argparse.Namespace) -> int:
         ]
         tail = " · ".join([part for part in [project, kind, *badges] if part])
         print(f"  {position}. {ticket.title}\n     {DIM}{tail}{RESET}\n     {DIM}{ticket.url}{RESET}")
+
+    if waiting:
+        title(f"\n{len(waiting)} ticket(s) waiting for their date")
+        now = datetime.now().astimezone()
+        for ticket, moment in waiting:
+            delay = moment - now
+            hours = delay.total_seconds() / 3600
+            when = f"in {hours:.0f} h" if hours < 48 else f"in {delay.days} days"
+            stamp = moment.strftime("%Y-%m-%d %H:%M")
+            print(f"  {ticket.title}\n     {DIM}{stamp} — {when}{RESET}")
     return 0
 
 
@@ -374,6 +390,7 @@ def command_doctor(args: argparse.Namespace) -> int:
         ("priority", "select", "which ready ticket runs first"),
         ("cost", "number", "what the run cost, written back"),
         ("duration", "number", "how long it took, in minutes"),
+        ("due", "date", "hold the ticket until that date, then run it"),
     )
     for key, preferred, why in optional:
         name = configuration.notion.prop(key)

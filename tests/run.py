@@ -304,6 +304,72 @@ def blocks_are_chunked_below_notions_append_limit():
     assert markdown.chunked([]) == [[]]
 
 
+# -- scheduling --------------------------------------------------------------
+
+
+@case
+def a_bare_date_means_the_start_of_that_day_here():
+    """Not midnight UTC: a ticket dated "30 August" starts on the 30th, locally."""
+    from datetime import datetime
+
+    from ticket_runner.runner import scheduled_for
+
+    moment = scheduled_for("2026-08-30")
+    assert moment is not None and moment.tzinfo is not None
+    assert (moment.year, moment.month, moment.day, moment.hour) == (2026, 8, 30, 0)
+    assert moment.utcoffset() == datetime.now().astimezone().utcoffset()
+
+
+@case
+def a_date_with_a_time_keeps_its_offset():
+    from ticket_runner.runner import scheduled_for
+
+    moment = scheduled_for("2026-08-30T14:30:00.000+02:00")
+    assert moment is not None
+    assert (moment.hour, moment.minute) == (14, 30)
+    assert moment.utcoffset().total_seconds() == 7200
+
+
+@case
+def an_unreadable_date_never_holds_a_ticket_back():
+    """A value the runner cannot parse must not silently freeze a ticket."""
+    from ticket_runner.runner import scheduled_for
+
+    assert scheduled_for(None) is None
+    assert scheduled_for("") is None
+    assert scheduled_for("bientôt") is None
+
+
+@case
+def notion_truncates_a_datetime_to_the_minute():
+    """Not our doing, but it decides how precise scheduling can be.
+
+    Sending 14:48:27 stores 14:48:00, so a ticket fires at the top of the minute
+    it names. Worth pinning: a future change here would look like the runner
+    firing early.
+    """
+    from ticket_runner.runner import scheduled_for
+
+    stored = scheduled_for("2026-08-28T14:48:00.000+02:00")
+    assert stored is not None and (stored.hour, stored.minute, stored.second) == (14, 48, 0)
+
+
+@case
+def a_date_range_schedules_on_its_end():
+    """Notion dates may be ranges; the runner reads the moment work is due."""
+    page = notion.Page(
+        id="x", url="u", title="t",
+        properties={
+            "Due": {"type": "date", "date": {"start": "2026-08-30", "end": "2026-09-02"}},
+            "Single": {"type": "date", "date": {"start": "2026-08-30", "end": None}},
+            "Empty": {"type": "date", "date": None},
+        },
+    )
+    assert notion.read(page, "Due") == "2026-09-02"
+    assert notion.read(page, "Single") == "2026-08-30"
+    assert notion.read(page, "Empty") is None
+
+
 # -- runner ------------------------------------------------------------------
 
 

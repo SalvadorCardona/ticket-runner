@@ -165,8 +165,24 @@ presence of each status — and names whichever of those was missed.
 | `Model` | select | *optional* — `opus`, `sonnet`, `haiku`. This ticket's model, over `runner.model` |
 | `Cost` | number | *optional* — written back, in dollars |
 | `Duration` | number | *optional* — written back, in minutes |
+| `Due Date` | date | *optional* — **hold the ticket until that moment**, then run it |
 
-The last four are optional in the strict sense: a database without them behaves exactly as
+`Due Date` is what turns the board into a calendar. A ticket without one starts within
+seconds of reaching the ready column, so a date on it can only mean *not yet*: the runner
+leaves it alone until the moment comes, then treats it like any other. Write the release
+post on Monday, run the monthly report on the first — the ticket sits ready and waits.
+
+A bare date means the start of that day in the runner's own timezone, so a ticket dated
+30 August begins on the 30th rather than at some hour dictated by UTC. A date with a time
+is taken as written, offset included. A range starts at its end — the moment the thing is
+due. And a value the runner cannot read never holds a ticket back: a ticket is not frozen
+by a date that failed to parse.
+
+Precision is to the minute, and that limit is Notion's rather than the runner's: it stores
+`14:48:27` as `14:48`. With a ten-second cadence a ticket therefore starts within a few
+seconds of the minute you named, which is as close as the board can express.
+
+The last five are optional in the strict sense: a database without them behaves exactly as
 before, because the runner only ever writes properties the schema declares. Add them and
 you get a queue you can steer — a cheap model for a documentation ticket, an expensive one
 for a refactor — and a board that shows what each ticket cost.

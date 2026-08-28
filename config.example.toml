@@ -31,6 +31,7 @@ model = "Model"          # select: pick the model per ticket, over runner.model
 priority = "Priority"    # select: Urgent, High, Normal, Low — which one runs first
 cost = "Cost"            # number: what the run cost, written back
 duration = "Duration"    # number: how long it took, in minutes
+due = "Due Date"         # date: hold the ticket until that moment, then run it
 
 # The states that drive the whole system. Point them at whatever your board
 # calls them — `ticket-runner doctor` checks that each one really exists.

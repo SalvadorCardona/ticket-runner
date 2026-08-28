@@ -110,6 +110,7 @@ _DEFAULT_PROPERTIES = {
     "priority": "Priority",    # which ready ticket goes first
     "cost": "Cost",            # written back, in dollars
     "duration": "Duration",    # written back, in minutes
+    "due": "Due Date",         # hold the ticket until that moment, then run it
 }
 
 # Highest first. Anything else — including an empty cell — sorts as normal.
