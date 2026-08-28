@@ -119,6 +119,7 @@ _DEFAULT_PROPERTIES = {
     "cost": "Cost",            # written back, in dollars
     "duration": "Duration",    # written back, in minutes
     "due": "Due Date",         # hold the ticket until that moment, then run it
+    "role": "Role",            # relation: which agent handles this ticket
 }
 
 # The rows the runner looks for in the workspace database, by their title.
@@ -126,6 +127,7 @@ _DEFAULT_PROPERTIES = {
 _DEFAULT_PAGES = {
     "tickets": "Master Tickets",
     "projects": "Master project",
+    "agents": "Master Agents",
     "context": "Soul",
 }
 

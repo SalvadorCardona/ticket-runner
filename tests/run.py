@@ -23,7 +23,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ticket_runner import config as C  # noqa: E402
-from ticket_runner import markdown, notion, prompt, session, workspace  # noqa: E402
+from ticket_runner import agents, markdown, notion, prompt, session, workspace  # noqa: E402
+from ticket_runner.runner import Runner  # noqa: E402
 from ticket_runner.__main__ import _names  # noqa: E402
 from ticket_runner.runner import short_id, slugify  # noqa: E402
 from ticket_runner.projects import _normalise  # noqa: E402
@@ -296,6 +297,135 @@ def a_workspace_without_a_context_page_changes_nothing():
     assert prompt.build(prompt.DOCUMENT, **common, context="   ") == prompt.build(
         prompt.DOCUMENT, **common
     ), "whitespace is not a context"
+
+
+# -- the role a ticket is handled by -----------------------------------------
+
+
+class _AgentClient:
+    def __init__(self, page: notion.Page | None, brief: str = "", broken: bool = False):
+        self._page, self._brief, self._broken = page, brief, broken
+
+    def page(self, page_id: str) -> notion.Page:
+        if self._page is None:
+            raise notion.NotionError("object not found")
+        return self._page
+
+    def blocks_text(self, page_id: str, depth: int = 0) -> str:
+        if self._broken:
+            raise notion.NotionError("object not found")
+        return self._brief
+
+
+def _agent_page(title: str, model: str = "") -> notion.Page:
+    properties = {"Name": {"type": "title", "title": [{"plain_text": title}]}}
+    if model:
+        properties["Model"] = {"type": "select", "select": {"name": model}}
+    return notion.Page(id="p-agent", url="", title=title, properties=properties)
+
+
+@case
+def an_agent_is_a_page_and_may_name_its_model():
+    client = _AgentClient(_agent_page("Rédacteur", "haiku"), brief="Ton direct, pas d'emoji.")
+    agent = agents.resolve(client, "p-agent")
+    assert agent.name == "Rédacteur"
+    assert agent.brief == "Ton direct, pas d'emoji."
+    assert agent.model == "haiku"
+    assert agent, "a named agent is truthy"
+
+
+@case
+def an_unreadable_agent_is_no_agent_rather_than_a_failed_ticket():
+    assert not agents.resolve(_AgentClient(None), "p-agent").name
+    # The page reads but its body does not: the role is lost, the run is not.
+    partial = agents.resolve(_AgentClient(_agent_page("Rédacteur"), broken=True), "p-agent")
+    assert partial.name == "Rédacteur" and partial.brief == ""
+    assert not agents.Agent(), "no agent at all is falsy"
+
+
+# -- the discussion on a ticket ----------------------------------------------
+
+
+class _CommentClient:
+    def __init__(self, texts: list[str], error: str = ""):
+        self._texts, self._error = texts, error
+
+    def comments(self, page_id: str) -> list[notion.Comment]:
+        if self._error:
+            raise notion.NotionError(self._error)
+        return [notion.Comment(text) for text in self._texts]
+
+
+def _runner_reading(texts: list[str], error: str = "") -> tuple[Runner, list[str]]:
+    """A Runner with its Notion replaced, and nothing else touched."""
+    runner = Runner.__new__(Runner)
+    runner.client = _CommentClient(texts, error)
+    runner.agent_label = "ticket-runner@laptop"
+    runner.quiet = True
+    ticket = type("T", (), {"page": notion.Page(id="p-ticket", url="", title="t")})()
+    return runner, runner.discussion(ticket)
+
+
+@case
+def a_question_a_run_asked_comes_back_with_its_answer():
+    _, lines = _runner_reading([
+        "ticket-runner@laptop — blocked.\nThe ticket does not say which header.\n\n"
+        "Session: `abc-123` — `claude --resume abc-123`\nLog: /home/x/log.jsonl",
+        "Celui du dashboard, pas du site public.",
+    ])
+    assert lines == [
+        "a previous run: blocked. The ticket does not say which header.",
+        "the ticket's author: Celui du dashboard, pas du site public.",
+    ], lines
+    assert "Session:" not in "".join(lines), "the machinery of a past run is not context"
+
+
+@case
+def a_long_discussion_is_cut_from_the_oldest_end():
+    _, lines = _runner_reading([f"comment number {index} " + "x" * 300 for index in range(20)])
+    assert len(lines) <= 10, "at most the last ten"
+    assert sum(len(line) for line in lines) <= 2000
+    assert "number 19" in lines[-1], "the newest survives"
+    assert "number 0" not in " ".join(lines), "the oldest is what goes"
+
+
+@case
+def comments_the_integration_cannot_read_are_not_a_failure():
+    _, lines = _runner_reading([], error="403 API token does not have access")
+    assert lines == []
+
+
+@case
+def the_role_sits_between_the_project_and_the_mechanics():
+    text = prompt.build(
+        prompt.DEFAULT,
+        project="Animalink", title="t", body="b", repo="/r", branch="br", base="main", url="u",
+        context="Je suis Salvador.",
+        brief="Ton: direct.",
+        agent_name="Rédacteur",
+        agent_brief="Deux ou trois angles, toujours.",
+        comments=["the ticket's author: plutôt court."],
+    )
+    order = [text.index(mark) for mark in (
+        "b",                        # the ticket itself
+        "already been said",        # then what was said about it
+        "Je suis Salvador.",        # then the widest frame
+        "Ton: direct.",             # then the project
+        "Deux ou trois angles",     # then the role
+        "# Context",                # then the mechanics
+    )]
+    assert order == sorted(order), order
+    assert "# Your role — Rédacteur" in text
+
+
+@case
+def a_ticket_with_no_agent_and_no_comments_reads_as_before():
+    common = dict(
+        project="Animalink", title="t", body="b", repo="/r", branch="br", base="main", url="u"
+    )
+    bare = prompt.build(prompt.DEFAULT, **common)
+    assert "# Your role" not in bare and "already been said" not in bare
+    assert prompt.build(prompt.DEFAULT, **common, comments=[], agent_brief="  ") == bare
 
 
 # -- session outcome ---------------------------------------------------------

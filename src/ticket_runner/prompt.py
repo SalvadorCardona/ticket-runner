@@ -26,7 +26,7 @@ nobody to talk to: no one can answer a question while the session runs.
 
 {body}
 
-{context}{brief}# Context
+{comments}{context}{brief}{agent}# Context
 
 - Repository: {repo}
 - You are in a dedicated git worktree, on branch `{branch}`, created from \
@@ -65,7 +65,7 @@ your answer will be written back into the Notion ticket itself.
 
 {body}
 
-{context}{brief}# Context
+{comments}{context}{brief}{agent}# Context
 
 - Working directory: {repo} — empty and disposable, it is yours to use.
 - Notion ticket: {url}
@@ -112,6 +112,9 @@ def build(
     url: str,
     brief: str = "",
     context: str = "",
+    agent_name: str = "",
+    agent_brief: str = "",
+    comments: list[str] | None = None,
 ) -> str:
     # A ticket may have no project at all: the sentence has to read either way.
     scope = f"for the {project} project" if project else "that belongs to no project"
@@ -123,11 +126,29 @@ def build(
     # before the `# Context` block so they read as the frame, not as an
     # afterthought — and after the page above, which frames them in turn.
     heading = f"# About {project}\n\n{brief.strip()}\n\n" if brief.strip() else ""
+    # The role, narrower than the project and narrower than you: a project says
+    # where the work happens, an agent says what craft it takes.
+    role = ""
+    if agent_brief.strip():
+        role = f"# Your role — {agent_name}\n\n{agent_brief.strip()}\n\n"
+    # What was said on the ticket sits with the ticket, not with the frames:
+    # a question asked by a previous run and answered since is part of the ask.
+    discussion = ""
+    if comments:
+        discussion = (
+            "# What has already been said on this ticket\n\n"
+            "Oldest first. An earlier run may have asked a question here and been "
+            "answered since — that answer is part of what you are being asked.\n\n"
+            + "\n".join(f"- {line}" for line in comments)
+            + "\n\n"
+        )
     return template.format(
         project=project or "no project",
         scope=scope,
         context=frame,
         brief=heading,
+        agent=role,
+        comments=discussion,
         title=title,
         body=body.strip() or "(the ticket has no description: everything is in the title)",
         repo=repo,

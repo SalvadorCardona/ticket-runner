@@ -30,6 +30,7 @@ from .config import Notion
 class Workspace:
     tickets: str = ""
     projects: str = ""
+    agents: str = ""
     context: str = ""
     rows: dict[str, str] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
@@ -86,11 +87,12 @@ def resolve(client: notion.Client, settings: Notion) -> Workspace:
         )
 
     # From here on, a failure is a missing feature, never a failed run.
-    if page := row("projects"):
-        try:
-            space.projects = client.resolve_database(page)
-        except notion.NotionError as error:
-            space.warnings.append(f"projects database unreadable: {_first_line(error)}")
+    for key in ("projects", "agents"):
+        if page := row(key):
+            try:
+                setattr(space, key, client.resolve_database(page))
+            except notion.NotionError as error:
+                space.warnings.append(f"{key} database unreadable: {_first_line(error)}")
 
     if page := row("context"):
         try:

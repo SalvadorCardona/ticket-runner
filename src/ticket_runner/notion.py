@@ -30,6 +30,12 @@ class NotionError(Exception):
 
 
 @dataclass
+class Comment:
+    text: str
+    created_time: str = ""
+
+
+@dataclass
 class Page:
     id: str
     url: str
@@ -190,6 +196,30 @@ class Client:
 
     def page(self, page_id: str) -> Page:
         return _to_page(self._request("GET", f"/pages/{page_id}"))
+
+    def comments(self, page_id: str) -> list[Comment]:
+        """The discussion on a page, oldest first.
+
+        This is where a ticket gets answered. A run that ends `blocked` leaves
+        its question here, you reply, and the ticket goes back to ready — so
+        without reading this, the next run reopens the very question it asked.
+
+        Reading comments is a separate capability of a Notion integration, and
+        one that is off by default. A refusal is not a reason to fail a ticket:
+        it comes back as no comments, and the caller says so.
+        """
+        found: list[Comment] = []
+        cursor: str | None = None
+        while True:
+            suffix = f"&start_cursor={cursor}" if cursor else ""
+            payload = self._request("GET", f"/comments?block_id={page_id}&page_size=100{suffix}")
+            for item in payload.get("results", []):
+                text = "".join(part.get("plain_text", "") for part in item.get("rich_text", []))
+                if text.strip():
+                    found.append(Comment(text.strip(), item.get("created_time", "")))
+            if not payload.get("has_more"):
+                return found
+            cursor = payload.get("next_cursor")
 
     def blocks_text(self, block_id: str, depth: int = 0) -> str:
         """A page's content, flattened into something an agent can read."""

@@ -378,8 +378,9 @@ def command_doctor(args: argparse.Namespace) -> int:
                 f"“{configuration.notion.page('context')}” — {len(space.context)} characters "
                 f"in every prompt: {DIM}{first[:60]}{RESET}"
             )
-        if space.projects:
-            ok(f"“{configuration.notion.page('projects')}” → database {space.projects}")
+        for key in ("projects", "agents"):
+            if resolved := getattr(space, key):
+                ok(f"“{configuration.notion.page(key)}” → database {resolved}")
 
     title("Tickets database")
     try:
@@ -418,6 +419,7 @@ def command_doctor(args: argparse.Namespace) -> int:
         ("cost", "number", "what the run cost, written back"),
         ("duration", "number", "how long it took, in minutes"),
         ("due", "date", "hold the ticket until that date, then run it"),
+        ("role", "relation", "which agent handles the ticket; its page is the role"),
     )
     for key, preferred, why in optional:
         name = configuration.notion.prop(key)

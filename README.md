@@ -100,6 +100,7 @@ own inline database:
 Master workspace          ← the one URL you configure
 ├── Master Tickets        ← the tickets database lives inside this page
 ├── Master project        ← the projects database lives inside this one
+├── Master Agents         ← optional: the roles a ticket can be handled by
 └── Soul                  ← a plain page: who you are
 ```
 
@@ -110,6 +111,7 @@ a row and tell the runner what it is now called, under `[notion.pages]`:
 [notion.pages]
 tickets = "Master Tickets"   # required
 projects = "Master project"  # optional — only `doctor` uses it
+agents = "Master Agents"     # optional — see below
 context = "Soul"             # optional — see below
 ```
 
@@ -174,7 +176,7 @@ presence of each status — and names whichever of those was missed.
 | `runner.document_prompt_file` | `""` | the same, for tickets with no repository |
 | `notion.workspace` | `""` | the database whose rows are your master pages |
 | `notion.tickets_database` | `""` | one database instead of a workspace; wins when both are set |
-| `[notion.pages]` | | which row of the workspace is the tickets database, the projects database, the context page |
+| `[notion.pages]` | | which row of the workspace is the tickets database, the projects database, the agents database, the context page |
 | `[notion.properties]` | | if your columns have other names |
 | `[notion.status]` | | if your statuses have other names |
 | `[projects]` | | `"Notion name" = "/path"` for repositories that cannot be guessed |
@@ -190,11 +192,12 @@ presence of each status — and names whichever of those was missed.
 | `Name` | title | what the agent must do, in one line |
 | `Status` | status | **what drives the whole system** — see below |
 | `Project` | relation | *optional* — to the projects database: decides the repository |
-| `Agent` | text | filled by the runner: who took the ticket |
+| `Role` | relation | *optional* — to the agents database: decides who handles it |
+| `Agent` | text | filled by the runner: which machine took the ticket |
 | `Pull Request` | URL | filled by the runner at the end |
 | `Session` | **URL** or text | written as soon as the ticket is claimed. Make it a URL and it becomes a link that opens the session; leave it text and it holds the bare ID |
 | `Priority` | select | *optional* — `Urgent`, `High`, `Normal`, `Low`. Decides which ready ticket runs first |
-| `Model` | select | *optional* — `opus`, `sonnet`, `haiku`. This ticket's model, over `runner.model` |
+| `Model` | select | *optional* — `opus`, `sonnet`, `haiku`. This ticket's model, over its agent's and over `runner.model` |
 | `Cost` | number | *optional* — written back, in dollars |
 | `Duration` | number | *optional* — written back, in minutes |
 | `Due Date` | date | *optional* — **hold the ticket until that moment**, then run it |
@@ -346,6 +349,48 @@ change the answer on a ticket of *any* project.
 The page is optional. Without it the runner behaves exactly as before, and says so once
 per run rather than leaving you to wonder.
 
+### The agents database — who handles the ticket
+
+A project says *where* the work happens. It says nothing about **who** does it, and
+“fix this regression” and “write this announcement” are not the same craft on the same
+repository.
+
+Add a `Role` relation column on your tickets, pointing at a database of agents. One row
+per role, and **the body of its page is the role**, exactly as a project page is its brief:
+
+> **Dev front**
+> Tu touches au CSS avant le JS. Aucune dépendance nouvelle sans raison écrite.
+> Un test qui reproduit le bug avant le correctif.
+
+An agent row may also carry a `Model`, which is how a rewriting ticket runs on a cheaper
+model than a refactor. The narrowest choice wins:
+
+```
+the ticket's Model  →  its agent's Model  →  runner.model
+```
+
+The role is read after your context page and after the project's brief, and **it can never
+loosen the frame**: committing without pushing, and answering `RESULT: blocked` rather than
+guessing, live in the template, above anything a page can say.
+
+All of it is optional twice over: a tickets database with no `Role` column behaves exactly
+as it always has, and a ticket that names no agent runs on the runner's own prompt.
+
+### The discussion on a ticket
+
+The comments of a ticket go into the prompt, oldest first, which closes the loop the
+`blocked` status opens: a run asks a question, you answer it in a comment, you move the
+ticket back to ready — and the next run reads your answer instead of asking again.
+
+The runner's own reports are included too, trimmed to their verdict and reason; the branch
+names, session IDs and log paths they carry are of no use to a session. At most the last
+ten comments and 2000 characters, newest kept, so a ticket that has been round three times
+does not spend more of its prompt on its own history than on the work.
+
+This needs one capability the integration does not have by default:
+[notion.so/my-integrations](https://www.notion.so/my-integrations) → your integration →
+**Capabilities** → *Read comments*. Without it the runner says so once and carries on.
+
 ### The statuses
 
 This is where your control over the system lives. The names are yours — map them under
@@ -446,6 +491,8 @@ often.
 | `object not found` on the database | the page is not shared with the integration (`···` → Connections). Sharing the page that holds the workspace covers everything under it |
 | “no page named … in the workspace” | the row is called something else. `doctor` lists what it did find — rename the row, or set `[notion.pages]` |
 | the agent knows nothing about you | no `Soul` row in the workspace, or the page is empty. `doctor` says which, and the run says so once |
+| “comments not readable” | the integration lacks *Read comments* (my-integrations → Capabilities). The ticket runs, without its discussion |
+| a ticket ignores its agent | the `Role` column is missing or is not a relation — `doctor` names it |
 | “project not found on disk” | the project names a repository that is not there: fix its `path` or `github` property, or add `"Notion name" = "/path"` under `[projects]` |
 | a ticket became a document when you wanted code | its project names no repository. Give the project page a `path` or a `github` |
 | “nothing to work from” | the ticket has neither a title nor a description — a page left on the bare template counts as empty |
@@ -521,7 +568,9 @@ database someone else can edit — it is a different proposition. What makes it 
 - a **narrowly scoped `GH_TOKEN`**, so the worst case stays inside the repositories the
   runner already writes to;
 - **editing rights on the tickets database limited** to the people you would let run a
-  command on that machine — which is the honest way to read that permission.
+  command on that machine — which is the honest way to read that permission. Since the
+  comments of a ticket reach the prompt too, that now includes **comment-only**
+  collaborators: on a shared board, they are the same permission.
 
 Setting `permission_mode = "acceptEdits"` narrows it further, at the cost of sessions that
 stall the first time one needs to run the test suite. It is the right setting for a shared
