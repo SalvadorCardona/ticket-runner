@@ -15,15 +15,17 @@ reaches Notion as a wall of text, a summary that keeps its verdict.
 
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import traceback
+from contextlib import contextmanager
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ticket_runner import config as C  # noqa: E402
-from ticket_runner import agents, markdown, notion, prompt, session, workspace  # noqa: E402
+from ticket_runner import agents, markdown, notion, prompt, session, update, workspace  # noqa: E402
 from ticket_runner.runner import Runner  # noqa: E402
 from ticket_runner.__main__ import _names  # noqa: E402
 from ticket_runner.runner import short_id, slugify  # noqa: E402
@@ -129,6 +131,15 @@ def the_interval_never_reaches_systemd_as_zero():
     assert _config("[runner]\ninterval_seconds = 0\n").runner.interval_seconds == 1
     assert _config("[runner]\ninterval_seconds = 10\n").runner.interval_seconds == 10
     assert _config("").runner.interval_seconds == 1800
+
+
+@case
+def the_update_check_never_runs_more_than_once_a_minute():
+    """At a ten-second cadence, an unbounded value would fetch six times a minute."""
+    assert _config("").runner.update_interval_seconds == 3600
+    assert _config("[runner]\nupdate_interval_seconds = 5\n").runner.update_interval_seconds == 60
+    assert _config("").runner.auto_update is True
+    assert _config("[runner]\nauto_update = false\n").runner.auto_update is False
 
 
 @case
@@ -658,6 +669,64 @@ def a_date_range_schedules_on_its_end():
     assert notion.read(page, "Due") == "2026-09-02"
     assert notion.read(page, "Single") == "2026-08-30"
     assert notion.read(page, "Empty") is None
+
+
+# -- staying up to date ------------------------------------------------------
+
+
+@contextmanager
+def _state_home():
+    """A throwaway XDG_STATE_HOME, for what the runner keeps between two runs."""
+    previous = os.environ.get("XDG_STATE_HOME")
+    os.environ["XDG_STATE_HOME"] = tempfile.mkdtemp()
+    try:
+        yield Path(os.environ["XDG_STATE_HOME"]) / "ticket-runner"
+    finally:
+        if previous is None:
+            os.environ.pop("XDG_STATE_HOME", None)
+        else:
+            os.environ["XDG_STATE_HOME"] = previous
+
+
+@case
+def an_update_needs_both_sides_to_be_known():
+    """A check that could not reach the remote must not look like a new version.
+
+    Everything else here fails quietly, so `stale` is the one place where a
+    missing answer would otherwise turn into a reinstall.
+    """
+    assert update.Status(current="a" * 40, latest="b" * 40).stale
+    assert not update.Status(current="a" * 40, latest="a" * 40).stale
+    assert not update.Status(current="a" * 40).stale
+    assert not update.Status(reason="git fetch: could not resolve host").stale
+    assert not update.Status().stale
+
+
+@case
+def the_check_is_hourly_rather_than_once_per_run():
+    """At a ten-second cadence the difference is 360 git fetches an hour."""
+    with _state_home():
+        assert update.due(3600), "an installation never checked is due at once"
+        update.remember(update.Status(current="a" * 40, latest="a" * 40))
+        assert not update.due(3600), "and not again before the interval is out"
+        assert update.due(0)
+        assert update.last_check() > 0
+
+
+@case
+def a_stamp_that_cannot_be_read_makes_the_check_due():
+    with _state_home() as state_home:
+        state_home.mkdir(parents=True)
+        (state_home / "update.json").write_text("half a line of jso")
+        assert update.last_check() == 0.0
+        assert update.due(3600)
+
+
+@case
+def a_copy_is_told_apart_from_a_clone_before_anything_is_fetched():
+    """An install made with TR_SRC has no remote: a reason, not a failure."""
+    status = update._look(Path(tempfile.mkdtemp()))
+    assert not status.stale and "copy" in status.reason
 
 
 # -- runner ------------------------------------------------------------------

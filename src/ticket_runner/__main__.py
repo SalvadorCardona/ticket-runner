@@ -18,6 +18,7 @@ from pathlib import Path
 from datetime import datetime
 
 from . import __version__, config as config_module, git, notion, session, state
+from . import update as update_module
 from . import workspace as workspace_module
 from .projects import Resolver
 from .runner import Runner
@@ -333,6 +334,20 @@ def command_doctor(args: argparse.Namespace) -> int:
             "gh authenticated" if authed.returncode == 0 else "gh not authenticated: gh auth login"
         )
 
+    title("Version")
+    status = update_module.check()
+    if status.reason:
+        warn(status.reason)
+    elif status.stale:
+        warn(f"{status.current[:8]} installed, {status.latest[:8]} available")
+    else:
+        ok(f"newest version installed ({status.current[:8]})")
+    if configuration.runner.auto_update:
+        every = configuration.runner.update_interval_seconds
+        print(f"  {DIM}checked by a run every {every}s (runner.auto_update){RESET}")
+    else:
+        print(f"  {DIM}runner.auto_update = false — ticket-runner update to do it by hand{RESET}")
+
     title("Repositories")
     root = configuration.runner.workspace_root
     if root.is_dir():
@@ -500,26 +515,29 @@ def command_clean(args: argparse.Namespace) -> int:
     return 0
 
 
-def _write_units(interval_seconds: int) -> Path:
-    """Regenerate the systemd units from the templates shipped with the app.
-
-    The interval lives in the configuration, not in the unit: changing a number
-    and running `ticket-runner enable` is a better story than reinstalling.
-    """
-    app = Path(__file__).resolve().parents[2]
-    units = Path.home() / ".config" / "systemd" / "user"
-    units.mkdir(parents=True, exist_ok=True)
-    binary = shutil.which("ticket-runner") or str(Path.home() / ".local/bin/ticket-runner")
-
-    service = (app / "systemd" / "ticket-runner.service.in").read_text()
-    service = service.replace("@BIN@", binary).replace("@PATH@", os.environ.get("PATH", ""))
-    (units / "ticket-runner.service").write_text(service)
-
-    timer = (app / "systemd" / "ticket-runner.timer.in").read_text()
-    timer = timer.replace("@INTERVAL@", str(interval_seconds))
-    timer = timer.replace("@ACCURACY@", "1s" if interval_seconds < 60 else "30s")
-    (units / "ticket-runner.timer").write_text(timer)
-    return units
+def command_update(args: argparse.Namespace) -> int:
+    """What a run does once an hour, on demand and out loud."""
+    status = update_module.check()
+    if status.reason:
+        bad(status.reason)
+        return 1
+    if not status.stale:
+        ok(f"already on the newest version ({status.current[:8]})")
+        return 0
+    print(f"  {status.current[:8]} → {status.latest[:8]}")
+    if args.check:
+        print(f"  {DIM}ticket-runner update to apply it{RESET}")
+        return 0
+    try:
+        interval = config_module.load().runner.interval_seconds
+    except config_module.ConfigError:
+        interval = config_module.Runner().interval_seconds
+    error = update_module.apply(status, interval)
+    if error:
+        bad(error)
+        return 1
+    ok(f"updated to {status.latest[:8]}")
+    return 0
 
 
 def command_open(args: argparse.Namespace) -> int:
@@ -545,7 +563,7 @@ def command_timer(args: argparse.Namespace) -> int:
     except config_module.ConfigError as error:
         print(f"{RED}error:{RESET} {error}", file=sys.stderr)
         return 2
-    _write_units(interval)
+    update_module.write_units(interval)
     subprocess.call(["systemctl", "--user", "daemon-reload"])
     code = subprocess.call(
         ["systemctl", "--user", "enable", "--now", "ticket-runner.timer"]
@@ -597,6 +615,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     configure = subparsers.add_parser("config", help="open the configuration")
     configure.set_defaults(function=command_config)
+
+    updating = subparsers.add_parser("update", help="move the installation to the newest version")
+    updating.add_argument("--check", action="store_true", help="say what is available, change nothing")
+    updating.set_defaults(function=command_update)
 
     opener = subparsers.add_parser("open", help="open a ticket-runner:// session link")
     opener.add_argument("uri", help="ticket-runner://session/<id>?cwd=<path>")

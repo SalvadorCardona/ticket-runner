@@ -54,6 +54,23 @@ which tells you, line by line, what is still missing.
 Running the same command again **updates** the installation: the code is replaced, your
 configuration is kept.
 
+You will rarely need to. The installer clones the repository into
+`~/.local/share/ticket-runner/app`, which is what lets the runner answer *"am I still on
+the latest version"* with one `git fetch`. A run looks at the clock before it looks at the
+tickets: **once an hour** it asks, and if the answer is no it updates itself — the
+launcher and the systemd units included — before claiming a single ticket. The change
+therefore lands between two sessions, never inside one, and the new code takes over on the
+next pass.
+
+```sh
+ticket-runner update --check   # what is available, changing nothing
+ticket-runner update           # apply it now
+```
+
+`runner.auto_update = false` turns the automatic half off; `runner.update_interval_seconds`
+changes the hour. An installation made from a local copy (`TR_SRC=.`) has no remote to
+compare itself against: it says so once per check and carries on.
+
 > **Requirements** — Linux with systemd in the user session, `python3` >= 3.11 (no
 > dependencies to install, everything is in the standard library), `git`,
 > [Claude Code](https://claude.com/claude-code), and `gh` authenticated for pull requests.
@@ -62,7 +79,8 @@ configuration is kept.
 | --- | --- |
 | `TR_INTERVAL=10` | seconds between two runs (default: 1800, i.e. 30 min) |
 | `TR_NO_SERVICE=1` | no timer: you run `ticket-runner run` yourself |
-| `TR_SRC=.` | install from a local clone, without the network |
+| `TR_SRC=.` | install from a local clone, without the network — and without self-updating |
+| `TR_REF=v1.2` | install a tag instead of `main`, and stay on it |
 
 ---
 
@@ -170,6 +188,8 @@ presence of each status — and names whichever of those was missed.
 | `runner.open_pull_request` | `true` | `false`: the branch is pushed, without a PR |
 | `runner.keep_worktree_on_failure` | `true` | keep enough around to understand a failure |
 | `runner.notify` | `true` | one desktop notification per finished ticket |
+| `runner.auto_update` | `true` | a run keeps the installation on the latest version |
+| `runner.update_interval_seconds` | `3600` | how often a run asks; one minute is the floor |
 | `runner.log_retention_days` | `14` | drop older session logs; `0` keeps everything |
 | `runner.attach_sessions` | `true` | file each session under its project, so `claude --resume` there lists it |
 | `runner.prompt_file` | `""` | your own prompt template, for repository tickets |
@@ -437,6 +457,8 @@ ticket-runner history      # what has been handled, with the pull requests
 ticket-runner projects     # Notion project → local repository mapping
 ticket-runner doctor       # full diagnostics
 ticket-runner clean --force          # remove worktrees and scratch dirs left by failures
+ticket-runner update       # move the installation to the newest version
+ticket-runner update --check         # what is available, changing nothing
 ticket-runner enable       # apply interval_seconds and start the timer
 ticket-runner disable      # stop the timer
 ```
@@ -499,6 +521,7 @@ often.
 | a ticket sat in *In progress* forever | it no longer can: the next run puts back any ticket this host claimed while no run was alive |
 | no desktop notification | `notify-send` is missing, or the service has no session bus. `runner.notify = false` silences the attempt |
 | the timer does not fire with no session open | `sudo loginctl enable-linger $USER` |
+| the version never moves | the install directory is a copy, not a clone: an installation older than self-updating, or one made with `TR_SRC`. `doctor` says which — run `install.sh` again |
 | branch pushed, no pull request | `gh` cannot reach its credentials from a systemd service — locked keyring. Use `gh auth login` with a token, or set `GH_TOKEN` in the unit |
 | `claude: command not found` in the journal | the PATH baked into the unit predates a node version change: run `install.sh` again |
 

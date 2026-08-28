@@ -5,8 +5,10 @@
 #
 # Environment variables:
 #   TR_REPO       source repository        (default: SalvadorCardona/ticket-runner)
-#   TR_REF        branch or tag            (default: main)
-#   TR_SRC        local folder to copy     (install from a clone, no network)
+#   TR_REF        branch or tag            (default: main; a tag pins the version,
+#                                          a branch is followed by the auto-update)
+#   TR_SRC        local folder to copy     (install from a clone, no network,
+#                                          and no auto-update: there is no remote)
 #   TR_INTERVAL   seconds between runs     (default: 1800, i.e. 30 min)
 #   TR_NO_SERVICE=1   do not install the systemd timer
 set -eu
@@ -64,21 +66,22 @@ fi
 mkdir -p "$APP_DIR" "$BIN_DIR" "$CONFIG_DIR"
 if [ -n "${TR_SRC:-}" ]; then
     say "Copying sources from $TR_SRC"
+    have tar || die "tar is required"
     [ -d "$TR_SRC/src/ticket_runner" ] || die "$TR_SRC does not contain src/ticket_runner"
     rm -rf "$APP_DIR"; mkdir -p "$APP_DIR"
     tar -C "$TR_SRC" --exclude='.git' --exclude='__pycache__' -cf - . | tar -C "$APP_DIR" -xf -
+    ok "sources in $APP_DIR (a copy: it will not update itself)"
 else
-    say "Downloading $TR_REPO ($TR_REF)"
-    have curl || die "curl is required"
-    have tar  || die "tar is required"
-    TMP=$(mktemp -d)
-    trap 'rm -rf "$TMP"' EXIT INT TERM
-    curl -fsSL "https://codeload.github.com/$TR_REPO/tar.gz/refs/heads/$TR_REF" -o "$TMP/src.tar.gz" \
-        || die "download failed (private repository, or no such branch?)"
-    rm -rf "$APP_DIR"; mkdir -p "$APP_DIR"
-    tar -xzf "$TMP/src.tar.gz" -C "$APP_DIR" --strip-components=1
+    # A clone rather than a tarball: it is what lets the runner answer "am I
+    # still on the latest version" with one git fetch, once an hour, and update
+    # itself when the answer is no. Shallow, because no run ever reads history.
+    say "Cloning $TR_REPO ($TR_REF)"
+    rm -rf "$APP_DIR"
+    GIT_TERMINAL_PROMPT=0 git clone --quiet --depth 1 --branch "$TR_REF" \
+        "https://github.com/$TR_REPO.git" "$APP_DIR" \
+        || die "clone failed (private repository, or no such branch?)"
+    ok "sources in $APP_DIR ($(git -C "$APP_DIR" rev-parse --short HEAD))"
 fi
-ok "sources in $APP_DIR"
 
 # --- 3. executable ----------------------------------------------------------
 PYTHON="$(command -v python3)"
@@ -190,7 +193,8 @@ printf '  Check everything is in place:\n\n    %sticket-runner doctor%s\n\n' "$B
 printf '  %sconfiguration%s  %s\n' "$DIM" "$RESET" "$CONFIG"
 printf '  %sready tickets%s  ticket-runner list\n' "$DIM" "$RESET"
 printf '  %sone run%s        ticket-runner run\n' "$DIM" "$RESET"
-printf '  %sfollow along%s   ticket-runner logs -f\n\n' "$DIM" "$RESET"
+printf '  %sfollow along%s   ticket-runner logs -f\n' "$DIM" "$RESET"
+printf '  %sversion%s        kept up to date on its own — ticket-runner update\n\n' "$DIM" "$RESET"
 case ":$PATH:" in
     *":$BIN_DIR:"*) ;;
     *) printf '  %s!%s add %s to your PATH: echo '"'"'export PATH="$HOME/.local/bin:$PATH"'"'"' >> ~/.bashrc\n\n' "$YELLOW" "$RESET" "$BIN_DIR" ;;

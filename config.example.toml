@@ -141,6 +141,20 @@ session_host = ""
 # you are not watching it; without this you discover your pull request tomorrow.
 notify = true
 
+# Keep the installation on the latest version, on its own. A run looks at the
+# clock before it looks at the tickets: once every update_interval_seconds it
+# asks the repository whether the installed code is still the newest, and brings
+# it up to date if it is not. The update happens before any ticket is claimed,
+# so it never lands in the middle of a session, and the new code takes over on
+# the next pass.
+#   ticket-runner update --check   what is available, right now
+#   ticket-runner update           apply it by hand
+# Only works on an installation made by install.sh from the repository: one made
+# from a local copy (TR_SRC=.) has no remote to compare itself against, and says
+# so once instead of updating.
+auto_update = true
+update_interval_seconds = 3600   # one hour; a minute is the floor
+
 # Drop session logs older than this. 0 keeps everything. The Notion comment
 # keeps the summary either way, and the transcript lives in ~/.claude/projects.
 log_retention_days = 14

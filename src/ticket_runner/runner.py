@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import agents, git, notion, notify, prompt as prompt_module, session, state
+from . import update as update_module
 from . import workspace as workspace_module
 from .config import PRIORITIES, Config, state_dir
 from .projects import Project, Resolver
@@ -721,7 +722,39 @@ class Runner:
 
     # -- a full run ----------------------------------------------------------
 
+    def update(self) -> None:
+        """Once an hour, make sure the installed code is still the newest.
+
+        Here rather than in a timer of its own: a run already wakes up on a
+        schedule, and doing it at the top of one — under the run lock, before a
+        single ticket is claimed — is what makes an update land between two
+        sessions instead of underneath one. The new code takes over on the next
+        pass.
+
+        Nothing here can fail a run: an unreachable remote, an installation made
+        from a copy, a refused write are all one line and then the tickets.
+        """
+        if not self.config.runner.auto_update or self.dry_run:
+            return
+        if not update_module.due(self.config.runner.update_interval_seconds):
+            return
+        status = update_module.check()
+        if status.reason:
+            self.say(f"  ! version not checked: {status.reason}")
+            return
+        if not status.stale:
+            return
+        short = f"{status.current[:8]} → {status.latest[:8]}"
+        self.say(f"  ↑ a newer version is out ({short}) — updating")
+        error = update_module.apply(status, self.config.runner.interval_seconds)
+        if error:
+            self.say(f"  ! update failed: {error}")
+            return
+        self.say("    updated — the next run uses it")
+        self._notify("ticket-runner updated", short)
+
     def tick(self, *, limit: int | None = None, reference: str = "") -> list[dict]:
+        self.update()
         if reference:
             tickets = [self.fetch_one(reference)]
             self.say(f"Requested ticket: {tickets[0].title}")
