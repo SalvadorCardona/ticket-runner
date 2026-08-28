@@ -25,8 +25,8 @@ In progress   ◀───────────┤
                           │
                           └─ has none ──────────▶  scratch dir, ANSWER.md
                                                    published as Notion blocks ──▶  the page itself
-In review     ◀───────────
-Done          ◀───────────  once you merge that pull request
+In review     ◀───────────  a pull request is waiting for you
+Done          ◀───────────  once you merge it — or straight away, for a document
 ```
 
 Which of the two you get is decided by the project, not by a setting: a project that names
