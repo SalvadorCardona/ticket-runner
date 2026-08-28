@@ -41,6 +41,18 @@ def title(message: str) -> None:
     print(f"{BOLD}{message}{RESET}")
 
 
+def _names(reference: str, filename: str) -> bool:
+    """Does this log belong to that ticket, however the ID was pasted?
+
+    A full ID, a dashed one, a URL, or just the short form all have to work —
+    log files are named by the ticket's *last* eight characters, which is not
+    what someone copying an ID from Notion has in hand.
+    """
+    probe = reference.strip().rstrip("/").rsplit("/", 1)[-1].rsplit("-", 1)[-1].replace("-", "")
+    forms = {probe, probe[-8:]} if len(probe) >= 8 else {probe}
+    return any(form and form in filename for form in forms)
+
+
 def _colour(status: str) -> str:
     """Blocked is not a failure: it is a ticket waiting for you."""
     return {"done": GREEN, "failed": RED, "blocked": YELLOW}.get(status, DIM)
@@ -190,7 +202,7 @@ def command_logs(args: argparse.Namespace) -> int:
         return 0
     target = logs[-1]
     if args.ticket:
-        matches = [path for path in logs if args.ticket[:8] in path.name]
+        matches = [path for path in logs if _names(args.ticket, path.name)]
         if not matches:
             print(f"No log for {args.ticket}", file=sys.stderr)
             return 1
@@ -345,6 +357,8 @@ def command_doctor(args: argparse.Namespace) -> int:
 
     title("Model")
     ok(f"claude: {session.available() or 'missing'}")
+    interval = configuration.runner.interval_seconds
+    print(f"  {DIM}one run every {interval}s (ticket-runner enable to apply a change){RESET}")
     print(f"  {DIM}permission_mode = {configuration.runner.permission_mode}{RESET}")
 
     if problems:
@@ -387,12 +401,60 @@ def command_clean(args: argparse.Namespace) -> int:
     return 0
 
 
+def _write_units(interval_seconds: int) -> Path:
+    """Regenerate the systemd units from the templates shipped with the app.
+
+    The interval lives in the configuration, not in the unit: changing a number
+    and running `ticket-runner enable` is a better story than reinstalling.
+    """
+    app = Path(__file__).resolve().parents[2]
+    units = Path.home() / ".config" / "systemd" / "user"
+    units.mkdir(parents=True, exist_ok=True)
+    binary = shutil.which("ticket-runner") or str(Path.home() / ".local/bin/ticket-runner")
+
+    service = (app / "systemd" / "ticket-runner.service.in").read_text()
+    service = service.replace("@BIN@", binary).replace("@PATH@", os.environ.get("PATH", ""))
+    (units / "ticket-runner.service").write_text(service)
+
+    timer = (app / "systemd" / "ticket-runner.timer.in").read_text()
+    timer = timer.replace("@INTERVAL@", str(interval_seconds))
+    timer = timer.replace("@ACCURACY@", "1s" if interval_seconds < 60 else "30s")
+    (units / "ticket-runner.timer").write_text(timer)
+    return units
+
+
+def command_open(args: argparse.Namespace) -> int:
+    """Handle a ticket-runner:// link. The desktop calls this on a click."""
+    try:
+        return session.open_link(args.uri)
+    except (ValueError, FileNotFoundError) as error:
+        print(f"{RED}error:{RESET} {error}", file=sys.stderr)
+        return 1
+
+
 def command_timer(args: argparse.Namespace) -> int:
     if not shutil.which("systemctl"):
         print("systemd not available", file=sys.stderr)
         return 1
-    action = ["enable", "--now"] if args.command == "enable" else ["disable", "--now"]
-    return subprocess.call(["systemctl", "--user", *action, "ticket-runner.timer"])
+    if args.command == "disable":
+        return subprocess.call(
+            ["systemctl", "--user", "disable", "--now", "ticket-runner.timer"]
+        )
+
+    try:
+        interval = config_module.load().runner.interval_seconds
+    except config_module.ConfigError as error:
+        print(f"{RED}error:{RESET} {error}", file=sys.stderr)
+        return 2
+    _write_units(interval)
+    subprocess.call(["systemctl", "--user", "daemon-reload"])
+    code = subprocess.call(
+        ["systemctl", "--user", "enable", "--now", "ticket-runner.timer"]
+    )
+    if code == 0:
+        every = f"{interval}s" if interval < 120 else f"{interval // 60} min"
+        ok(f"timer enabled — one run every {every}")
+    return code
 
 
 # -- entry point -------------------------------------------------------------
@@ -426,7 +488,7 @@ def build_parser() -> argparse.ArgumentParser:
     history.set_defaults(function=command_history)
 
     logs = subparsers.add_parser("logs", help="follow a session")
-    logs.add_argument("ticket", nargs="?", help="start of the ticket ID")
+    logs.add_argument("ticket", nargs="?", help="the ticket's ID, in any form")
     logs.add_argument("-f", "--follow", action="store_true")
     logs.add_argument("--raw", action="store_true", help="the raw JSON stream")
     logs.set_defaults(function=command_logs)
@@ -437,11 +499,18 @@ def build_parser() -> argparse.ArgumentParser:
     configure = subparsers.add_parser("config", help="open the configuration")
     configure.set_defaults(function=command_config)
 
+    opener = subparsers.add_parser("open", help="open a ticket-runner:// session link")
+    opener.add_argument("uri", help="ticket-runner://session/<id>?cwd=<path>")
+    opener.set_defaults(function=command_open)
+
     clean = subparsers.add_parser("clean", help="remove worktrees left by failures")
     clean.add_argument("--force", action="store_true")
     clean.set_defaults(function=command_clean)
 
-    for name, help_text in (("enable", "start the timer"), ("disable", "stop the timer")):
+    for name, help_text in (
+        ("enable", "apply runner.interval_seconds and start the timer"),
+        ("disable", "stop the timer"),
+    ):
         timer = subparsers.add_parser(name, help=help_text)
         timer.set_defaults(function=command_timer)
 

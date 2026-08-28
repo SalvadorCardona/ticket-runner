@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=ticket-runner session link
+Comment=Open a Claude Code session from a ticket-runner:// link
+Exec=@BIN@ open %u
+Type=Application
+NoDisplay=true
+Terminal=false
+MimeType=x-scheme-handler/ticket-runner;

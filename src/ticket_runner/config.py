@@ -57,6 +57,7 @@ class Notion:
 @dataclass
 class Runner:
     workspace_root: Path = Path.home() / "workspace"
+    interval_seconds: int = 1800
     max_concurrent: int = 2
     timeout_minutes: int = 30
     model: str = ""
@@ -67,8 +68,10 @@ class Runner:
     push: bool = True
     open_pull_request: bool = True
     keep_worktree_on_failure: bool = True
+    attach_sessions: bool = True
     dry_run: bool = False
     prompt_file: str = ""
+    document_prompt_file: str = ""
 
 
 @dataclass
@@ -164,6 +167,9 @@ def load(path: Path | None = None) -> Config:
                 str(runner_raw.get("workspace_root", defaults.workspace_root))
             )
         ),
+        # systemd refuses a zero interval, and anything below a second would
+        # only spin: one second is the floor that means anything here.
+        interval_seconds=max(1, int(runner_raw.get("interval_seconds", defaults.interval_seconds))),
         max_concurrent=max(1, int(runner_raw.get("max_concurrent", defaults.max_concurrent))),
         timeout_minutes=max(1, int(runner_raw.get("timeout_minutes", defaults.timeout_minutes))),
         model=str(runner_raw.get("model", defaults.model)).strip(),
@@ -178,8 +184,12 @@ def load(path: Path | None = None) -> Config:
         keep_worktree_on_failure=bool(
             runner_raw.get("keep_worktree_on_failure", defaults.keep_worktree_on_failure)
         ),
+        attach_sessions=bool(runner_raw.get("attach_sessions", defaults.attach_sessions)),
         dry_run=bool(runner_raw.get("dry_run", defaults.dry_run)),
         prompt_file=str(runner_raw.get("prompt_file", defaults.prompt_file)).strip(),
+        document_prompt_file=str(
+            runner_raw.get("document_prompt_file", defaults.document_prompt_file)
+        ).strip(),
     )
 
     projects = {

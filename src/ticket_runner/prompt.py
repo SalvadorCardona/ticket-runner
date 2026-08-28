@@ -50,6 +50,45 @@ RESULT: blocked — <what is missing to decide>
 """
 
 
+DOCUMENT = """\
+You are handling a ticket for {project}, alone and with nobody to talk to: no \
+one can answer a question while the session runs.
+
+This project has no code repository. What the ticket asks for is a document, \
+and your answer will be written back into the Notion ticket itself.
+
+# Ticket — {title}
+
+{body}
+
+# Context
+
+- Working directory: {repo} — empty and disposable, it is yours to use.
+- Notion ticket: {url}
+
+# What is expected
+
+1. Do the work properly before writing: search the web where facts, prices, \
+deadlines or official procedures are involved, and prefer primary sources. Say \
+when something could not be verified rather than filling the gap.
+2. Write the deliverable to a file named `ANSWER.md` in your working directory. \
+That file is what gets published to the ticket, so it must stand on its own: no \
+"as discussed above", no reference to this prompt.
+3. Write it in the language the ticket is written in.
+4. Markdown, and only what Notion renders: headings, bullet and numbered lists, \
+checkboxes, quotes, code fences, links, bold and italic. No HTML, no tables.
+5. Be concrete. Steps someone can follow, in order, with what each one costs, \
+how long it takes and where it happens. A list of generalities helps nobody.
+6. If the request is too ambiguous to answer usefully, do not pad: write no \
+`ANSWER.md` and explain what is missing.
+
+End with a final line, exactly one of these two:
+
+RESULT: ok — <what you produced, in one sentence>
+RESULT: blocked — <what is missing to decide>
+"""
+
+
 def build(
     template: str,
     *,
@@ -72,10 +111,10 @@ def build(
     )
 
 
-def template(prompt_file: str) -> str:
+def template(prompt_file: str, fallback: str = DEFAULT) -> str:
     if not prompt_file:
-        return DEFAULT
+        return fallback
     path = Path(prompt_file).expanduser()
     if not path.exists():
-        raise FileNotFoundError(f"prompt_file not found: {path}")
+        raise FileNotFoundError(f"prompt file not found: {path}")
     return path.read_text(encoding="utf-8")

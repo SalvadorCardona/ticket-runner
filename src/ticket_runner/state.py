@@ -73,6 +73,7 @@ def history(limit: int = 20) -> list[dict]:
     return entries
 
 
-def log_file(ticket_id: str) -> Path:
+def log_file(short: str) -> Path:
+    """One log per session, named by the ticket's short id (see `short_id`)."""
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    return logs_dir() / f"{stamp}-{ticket_id[:8]}.jsonl"
+    return logs_dir() / f"{stamp}-{short}.jsonl"

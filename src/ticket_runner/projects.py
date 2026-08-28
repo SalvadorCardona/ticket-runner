@@ -26,9 +26,14 @@ SKIP = {"node_modules", "vendor", ".git", "dist", "build", ".venv", "__pycache__
 @dataclass
 class Project:
     name: str
-    path: Path
+    path: Path | None
     notion_id: str = ""
     github: str = ""
+
+    @property
+    def is_code(self) -> bool:
+        """A project with a repository is worked on in git; the others are not."""
+        return self.path is not None
 
 
 def _normalise(url: str) -> str:
@@ -90,21 +95,25 @@ class Resolver:
                 raise LookupError(f"“{name}”: {path} is not a git repository")
             return Project(name, path, page_id, github)
 
-        index = self._index()
-        if github:
-            match = index.get(_normalise(github))
-            if match:
-                return Project(name, match, page_id, github)
-            slug = _normalise(github).split("/")[-1]
-            if slug in index:
-                return Project(name, index[slug], page_id, github)
+        if not github:
+            # Nothing declares a repository, so the project does not have one:
+            # its tickets produce a document written back into Notion. Guessing
+            # from the project's name would be worse than useless here — it
+            # would silently turn a writing task into a commit on some repo that
+            # merely happens to be named alike.
+            return Project(name, None, page_id, "")
 
-        guess = index.get(name.lower().replace(" ", "-"))
-        if guess:
-            return Project(name, guess, page_id, github)
+        index = self._index()
+        match = index.get(_normalise(github))
+        if match:
+            return Project(name, match, page_id, github)
+        slug = _normalise(github).split("/")[-1]
+        if slug in index:
+            return Project(name, index[slug], page_id, github)
 
         raise LookupError(
-            f"“{name}”: no repository found under {self._root}"
-            + (f" for {github}" if github else " (the github property is empty)")
-            + f'\nAdd  "{name}" = "/path/to/the/repo"  under [projects].'
+            f"“{name}”: {github} is declared but no matching repository exists "
+            f"under {self._root}"
+            + f'\nAdd  "{name}" = "/path/to/the/repo"  under [projects], or clear '
+            "the project's github property to make it a document project."
         )

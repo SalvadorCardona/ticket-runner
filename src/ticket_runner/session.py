@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -22,6 +23,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import parse_qs, quote, urlparse
 
 
 @dataclass
@@ -31,6 +33,7 @@ class Outcome:
     session_id: str
     summary: str
     log: Path
+    answer: str = ""
     error: str = ""
     cost_usd: float = 0.0
     turns: int = 0
@@ -140,6 +143,7 @@ def run(
             session_id=session_id,
             summary="",
             log=log,
+            answer="",
             error=f"session killed after {timeout_minutes} min",
             seconds=seconds,
         )
@@ -157,10 +161,121 @@ def run(
         session_id=str(final.get("session_id") or session_id),
         summary=_summary(answer),
         log=log,
+        answer=answer,
         error=error,
         cost_usd=float(final.get("total_cost_usd") or 0.0),
         turns=int(final.get("num_turns") or 0),
         seconds=seconds,
+    )
+
+
+PROJECTS = Path.home() / ".claude" / "projects"
+
+
+def project_key(path: Path) -> str:
+    """The folder Claude Code files a session under, for a given directory.
+
+    It slugifies the working directory: every `/` and `.` becomes `-`. So
+    /home/me/work/app is `-home-me-work-app`, and a session started inside a
+    disposable worktree is filed under the worktree, not the repository — which
+    is why `/resume` in the repository never shows it.
+    """
+    return re.sub(r"[/.]", "-", str(path))
+
+
+def relocate(session_id: str, destination: Path) -> Path | None:
+    """Move a finished session's transcript under `destination`'s project folder.
+
+    A ticket runs in a worktree that is deleted afterwards, so its session ends
+    up filed under a directory that no longer exists — resumable by ID, but
+    invisible in the repository's session picker. Moving the transcript puts it
+    where you would look for it: `claude --resume` inside the repository lists
+    it beside your own sessions.
+
+    This reaches into Claude Code's own storage, so it is written to fail
+    quietly: the transcript is located by globbing rather than by guessing where
+    it was, and anything unexpected leaves the session exactly where it is,
+    still resumable by its identifier.
+    """
+    try:
+        matches = list(PROJECTS.glob(f"*/{session_id}.jsonl"))
+        if not matches:
+            return None
+        source = matches[0]
+        target_dir = PROJECTS / project_key(destination)
+        if source.parent == target_dir:
+            return source
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / source.name
+        shutil.move(str(source), str(target))
+        try:
+            source.parent.rmdir()  # only if the ticket left nothing else behind
+        except OSError:
+            pass
+        return target
+    except (OSError, ValueError):
+        return None
+
+
+SCHEME = "ticket-runner"
+TERMINALS = (
+    ("gnome-terminal", lambda cwd, args: ["gnome-terminal", f"--working-directory={cwd}", "--", *args]),
+    ("konsole", lambda cwd, args: ["konsole", "--workdir", str(cwd), "-e", *args]),
+    ("xfce4-terminal", lambda cwd, args: ["xfce4-terminal", f"--working-directory={cwd}", "-e", " ".join(args)]),
+    ("kitty", lambda cwd, args: ["kitty", "--directory", str(cwd), *args]),
+    ("alacritty", lambda cwd, args: ["alacritty", "--working-directory", str(cwd), "-e", *args]),
+    ("foot", lambda cwd, args: ["foot", "--working-directory", str(cwd), *args]),
+    ("x-terminal-emulator", lambda cwd, args: ["x-terminal-emulator", "-e", *args]),
+)
+
+
+def deep_link(session_id: str, cwd: Path | str | None = None) -> str:
+    """A clickable link that reopens this session.
+
+    Notion accepts any scheme in a URL property, and `install.sh` registers
+    `ticket-runner://` with the desktop. Clicking the Session cell of a ticket
+    therefore opens a terminal already inside the conversation — which beats
+    copying a UUID into a command by some distance.
+
+    Claude Code registers a `claude-cli://` scheme of its own, but its query
+    parameters are undocumented and a wrong guess would produce a link that
+    silently does nothing; ours does exactly what this file says it does.
+    """
+    link = f"{SCHEME}://session/{session_id}"
+    return f"{link}?cwd={quote(str(cwd), safe='/')}" if cwd else link
+
+
+def open_link(uri: str) -> int:
+    """Handle a ticket-runner:// URI by opening a terminal on that session."""
+    parsed = urlparse(uri)
+    if parsed.scheme != SCHEME:
+        raise ValueError(f"not a {SCHEME}:// link: {uri}")
+    action = parsed.netloc or parsed.path.lstrip("/").split("/")[0]
+    if action != "session":
+        raise ValueError(f"unknown action “{action}” — expected {SCHEME}://session/<id>")
+    session_id = parsed.path.strip("/").split("/")[-1]
+    if not session_id:
+        raise ValueError("no session identifier in the link")
+    cwd = (parse_qs(parsed.query).get("cwd") or [str(Path.home())])[0]
+    if not Path(cwd).is_dir():
+        cwd = str(Path.home())
+
+    binary = available()
+    if not binary:
+        raise FileNotFoundError("claude not found in PATH")
+    command = [binary, "--resume", session_id]
+
+    preferred = os.environ.get("TICKET_RUNNER_TERMINAL", "")
+    candidates = list(TERMINALS)
+    if preferred:
+        candidates.insert(0, (preferred, lambda cwd, args, p=preferred: [p, "-e", *args]))
+    for name, build in candidates:
+        if shutil.which(name):
+            # Detached: the click must not keep the desktop handler alive.
+            subprocess.Popen(build(cwd, command), start_new_session=True)
+            return 0
+    raise FileNotFoundError(
+        "no terminal emulator found — set TICKET_RUNNER_TERMINAL to the one you use"
     )
 
 

@@ -225,6 +225,21 @@ class Client:
         if properties:
             self._request("PATCH", f"/pages/{page_id}", {"properties": properties})
 
+    def append_markdown(self, page_id: str, markdown: str) -> int:
+        """Append markdown to a page, as real Notion blocks. Returns the count.
+
+        Appending, never replacing: the ticket's own description is what the
+        agent was asked to work from, and destroying it to make room for the
+        answer would be a poor trade.
+        """
+        from . import markdown as converter
+
+        blocks = converter.to_blocks(markdown)
+        for batch in converter.chunked(blocks):
+            if batch:
+                self._request("PATCH", f"/blocks/{page_id}/children", {"children": batch})
+        return len(blocks)
+
     def comment(self, page_id: str, text: str) -> None:
         self._request(
             "POST",

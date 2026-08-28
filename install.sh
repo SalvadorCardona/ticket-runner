@@ -7,13 +7,13 @@
 #   TR_REPO       source repository        (default: SalvadorCardona/ticket-runner)
 #   TR_REF        branch or tag            (default: main)
 #   TR_SRC        local folder to copy     (install from a clone, no network)
-#   TR_INTERVAL   minutes between runs     (default: 30)
+#   TR_INTERVAL   seconds between runs     (default: 1800, i.e. 30 min)
 #   TR_NO_SERVICE=1   do not install the systemd timer
 set -eu
 
 TR_REPO="${TR_REPO:-SalvadorCardona/ticket-runner}"
 TR_REF="${TR_REF:-main}"
-TR_INTERVAL="${TR_INTERVAL:-30}"
+TR_INTERVAL="${TR_INTERVAL:-1800}"
 
 APP_DIR="$HOME/.local/share/ticket-runner/app"
 BIN_DIR="$HOME/.local/bin"
@@ -125,15 +125,51 @@ PY
     fi
 fi
 
-# --- 5. timer ---------------------------------------------------------------
+# --- 5. clickable session links ---------------------------------------------
+# Registers ticket-runner:// with the desktop, so the Session cell of a ticket
+# opens a terminal already inside that Claude Code session.
+DESKTOP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+if [ -d "$APP_DIR/desktop" ]; then
+    say "Registering ticket-runner:// links"
+    mkdir -p "$DESKTOP_DIR"
+    sed -e "s|@BIN@|$BIN|g" \
+        "$APP_DIR/desktop/ticket-runner-url-handler.desktop.in" \
+        > "$DESKTOP_DIR/ticket-runner-url-handler.desktop"
+    have update-desktop-database && update-desktop-database "$DESKTOP_DIR" >/dev/null 2>&1
+    if have xdg-mime; then
+        xdg-mime default ticket-runner-url-handler.desktop x-scheme-handler/ticket-runner \
+            >/dev/null 2>&1 && ok "ticket-runner:// links open a terminal on the session" \
+            || warn "could not register ticket-runner:// with the desktop"
+    fi
+fi
+
+# --- 6. timer ---------------------------------------------------------------
 if [ "${TR_NO_SERVICE:-0}" != "1" ] && have systemctl; then
-    say "Installing the timer (one run every $TR_INTERVAL min)"
+    # The interval lives in the configuration, so that changing it later is one
+    # number and "ticket-runner enable" rather than a reinstall. TR_INTERVAL
+    # only seeds it, on a configuration that does not set it yet.
+    INTERVAL=$(python3 - "$CONFIG" "$TR_INTERVAL" <<'PY'
+import pathlib, re, sys, tomllib
+path, seed = pathlib.Path(sys.argv[1]), sys.argv[2]
+text = path.read_text()
+with path.open("rb") as handle:
+    current = tomllib.load(handle).get("runner", {}).get("interval_seconds")
+if current is None:
+    text = re.sub(r"^(\[runner\]\n)", rf"\g<1>interval_seconds = {int(seed)}\n", text, count=1, flags=re.M)
+    path.write_text(text)
+    current = int(seed)
+print(int(current))
+PY
+)
+    say "Installing the timer (one run every ${INTERVAL}s)"
     mkdir -p "$UNIT_DIR"
+    ACCURACY=30s
+    [ "$INTERVAL" -lt 60 ] && ACCURACY=1s
     # The login PATH is copied into the unit: a systemd service has neither
     # ~/.local/bin nor node in its own, so it would find neither claude nor npm.
     sed -e "s|@BIN@|$BIN|g" -e "s|@PATH@|$PATH|g" \
         "$APP_DIR/systemd/ticket-runner.service.in" > "$UNIT_DIR/ticket-runner.service"
-    sed -e "s|@INTERVAL@|$TR_INTERVAL|g" \
+    sed -e "s|@INTERVAL@|$INTERVAL|g" -e "s|@ACCURACY@|$ACCURACY|g" \
         "$APP_DIR/systemd/ticket-runner.timer.in" > "$UNIT_DIR/ticket-runner.timer"
     systemctl --user daemon-reload
     systemctl --user enable --now ticket-runner.timer >/dev/null 2>&1 \
@@ -147,7 +183,7 @@ else
     warn "timer not installed — run passes by hand with “ticket-runner run”"
 fi
 
-# --- 6. summary -------------------------------------------------------------
+# --- 7. summary -------------------------------------------------------------
 printf '\n%sinstallation complete.%s\n\n' "$BOLD" "$RESET"
 printf '  Check everything is in place:\n\n    %sticket-runner doctor%s\n\n' "$BOLD" "$RESET"
 printf '  %sconfiguration%s  %s\n' "$DIM" "$RESET" "$CONFIG"

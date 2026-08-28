@@ -49,6 +49,12 @@ failed = "Draft"
 # Where to look for repositories. Projects are matched by their origin remote.
 workspace_root = "~/workspace"
 
+# Seconds between two passes. Changing this takes effect on the next
+# `ticket-runner enable`, which rewrites the systemd timer from this value.
+# A pass with nothing to do costs one Notion query, so a short interval is
+# cheap: 10 means a ticket starts being worked on within ten seconds.
+interval_seconds = 1800
+
 # Tickets handled side by side in one run. Each costs a full Claude session.
 max_concurrent = 2
 
@@ -77,10 +83,21 @@ open_pull_request = true  # gh pr create — never an automatic merge
 #   ticket-runner clean --force  to tidy up
 keep_worktree_on_failure = true
 
+# Move each finished session's transcript under the project's directory, so it
+# appears in `claude --resume` there, beside the sessions you started yourself.
+# Without this the session is still resumable by its ID, but it stays filed
+# under the disposable worktree it ran in — a directory that no longer exists.
+# Tickets with no repository are filed under workspace_root.
+attach_sessions = true
+
 dry_run = false
 
-# Your own prompt template. Empty = the runner's, which fits the general case.
+# Your own prompt templates. Empty = the runner's, which fit the general case.
+#   prompt_file           tickets on a project that has a repository
+#   document_prompt_file  tickets on a project that has none: the agent writes
+#                         ANSWER.md and the runner publishes it into the ticket
 prompt_file = ""
+document_prompt_file = ""
 
 # Projects whose repository cannot be guessed: exact Notion name = local path.
 # Without an entry here, the runner matches the project's `github` property

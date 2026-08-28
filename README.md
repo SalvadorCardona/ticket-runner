@@ -5,8 +5,9 @@
 its commits, a description, and the session link in the ticket's comments.
 
 The runner lives on your machine, in the background, across **all of your projects at
-once**: it is the ticket's `Project` relation that decides which repository it goes to
-work in.
+once**: it is the ticket's `Project` relation that decides where it goes to work. A
+project with a repository gets a pull request; a project without one gets its answer
+written straight back into the Notion ticket.
 
 ```
 Notion                    ticket-runner                     git
@@ -28,7 +29,8 @@ curl -LsSf https://raw.githubusercontent.com/SalvadorCardona/ticket-runner/main/
 
 The script checks the dependencies, installs the `ticket-runner` command into
 `~/.local/bin`, asks for your Notion token, and arms a systemd timer that picks up ready
-tickets **every 30 minutes**. Then:
+tickets **every 30 minutes** — `interval_seconds` in the configuration changes that, down
+to a few seconds if you want a ticket picked up as soon as you move it. Then:
 
 ```sh
 ticket-runner doctor
@@ -45,7 +47,7 @@ configuration is kept.
 
 | Variable | Effect |
 | --- | --- |
-| `TR_INTERVAL=15` | minutes between two runs (default: 30) |
+| `TR_INTERVAL=10` | seconds between two runs (default: 1800, i.e. 30 min) |
 | `TR_NO_SERVICE=1` | no timer: you run `ticket-runner run` yourself |
 | `TR_SRC=.` | install from a local clone, without the network |
 
@@ -113,6 +115,7 @@ presence of each status — and names whichever of those was missed.
 | Key | Default | Effect |
 | --- | --- | --- |
 | `runner.workspace_root` | `~/workspace` | where to look for repositories |
+| `runner.interval_seconds` | `1800` | seconds between two passes — `ticket-runner enable` applies a change |
 | `runner.max_concurrent` | `2` | tickets handled side by side in one run |
 | `runner.timeout_minutes` | `30` | past this, the session is killed and the ticket fails |
 | `runner.model` | `""` | `"opus"`, `"sonnet"`… empty = the CLI's default |
@@ -122,7 +125,9 @@ presence of each status — and names whichever of those was missed.
 | `runner.push` | `true` | `false`: commits stay local |
 | `runner.open_pull_request` | `true` | `false`: the branch is pushed, without a PR |
 | `runner.keep_worktree_on_failure` | `true` | keep enough around to understand a failure |
-| `runner.prompt_file` | `""` | your own prompt template |
+| `runner.attach_sessions` | `true` | file each session under its project, so `claude --resume` there lists it |
+| `runner.prompt_file` | `""` | your own prompt template, for repository tickets |
+| `runner.document_prompt_file` | `""` | the same, for tickets with no repository |
 | `[notion.properties]` | | if your columns have other names |
 | `[notion.status]` | | if your statuses have other names |
 | `[projects]` | | `"Notion name" = "/path"` for repositories that cannot be guessed |
@@ -140,7 +145,7 @@ presence of each status — and names whichever of those was missed.
 | `Project` | relation | to the projects database: decides the repository |
 | `Agent` | text | filled by the runner: who took the ticket |
 | `Pull Request` | URL | filled by the runner at the end |
-| `Session` | text | the session ID, written as soon as the ticket is claimed |
+| `Session` | **URL** or text | written as soon as the ticket is claimed. Make it a URL and it becomes a link that opens the session; leave it text and it holds the bare ID |
 
 The **body** of the ticket page is sent to the agent as the description. Write there what
 you would tell a developer who does not know the subject: what must change, where, and
@@ -158,10 +163,36 @@ ticket-runner logs <ticket id>        # a past session, rendered
 ticket-runner logs <ticket id> --raw  # the raw JSON stream
 ```
 
-`claude --resume` works from any directory, and keeps working after the worktree is gone:
-the transcript lives in `~/.claude/projects/`, not in the checkout. While a session runs,
-its worktree is also a normal repository — `git -C ~/.local/state/ticket-runner/worktrees/<name> diff`
-shows you what it has changed so far.
+**Make `Session` a URL property and its cell becomes a button.** Clicking it opens a
+terminal already inside that conversation — no identifier to copy, no directory to find.
+`install.sh` registers a `ticket-runner://` scheme with your desktop for exactly this, and
+`ticket-runner open <link>` is what runs behind the click. Which of the two you get is
+decided by the column's type in Notion, nothing to configure: a URL column gets the link,
+a text column gets the identifier.
+
+The terminal is picked from the usual suspects — GNOME Terminal, Konsole, xfce4-terminal,
+kitty, Alacritty, foot — or set `TICKET_RUNNER_TERMINAL` to yours.
+
+Every ticket is a **real Claude Code session** — not a private log format, the same
+transcript your own sessions produce. `claude --resume` works from any directory, and
+keeps working after the worktree is gone: the transcript lives in `~/.claude/projects/`,
+not in the checkout.
+
+By default they also **show up in the project's session picker**. A session started
+inside a disposable worktree would otherwise be filed under that worktree, so opening
+`claude` in the repository would never list it; when a ticket finishes, the runner moves
+its transcript under the repository's own directory instead. Open `claude` in the repo,
+pick the session, and you are inside the conversation that produced the pull request.
+Tickets with no repository are filed under `workspace_root`. Set
+`attach_sessions = false` to leave them where they ran.
+
+This one reaches into Claude Code's own storage layout, so it is written to fail quietly:
+if the layout ever changes, the move is skipped and the session stays resumable by its
+identifier, exactly as before.
+
+While a session runs, its worktree is also a normal repository —
+`git -C ~/.local/state/ticket-runner/worktrees/<name> diff` shows you what it has changed
+so far.
 
 The runner also posts a comment on the ticket when it finishes, carrying the summary, the
 branch, the pull request and the resume command. That one needs a capability the
@@ -171,15 +202,25 @@ comment was refused with a 403.
 
 ### The projects database
 
-One row per project. The runner needs to locate the repository on disk, and tries in this
-order:
+One row per project, and **the project decides what kind of work its tickets are.**
 
-1. a `[projects]` entry in your configuration — `"Trader Ia" = "~/workspace/labo/trader-ia"`;
-2. the project's **`github`** property, matched against the `origin` remotes of every
-   repository found under `workspace_root`;
-3. failing that, a directory named after the repository.
+A project that names a repository — a `github` property, or a `[projects]` entry in your
+configuration — is a **code project**. Its tickets get a git worktree, a branch, commits
+and a pull request. The repository is located by matching `github` against the `origin`
+remotes of everything found under `workspace_root`; if it names one that does not exist
+on disk, the ticket is blocked rather than guessed at.
 
-`ticket-runner projects` shows you the outcome for every referenced project — worth
+A project that names none is a **document project**. Its tickets get a disposable scratch
+directory instead of a worktree, and the agent's answer is written back into the Notion
+ticket as real blocks — headings, lists, checkboxes, links. No branch, no pull request.
+That is what you want for a ticket like *"draft me the steps to become a certified
+trainer"*: there is nothing to commit, and the deliverable is the page itself.
+
+The runner never guesses from a project's name. A name that happens to match a folder is
+a coincidence, and turning a writing task into commits on a like-named repository is a
+worse outcome than asking you to be explicit.
+
+`ticket-runner projects` shows you which is which for every referenced project — worth
 running once after installation; it is what saves you from surprises.
 
 ### The statuses
@@ -228,7 +269,8 @@ ticket-runner history      # what has been handled, with the pull requests
 ticket-runner projects     # Notion project → local repository mapping
 ticket-runner doctor       # full diagnostics
 ticket-runner clean --force          # remove worktrees left behind by failures
-ticket-runner disable      # stop the timer (enable to start it again)
+ticket-runner enable       # apply interval_seconds and start the timer
+ticket-runner disable      # stop the timer
 ```
 
 The first attempt is best made by hand, on a ticket you choose:

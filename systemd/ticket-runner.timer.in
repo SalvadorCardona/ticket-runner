@@ -3,9 +3,11 @@ Description=ticket-runner — picks up ready Notion tickets
 Documentation=https://github.com/SalvadorCardona/ticket-runner
 
 [Timer]
-OnBootSec=3min
-OnUnitActiveSec=@INTERVAL@min
-AccuracySec=30s
+OnBootSec=@INTERVAL@s
+OnUnitActiveSec=@INTERVAL@s
+# A ten-second timer needs second-level accuracy; a half-hourly one does not,
+# and letting systemd coalesce its wake-ups is worth more than the precision.
+AccuracySec=@ACCURACY@
 # Catch up on the missed run if the machine was off.
 Persistent=true
 Unit=ticket-runner.service
