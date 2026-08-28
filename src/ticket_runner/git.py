@@ -1,9 +1,9 @@
-"""Le peu de git et de gh dont le runner a besoin.
+"""The little bit of git and gh the runner needs.
 
-Une règle, et elle n'est pas négociable : **le travail d'un ticket n'a jamais
-lieu dans le dépôt principal**. Chaque ticket obtient un `git worktree` sur sa
-propre branche, ce qui permet à deux tickets du même projet d'avancer en même
-temps et laisse votre copie de travail exactement comme vous l'avez laissée.
+One rule, and it is not negotiable: **a ticket is never worked on in the main
+repository**. Every ticket gets a `git worktree` on its own branch, which lets
+two tickets of the same project move at once and leaves your working copy
+exactly as you left it.
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ def remote_url(repo: Path) -> str:
 
 
 def default_branch(repo: Path) -> str:
-    """La branche par défaut telle que l'origine la déclare, sinon main/master."""
+    """The branch the origin declares as default, else main/master."""
     result = git(["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"], repo)
     if result.ok and "/" in result.out:
         return result.out.rsplit("/", 1)[-1]
@@ -70,16 +70,16 @@ def fetch(repo: Path) -> None:
 
 
 def add_worktree(repo: Path, path: Path, branch: str, base: str) -> None:
-    """Crée le worktree sur une branche neuve, partant du dernier état de `base`."""
+    """Create the worktree on a fresh branch, off the latest state of `base`."""
     start = base
     if git(["rev-parse", "--verify", "--quiet", f"origin/{base}"], repo).ok:
         start = f"origin/{base}"
     if git(["rev-parse", "--verify", "--quiet", branch], repo).ok:
-        raise GitError(f"la branche {branch} existe déjà — ticket déjà traité ?")
+        raise GitError(f"branch {branch} already exists — ticket already handled?")
     path.parent.mkdir(parents=True, exist_ok=True)
     result = git(["worktree", "add", "-b", branch, str(path), start], repo)
     if not result.ok:
-        raise GitError(f"git worktree add : {result.err or result.out}")
+        raise GitError(f"git worktree add: {result.err or result.out}")
 
 
 def remove_worktree(repo: Path, path: Path) -> None:
@@ -106,9 +106,9 @@ def push(worktree: Path, branch: str) -> Result:
 
 
 def open_pull_request(worktree: Path, title: str, body: str, base: str) -> str:
-    """Ouvre la PR via gh et renvoie son URL. La PR n'est jamais fusionnée."""
+    """Open the PR through gh and return its URL. It is never merged."""
     if not shutil.which("gh"):
-        raise GitError("gh introuvable — impossible d'ouvrir la pull request")
+        raise GitError("gh not found — cannot open the pull request")
     result = run(
         ["gh", "pr", "create", "--base", base, "--title", title, "--body", body],
         cwd=worktree,
@@ -122,4 +122,4 @@ def open_pull_request(worktree: Path, title: str, body: str, base: str) -> str:
     existing = run(["gh", "pr", "view", "--json", "url", "-q", ".url"], cwd=worktree)
     if existing.ok and existing.out.startswith("http"):
         return existing.out
-    raise GitError(f"gh pr create : {result.err or result.out}")
+    raise GitError(f"gh pr create: {result.err or result.out}")

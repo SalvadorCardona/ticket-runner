@@ -1,13 +1,13 @@
 #!/bin/sh
-# Désinstallation de ticket-runner.
+# Uninstall ticket-runner.
 #   curl -LsSf https://raw.githubusercontent.com/SalvadorCardona/ticket-runner/main/uninstall.sh | sh
-# Ajoutez TR_PURGE=1 pour supprimer aussi la configuration, les journaux et l'historique.
+# Add TR_PURGE=1 to remove the configuration, logs and history as well.
 set -eu
 
 say() { printf '==> %s\n' "$1"; }
 
 if command -v systemctl >/dev/null 2>&1; then
-    say "Arrêt du minuteur"
+    say "Stopping the timer"
     systemctl --user disable --now ticket-runner.timer >/dev/null 2>&1 || true
     rm -f "$HOME/.config/systemd/user/ticket-runner.timer" \
           "$HOME/.config/systemd/user/ticket-runner.service"
@@ -16,21 +16,21 @@ fi
 
 STATE="${XDG_STATE_HOME:-$HOME/.local/state}/ticket-runner"
 if [ -d "$STATE/worktrees" ] && [ -n "$(ls -A "$STATE/worktrees" 2>/dev/null)" ]; then
-    say "Worktrees restants dans $STATE/worktrees"
-    printf '    ils appartiennent encore à leurs dépôts : « ticket-runner clean --force »\n'
-    printf '    avant de désinstaller, sinon « git worktree prune » dans chaque dépôt.\n'
+    say "Worktrees left in $STATE/worktrees"
+    printf '    they still belong to their repositories: run "ticket-runner clean --force"\n'
+    printf '    before uninstalling, or "git worktree prune" in each repository.\n'
 fi
 
-say "Suppression des fichiers"
+say "Removing files"
 rm -f "$HOME/.local/bin/ticket-runner"
 rm -rf "$HOME/.local/share/ticket-runner"
 
 if [ "${TR_PURGE:-0}" = "1" ]; then
     rm -rf "${XDG_CONFIG_HOME:-$HOME/.config}/ticket-runner" "$STATE"
-    say "Configuration, journaux et historique supprimés"
+    say "Configuration, logs and history removed"
 else
-    say "Configuration et historique conservés (TR_PURGE=1 pour les supprimer)"
+    say "Configuration and history kept (TR_PURGE=1 to remove them)"
 fi
 
-printf '\nticket-runner est désinstallé.\n'
-printf 'Les branches ticket/* déjà poussées ne sont pas touchées.\n'
+printf '\nticket-runner is uninstalled.\n'
+printf 'Branches already pushed are left untouched.\n'

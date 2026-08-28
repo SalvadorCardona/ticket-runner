@@ -1,7 +1,7 @@
-"""L'interface en ligne de commande.
+"""The command line interface.
 
-`run` est ce que le minuteur systemd appelle ; tout le reste existe pour qu'on
-puisse comprendre ce qu'il a fait sans lire un journal systemd.
+`run` is what the systemd timer calls; everything else exists so you can find
+out what it did without reading a systemd journal.
 """
 
 from __future__ import annotations
@@ -47,11 +47,11 @@ def load_config() -> config_module.Config:
         configuration.require_usable()
         return configuration
     except config_module.ConfigError as error:
-        print(f"{RED}erreur :{RESET} {error}", file=sys.stderr)
+        print(f"{RED}error:{RESET} {error}", file=sys.stderr)
         raise SystemExit(2) from error
 
 
-# -- commandes ---------------------------------------------------------------
+# -- commands ----------------------------------------------------------------
 
 
 def command_run(args: argparse.Namespace) -> int:
@@ -64,11 +64,11 @@ def command_run(args: argparse.Namespace) -> int:
         print(f"{DIM}{error}{RESET}")
         return 0
     except notion.NotionError as error:
-        print(f"{RED}Notion :{RESET} {error}", file=sys.stderr)
+        print(f"{RED}Notion:{RESET} {error}", file=sys.stderr)
         return 1
     failures = sum(1 for result in results if result.get("status") == "failed")
-    # Le minuteur ne doit voir un échec que si le tour entier a échoué : un
-    # ticket raté sur trois n'est pas une panne du service.
+    # The timer should only see a failure if the whole run failed: one ticket
+    # out of three going wrong is not a service outage.
     return 1 if results and failures == len(results) else 0
 
 
@@ -77,9 +77,9 @@ def command_list(args: argparse.Namespace) -> int:
     runner = Runner(configuration, quiet=True)
     tickets = runner.ready()
     if not tickets:
-        print("Aucun ticket prêt.")
+        print("No ticket ready.")
         return 0
-    title(f"{len(tickets)} ticket(s) en « {configuration.notion.state('ready')} »")
+    title(f"{len(tickets)} ticket(s) in “{configuration.notion.state('ready')}”")
     for ticket in tickets:
         relation = notion.read(ticket.page, configuration.notion.prop("project")) or []
         project = "?"
@@ -87,7 +87,7 @@ def command_list(args: argparse.Namespace) -> int:
             try:
                 project = runner.resolver.resolve(runner.client, relation[0]).name
             except (LookupError, notion.NotionError):
-                project = f"{YELLOW}projet non situé{RESET}"
+                project = f"{YELLOW}project not found{RESET}"
         print(f"  {ticket.title}\n    {DIM}{project} · {ticket.url}{RESET}")
     return 0
 
@@ -100,9 +100,9 @@ def command_projects(args: argparse.Namespace) -> int:
         for page_id in notion.read(ticket, configuration.notion.prop("project")) or []:
             seen.setdefault(page_id, None)
     if not seen:
-        print("Aucun projet référencé par un ticket.")
+        print("No project referenced by any ticket.")
         return 0
-    title(f"Projets référencés ({len(seen)})")
+    title(f"Referenced projects ({len(seen)})")
     failed = 0
     for page_id in seen:
         try:
@@ -117,7 +117,7 @@ def command_projects(args: argparse.Namespace) -> int:
 def command_history(args: argparse.Namespace) -> int:
     entries = state.history(args.number)
     if not entries:
-        print("Aucun ticket traité pour l'instant.")
+        print("No ticket handled yet.")
         return 0
     for entry in entries:
         status = entry.get("status", "?")
@@ -137,7 +137,7 @@ def command_status(args: argparse.Namespace) -> int:
         bad(str(error))
         return 2
 
-    title("Minuteur")
+    title("Timer")
     if shutil.which("systemctl"):
         active = subprocess.run(
             ["systemctl", "--user", "is-enabled", "ticket-runner.timer"],
@@ -147,31 +147,31 @@ def command_status(args: argparse.Namespace) -> int:
             ["systemctl", "--user", "list-timers", "ticket-runner.timer", "--no-pager"],
             capture_output=True, text=True,
         ).stdout.strip().splitlines()
-        (ok if active == "enabled" else warn)(f"ticket-runner.timer : {active or 'absent'}")
+        (ok if active == "enabled" else warn)(f"ticket-runner.timer: {active or 'not installed'}")
         for line in timers[1:2]:
             print(f"    {DIM}{line.strip()}{RESET}")
     else:
-        warn("systemd absent — le runner ne tourne qu'à la demande")
+        warn("no systemd — the runner only runs on demand")
 
     lock_file = config_module.state_dir() / "run.lock"
     if lock_file.exists():
-        warn(f"un tour est en cours ({lock_file.read_text().strip()})")
+        warn(f"a run is in progress ({lock_file.read_text().strip()})")
     else:
-        ok("aucun tour en cours")
+        ok("no run in progress")
 
     title("Tickets")
     try:
         configuration.require_usable()
         runner = Runner(configuration, quiet=True)
         ready = runner.ready()
-        ok(f"{len(ready)} prêt(s) en « {configuration.notion.state('ready')} »")
+        ok(f"{len(ready)} ready in “{configuration.notion.state('ready')}”")
     except (config_module.ConfigError, notion.NotionError) as error:
-        bad(f"Notion injoignable : {str(error).splitlines()[0]}")
+        bad(f"Notion unreachable: {str(error).splitlines()[0]}")
 
-    title("Derniers tickets")
+    title("Recent tickets")
     entries = state.history(5)
     if not entries:
-        print(f"  {DIM}aucun{RESET}")
+        print(f"  {DIM}none{RESET}")
     for entry in entries:
         status = entry.get("status", "?")
         colour = GREEN if status == "done" else RED if status == "failed" else DIM
@@ -182,13 +182,13 @@ def command_status(args: argparse.Namespace) -> int:
 def command_logs(args: argparse.Namespace) -> int:
     logs = sorted(state.logs_dir().glob("*.jsonl"))
     if not logs:
-        print("Aucun journal.")
+        print("No log yet.")
         return 0
     target = logs[-1]
     if args.ticket:
         matches = [path for path in logs if args.ticket[:8] in path.name]
         if not matches:
-            print(f"Aucun journal pour {args.ticket}", file=sys.stderr)
+            print(f"No log for {args.ticket}", file=sys.stderr)
             return 1
         target = matches[-1]
     print(f"{DIM}{target}{RESET}", file=sys.stderr)
@@ -214,7 +214,7 @@ def command_logs(args: argparse.Namespace) -> int:
 
 
 def _render(line: str) -> str:
-    """Une ligne du flux stream-json, ramenée à ce qui se lit."""
+    """One line of the stream-json feed, reduced to what reads."""
     try:
         event = json.loads(line)
     except json.JSONDecodeError:
@@ -233,7 +233,7 @@ def _render(line: str) -> str:
         return "\n".join(pieces)
     if kind == "result":
         cost = event.get("total_cost_usd") or 0
-        return f"{BOLD}— fin —{RESET} {event.get('num_turns', 0)} tours · {cost:.3f} $"
+        return f"{BOLD}— end —{RESET} {event.get('num_turns', 0)} turns · ${cost:.3f}"
     return ""
 
 
@@ -249,59 +249,59 @@ def command_doctor(args: argparse.Namespace) -> int:
         return 2
     try:
         configuration.require_usable()
-        ok("jeton Notion et base de tickets renseignés")
+        ok("Notion token and tickets database are set")
     except config_module.ConfigError as error:
         bad(str(error).splitlines()[0])
         problems += 1
 
-    title("Outils")
-    for binary, why in (("git", "obligatoire"), ("claude", "obligatoire"), ("gh", "pour les pull requests")):
+    title("Tools")
+    for binary, why in (("git", "required"), ("claude", "required"), ("gh", "for pull requests")):
         path = shutil.which(binary)
         if path:
-            version = git.run([binary, "--version"]).out.splitlines()[0] if binary != "gh" else "présent"
+            version = git.run([binary, "--version"]).out.splitlines()[0] if binary != "gh" else "present"
             ok(f"{binary} — {version}")
         else:
-            (bad if why == "obligatoire" else warn)(f"{binary} absent ({why})")
-            problems += 1 if why == "obligatoire" else 0
+            (bad if why == "required" else warn)(f"{binary} missing ({why})")
+            problems += 1 if why == "required" else 0
     if shutil.which("gh"):
         authed = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True)
         (ok if authed.returncode == 0 else warn)(
-            "gh authentifié" if authed.returncode == 0 else "gh non authentifié : gh auth login"
+            "gh authenticated" if authed.returncode == 0 else "gh not authenticated: gh auth login"
         )
 
-    title("Espace de travail")
+    title("Workspace")
     root = configuration.runner.workspace_root
     if root.is_dir():
         resolver = Resolver(root, configuration.projects)
-        count = len(resolver._index())  # noqa: SLF001 — diagnostic
-        ok(f"{root} — {count} dépôt(s) repérés")
+        count = len(resolver._index())  # noqa: SLF001 — diagnostics
+        ok(f"{root} — {count} repository(ies) found")
     else:
-        bad(f"{root} n'existe pas (runner.workspace_root)")
+        bad(f"{root} does not exist (runner.workspace_root)")
         problems += 1
 
     if problems:
-        print(f"\n{RED}{problems} problème(s) à corriger.{RESET}")
+        print(f"\n{RED}{problems} problem(s) to fix.{RESET}")
         return 1
 
     title("Notion")
     client = notion.Client(configuration.notion.token)
     try:
-        me = client._request("GET", "/users/me")  # noqa: SLF001 — diagnostic
-        ok(f"connecté en tant que « {me.get('name', 'intégration')} »")
+        me = client._request("GET", "/users/me")  # noqa: SLF001 — diagnostics
+        ok(f"connected as “{me.get('name', 'integration')}”")
     except notion.NotionError as error:
-        bad(f"jeton refusé : {error}")
+        bad(f"token refused: {error}")
         return 1
 
     try:
         database = client.resolve_database(configuration.notion.tickets_database)
         schema = client.schema(database)
     except notion.NotionError as error:
-        bad(f"base de tickets inaccessible : {str(error).splitlines()[0]}")
-        warn("la base doit être partagée avec l'intégration (menu ··· → Connexions)")
+        bad(f"tickets database unreachable: {str(error).splitlines()[0]}")
+        warn("the database must be shared with the integration (··· menu → Connections)")
         return 1
-    ok(f"base de tickets lisible — {len(schema)} propriété(s)")
+    ok(f"tickets database readable — {len(schema)} property(ies)")
     if database != configuration.notion.tickets_database:
-        warn(f"l'ID configuré est celui de la page ; base utilisée : {database}")
+        warn(f"resolved from “{configuration.notion.tickets_database}” to database {database}")
 
     for key, expected in (
         ("status", ("status", "select")),
@@ -313,33 +313,33 @@ def command_doctor(args: argparse.Namespace) -> int:
         kind = schema.get(name)
         if kind is None:
             (warn if key in ("agent", "pull_request") else bad)(
-                f"propriété « {name} » absente"
-                + (" — le runner s'en passera" if key in ("agent", "pull_request") else "")
+                f"property “{name}” missing"
+                + (" — the runner will do without it" if key in ("agent", "pull_request") else "")
             )
             problems += 0 if key in ("agent", "pull_request") else 1
         elif kind not in expected:
-            warn(f"« {name} » est de type {kind}, attendu {' ou '.join(expected)}")
+            warn(f"“{name}” is a {kind}, expected {' or '.join(expected)}")
         else:
-            ok(f"« {name} » ({kind})")
+            ok(f"“{name}” ({kind})")
     session_property = configuration.notion.prop("session")
     if session_property not in schema:
-        warn(f"propriété « {session_property} » absente — l'ID de session ira en commentaire")
+        warn(f"property “{session_property}” missing — the session ID will go in a comment")
 
-    title("Modèle")
-    ok(f"claude : {session.available() or 'absent'}")
+    title("Model")
+    ok(f"claude: {session.available() or 'missing'}")
     print(f"  {DIM}permission_mode = {configuration.runner.permission_mode}{RESET}")
 
     if problems:
-        print(f"\n{RED}{problems} problème(s) à corriger.{RESET}")
+        print(f"\n{RED}{problems} problem(s) to fix.{RESET}")
         return 1
-    print(f"\n{GREEN}Tout est en place.{RESET}")
+    print(f"\n{GREEN}Everything is in place.{RESET}")
     return 0
 
 
 def command_config(args: argparse.Namespace) -> int:
     path = config_module.config_path()
     if not path.exists():
-        print(f"{path} n'existe pas — relancez install.sh", file=sys.stderr)
+        print(f"{path} does not exist — run install.sh again", file=sys.stderr)
         return 1
     editor = os.environ.get("EDITOR") or os.environ.get("VISUAL") or "nano"
     return subprocess.call([editor, str(path)])
@@ -349,14 +349,14 @@ def command_clean(args: argparse.Namespace) -> int:
     root = config_module.state_dir() / "worktrees"
     directories = sorted(root.iterdir()) if root.exists() else []
     if not directories:
-        print("Aucun worktree résiduel.")
+        print("No leftover worktree.")
         return 0
-    title(f"{len(directories)} worktree(s) conservé(s)")
+    title(f"{len(directories)} worktree(s) kept")
     for directory in directories:
         branch = git.git(["rev-parse", "--abbrev-ref", "HEAD"], directory).out or "?"
         print(f"  {directory}  {DIM}{branch}{RESET}")
     if not args.force:
-        print(f"\n{DIM}ticket-runner clean --force pour les supprimer{RESET}")
+        print(f"\n{DIM}ticket-runner clean --force to remove them{RESET}")
         return 0
     for directory in directories:
         origin = git.git(["rev-parse", "--path-format=absolute", "--git-common-dir"], directory).out
@@ -365,65 +365,65 @@ def command_clean(args: argparse.Namespace) -> int:
             git.remove_worktree(repo, directory)
         else:
             shutil.rmtree(directory, ignore_errors=True)
-        print(f"  supprimé {directory}")
+        print(f"  removed {directory}")
     return 0
 
 
 def command_timer(args: argparse.Namespace) -> int:
     if not shutil.which("systemctl"):
-        print("systemd absent", file=sys.stderr)
+        print("systemd not available", file=sys.stderr)
         return 1
     action = ["enable", "--now"] if args.command == "enable" else ["disable", "--now"]
     return subprocess.call(["systemctl", "--user", *action, "ticket-runner.timer"])
 
 
-# -- entrée ------------------------------------------------------------------
+# -- entry point -------------------------------------------------------------
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ticket-runner",
-        description="Transforme les tickets Notion « prêts » en sessions Claude Code.",
+        description="Turns ready Notion tickets into Claude Code sessions.",
     )
     parser.add_argument("--version", action="version", version=f"ticket-runner {__version__}")
     subparsers = parser.add_subparsers(dest="command")
 
-    run = subparsers.add_parser("run", help="traiter les tickets prêts (un tour)")
-    run.add_argument("--ticket", help="URL ou ID d'un ticket précis, quel que soit son statut")
-    run.add_argument("--limit", type=int, help="nombre maximal de tickets pour ce tour")
-    run.add_argument("--dry-run", action="store_true", help="montrer sans rien modifier")
+    run = subparsers.add_parser("run", help="handle the ready tickets (one run)")
+    run.add_argument("--ticket", help="URL or ID of one ticket, whatever its status")
+    run.add_argument("--limit", type=int, help="maximum number of tickets for this run")
+    run.add_argument("--dry-run", action="store_true", help="show without changing anything")
     run.set_defaults(function=command_run)
 
-    listing = subparsers.add_parser("list", help="lister les tickets prêts")
+    listing = subparsers.add_parser("list", help="list the ready tickets")
     listing.set_defaults(function=command_list)
 
-    projects = subparsers.add_parser("projects", help="vérifier la correspondance projet → dépôt")
+    projects = subparsers.add_parser("projects", help="check the project → repository mapping")
     projects.set_defaults(function=command_projects)
 
-    status = subparsers.add_parser("status", help="minuteur, tour en cours, derniers tickets")
+    status = subparsers.add_parser("status", help="timer, current run, recent tickets")
     status.set_defaults(function=command_status)
 
-    history = subparsers.add_parser("history", help="tickets traités")
+    history = subparsers.add_parser("history", help="tickets already handled")
     history.add_argument("-n", "--number", type=int, default=20)
     history.set_defaults(function=command_history)
 
-    logs = subparsers.add_parser("logs", help="suivre une session")
-    logs.add_argument("ticket", nargs="?", help="début de l'ID du ticket")
+    logs = subparsers.add_parser("logs", help="follow a session")
+    logs.add_argument("ticket", nargs="?", help="start of the ticket ID")
     logs.add_argument("-f", "--follow", action="store_true")
-    logs.add_argument("--raw", action="store_true", help="le flux JSON brut")
+    logs.add_argument("--raw", action="store_true", help="the raw JSON stream")
     logs.set_defaults(function=command_logs)
 
-    doctor = subparsers.add_parser("doctor", help="diagnostic complet")
+    doctor = subparsers.add_parser("doctor", help="full diagnostics")
     doctor.set_defaults(function=command_doctor)
 
-    configure = subparsers.add_parser("config", help="ouvrir la configuration")
+    configure = subparsers.add_parser("config", help="open the configuration")
     configure.set_defaults(function=command_config)
 
-    clean = subparsers.add_parser("clean", help="supprimer les worktrees d'échecs")
+    clean = subparsers.add_parser("clean", help="remove worktrees left by failures")
     clean.add_argument("--force", action="store_true")
     clean.set_defaults(function=command_clean)
 
-    for name, help_text in (("enable", "activer le minuteur"), ("disable", "arrêter le minuteur")):
+    for name, help_text in (("enable", "start the timer"), ("disable", "stop the timer")):
         timer = subparsers.add_parser(name, help=help_text)
         timer.set_defaults(function=command_timer)
 

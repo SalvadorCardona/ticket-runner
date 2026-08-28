@@ -1,20 +1,21 @@
 # ticket-runner
 
-**Vos tickets Notion, joués par Claude Code.** Vous écrivez un ticket, vous le passez
-en *Not started*, et quelques minutes plus tard une pull request vous attend — branche
-dédiée, commits, description, et le lien de la session dans les commentaires du ticket.
+**Your Notion tickets, played by Claude Code.** You write a ticket, you move it to
+*Not started*, and a few minutes later a pull request is waiting for you — its own branch,
+its commits, a description, and the session link in the ticket's comments.
 
-Le runner tourne sur votre machine, en tâche de fond, sur **tous vos projets à la fois** :
-c'est la relation `Project` du ticket qui décide dans quel dépôt il ira travailler.
+The runner lives on your machine, in the background, across **all of your projects at
+once**: it is the ticket's `Project` relation that decides which repository it goes to
+work in.
 
 ```
 Notion                    ticket-runner                     git
 ──────                    ─────────────                     ───
-Not started    ──────▶    réserve le ticket
-                          git worktree + branche      ──▶   ticket/supprimer-le-header-3ca45168
+Not started    ──────▶    claims the ticket
+                          git worktree + branch       ──▶   ticket/remove-the-header-3ca45168
 In progress    ◀──────    claude --print
-                          commits vérifiés
-Done + PR      ◀──────    push + gh pr create         ──▶   pull request à relire
+                          commits verified
+Done + PR      ◀──────    push + gh pr create         ──▶   pull request to review
 ```
 
 ---
@@ -25,185 +26,233 @@ Done + PR      ◀──────    push + gh pr create         ──▶   
 curl -LsSf https://raw.githubusercontent.com/SalvadorCardona/ticket-runner/main/install.sh | sh
 ```
 
-Le script vérifie les dépendances, installe la commande `ticket-runner` dans
-`~/.local/bin`, vous demande votre jeton Notion, et arme un minuteur systemd qui relève
-les tickets **toutes les 30 minutes**. Puis :
+The script checks the dependencies, installs the `ticket-runner` command into
+`~/.local/bin`, asks for your Notion token, and arms a systemd timer that picks up ready
+tickets **every 30 minutes**. Then:
 
 ```sh
 ticket-runner doctor
 ```
 
-qui vous dit, ligne par ligne, ce qui manque encore.
+which tells you, line by line, what is still missing.
 
-Relancer la même commande **met à jour** l'installation : le code est remplacé, votre
-configuration est conservée.
+Running the same command again **updates** the installation: the code is replaced, your
+configuration is kept.
 
-> **Prérequis** — Linux avec systemd en session utilisateur, `python3` ≥ 3.11 (aucune
-> dépendance à installer, tout est dans la bibliothèque standard), `git`,
-> [Claude Code](https://claude.com/claude-code), et `gh` authentifié pour les pull requests.
+> **Requirements** — Linux with systemd in the user session, `python3` >= 3.11 (no
+> dependencies to install, everything is in the standard library), `git`,
+> [Claude Code](https://claude.com/claude-code), and `gh` authenticated for pull requests.
 
-| Variable | Effet |
+| Variable | Effect |
 | --- | --- |
-| `TR_INTERVAL=15` | minutes entre deux tours (défaut : 30) |
-| `TR_NO_SERVICE=1` | pas de minuteur : vous lancez `ticket-runner run` vous-même |
-| `TR_SRC=.` | installer depuis un clone local, sans réseau |
-
----
-
-## Le côté Notion
-
-### 1. Une intégration
-
-Sur [notion.so/my-integrations](https://www.notion.so/my-integrations), créez une
-intégration interne et copiez son jeton (`ntn_…`). Puis, **sur la base de tickets comme
-sur la base de projets** : menu `···` → *Connexions* → votre intégration. Sans ce
-partage, l'API répond « object not found » et rien ne fonctionne — c'est l'oubli le plus
-courant, et `ticket-runner doctor` le nomme explicitement.
-
-### 2. La base de tickets
-
-| Propriété | Type | Rôle |
-| --- | --- | --- |
-| `Name` | titre | ce que l'agent doit faire, en une ligne |
-| `Status` | statut | **le moteur de tout le système** — voir plus bas |
-| `Project` | relation | vers la base des projets : décide du dépôt |
-| `Agent` | texte | rempli par le runner : qui a pris le ticket |
-| `Pull Request` | URL | remplie par le runner à la fin |
-| `Session` | texte | *optionnel* — l'ID de session, pour `claude --resume` |
-
-Le **contenu** de la page du ticket est envoyé à l'agent comme description. Écrivez-y ce
-que vous diriez à un développeur qui ne connaît pas le sujet : ce qui doit changer, où,
-et à quoi on reconnaît que c'est fait.
-
-### 3. La base de projets
-
-Une ligne par projet. Le runner a besoin de situer le dépôt sur le disque, et il essaie
-dans cet ordre :
-
-1. une entrée `[projects]` dans votre configuration — `"Trader Ia" = "~/workspace/labo/trader-ia"` ;
-2. la propriété **`github`** du projet, comparée aux `origin` de tous les dépôts trouvés
-   sous `workspace_root` ;
-3. à défaut, un dossier portant le nom du dépôt.
-
-`ticket-runner projects` vous montre le résultat pour chaque projet référencé — à lancer
-une fois après l'installation, c'est ce qui évite les surprises.
-
-### 4. Les quatre statuts
-
-C'est là que se joue votre contrôle sur le système.
-
-| Statut | Ce qu'il veut dire |
-| --- | --- |
-| **Draft** | pas prêt. Le runner n'y touche pas. C'est aussi là que **retombe un ticket échoué**, avec la raison en commentaire. |
-| **Not started** | prêt. La description est assez précise pour qu'un agent la traite seul. **Le seul geste qui déclenche du travail.** |
-| **In progress** | réservé par le runner. Empêche le tour suivant de le reprendre. |
-| **Done** | branche poussée, pull request ouverte. À vous de relire. |
-
-Rien n'est jamais fusionné automatiquement.
-
----
-
-## Utilisation
-
-```sh
-ticket-runner list         # les tickets prêts, et leur projet
-ticket-runner run          # un tour tout de suite
-ticket-runner run --dry-run          # ce qu'il ferait, sans rien toucher
-ticket-runner run --ticket <url>     # ce ticket-là, quel que soit son statut
-ticket-runner logs -f      # suivre la session en cours
-ticket-runner status       # minuteur, tour en cours, derniers tickets
-ticket-runner history      # ce qui a été traité, avec les PR
-ticket-runner projects     # correspondance projet Notion → dépôt local
-ticket-runner doctor       # diagnostic complet
-ticket-runner clean --force          # supprimer les worktrees laissés par les échecs
-ticket-runner disable      # arrêter le minuteur (enable pour le relancer)
-```
-
-Le premier essai gagne à être fait à la main, sur un ticket choisi :
-
-```sh
-ticket-runner run --ticket https://www.notion.so/... --dry-run   # on regarde
-ticket-runner run --ticket https://www.notion.so/...             # on y va
-```
-
----
-
-## Ce qui protège votre code
-
-Un agent qui travaille sans personne pour l'arrêter, ça se cadre. Cinq garde-fous, tous
-dans le chemin normal du programme :
-
-- **Le dépôt principal n'est jamais touché.** Chaque ticket obtient un `git worktree`
-  jetable, sur sa propre branche. Votre copie de travail, vos fichiers non commités et
-  votre branche courante restent exactement comme vous les avez laissés — et deux tickets
-  du même projet peuvent avancer en même temps.
-- **L'agent commit, le runner publie.** Pousser une branche et ouvrir une PR sont des
-  gestes tournés vers l'extérieur : ils ont lieu après coup, une fois vérifié qu'il y a
-  bien des commits. Une session qui se déclare terminée sans rien avoir commité est
-  traitée comme un échec.
-- **Un ticket ambigu n'est pas deviné.** Le prompt demande explicitement à l'agent de
-  répondre `RESULT: blocked` et de s'arrêter plutôt que de trancher à votre place. Le
-  ticket revient en *Draft* avec la question posée en commentaire.
-- **Un ticket qui échoue n'emporte que lui.** Les autres du même tour continuent. Son
-  worktree est conservé pour l'autopsie, et l'ID de session permet de rouvrir la
-  conversation exactement là où elle s'est arrêtée : `claude --resume <id>`.
-- **Deux tours ne se chevauchent jamais.** Un verrou de fichier fait qu'un tour plus long
-  que l'intervalle du minuteur ne se fait pas doubler.
-
-Reste une chose à savoir : par défaut le runner lance la session en
-`permission_mode = "bypassPermissions"`, parce qu'une session sans interlocuteur ne peut
-pas demander d'autorisation et se bloquerait au premier test à lancer. L'isolation vient
-du worktree, pas du modèle de permissions. Si vous préférez l'inverse, `"acceptEdits"`
-interdit les commandes shell non approuvées — au prix de sessions qui s'arrêtent souvent.
+| `TR_INTERVAL=15` | minutes between two runs (default: 30) |
+| `TR_NO_SERVICE=1` | no timer: you run `ticket-runner run` yourself |
+| `TR_SRC=.` | install from a local clone, without the network |
 
 ---
 
 ## Configuration
 
-Tout est dans **`~/.config/ticket-runner/config.toml`** (`ticket-runner config` l'ouvre).
-Les réglages qui changent quelque chose au quotidien :
+Everything lives in **`~/.config/ticket-runner/config.toml`**, created by the installer
+with mode `600` — it holds your Notion token. `ticket-runner config` opens it in
+`$EDITOR`.
 
-| Clé | Défaut | Effet |
+### 1. Create a Notion integration
+
+The runner works alone, on your machine, at three in the morning. It needs an identity of
+its own: an **internal integration**, which is a robot account with its own token.
+
+On [notion.so/my-integrations](https://www.notion.so/my-integrations) → **New
+integration** → give it a name (`ticket-runner`), pick your workspace, type **Internal**.
+Copy the token it shows you; it starts with `ntn_`.
+
+### 2. Give the token to the runner
+
+Two lines to fill in, and only two:
+
+```toml
+[notion]
+token = "ntn_your_real_token_here"
+
+# The URL of the database is enough — the ID is extracted from it. If your tickets
+# database is inline inside a page, the page URL works too: the runner looks inside
+# and finds the database on its own.
+tickets_database = "https://www.notion.so/workspace/Tickets-3c3451680af480f5b1aad0785c0322b4"
+```
+
+Three ways to get them in, whichever you prefer:
+
+```sh
+ticket-runner config      # opens the TOML in your editor — the cleanest
+
+# or let the installer ask you (it does, on a fresh install):
+curl -LsSf https://raw.githubusercontent.com/SalvadorCardona/ticket-runner/main/install.sh | sh
+
+# or in one line:
+sed -i 's|^token = .*|token = "ntn_…"|' ~/.config/ticket-runner/config.toml
+```
+
+### 3. Share the databases with the integration — the step everyone forgets
+
+A valid token on a database that was never shared answers `object not found`, and nothing
+about it hints at why. On **the tickets database and the projects database alike**: the
+`···` menu, top right → **Connections** → your integration. The first one to read the
+tickets, the second to know which repository to work in.
+
+Then:
+
+```sh
+ticket-runner doctor
+```
+
+which checks the token, the access to the database, the type of every column and the
+presence of each status — and names whichever of those was missed.
+
+### 4. The rest of the file
+
+| Key | Default | Effect |
 | --- | --- | --- |
-| `runner.max_concurrent` | `2` | tickets menés de front en un tour |
-| `runner.timeout_minutes` | `30` | au-delà, la session est tuée et le ticket échoue |
-| `runner.model` | `""` | `"opus"`, `"sonnet"`… vide = le défaut du CLI |
-| `runner.workspace_root` | `~/workspace` | où chercher les dépôts |
-| `runner.base_branch` | `""` | vide = la branche par défaut de chaque dépôt |
-| `runner.open_pull_request` | `true` | `false` : la branche est poussée, sans PR |
-| `runner.keep_worktree_on_failure` | `true` | garder de quoi comprendre un échec |
-| `runner.prompt_file` | `""` | votre propre gabarit de prompt |
-| `[notion.properties]` | | si vos colonnes portent d'autres noms |
-| `[notion.status]` | | si vos statuts portent d'autres noms |
-
-Le fichier est créé en `chmod 600` : il contient votre jeton Notion.
+| `runner.workspace_root` | `~/workspace` | where to look for repositories |
+| `runner.max_concurrent` | `2` | tickets handled side by side in one run |
+| `runner.timeout_minutes` | `30` | past this, the session is killed and the ticket fails |
+| `runner.model` | `""` | `"opus"`, `"sonnet"`… empty = the CLI's default |
+| `runner.permission_mode` | `"bypassPermissions"` | see *What protects your code* below |
+| `runner.branch_prefix` | `"ticket/"` | prefix of the created branches |
+| `runner.base_branch` | `""` | empty = each repository's default branch |
+| `runner.push` | `true` | `false`: commits stay local |
+| `runner.open_pull_request` | `true` | `false`: the branch is pushed, without a PR |
+| `runner.keep_worktree_on_failure` | `true` | keep enough around to understand a failure |
+| `runner.prompt_file` | `""` | your own prompt template |
+| `[notion.properties]` | | if your columns have other names |
+| `[notion.status]` | | if your statuses have other names |
+| `[projects]` | | `"Notion name" = "/path"` for repositories that cannot be guessed |
 
 ---
 
-## Quand ça ne marche pas
+## The Notion side
 
-| Symptôme | Cause la plus probable |
+### The tickets database
+
+| Property | Type | Role |
+| --- | --- | --- |
+| `Name` | title | what the agent must do, in one line |
+| `Status` | status | **what drives the whole system** — see below |
+| `Project` | relation | to the projects database: decides the repository |
+| `Agent` | text | filled by the runner: who took the ticket |
+| `Pull Request` | URL | filled by the runner at the end |
+| `Session` | text | *optional* — the session ID, for `claude --resume` |
+
+The **body** of the ticket page is sent to the agent as the description. Write there what
+you would tell a developer who does not know the subject: what must change, where, and
+how you will know it is done.
+
+### The projects database
+
+One row per project. The runner needs to locate the repository on disk, and tries in this
+order:
+
+1. a `[projects]` entry in your configuration — `"Trader Ia" = "~/workspace/labo/trader-ia"`;
+2. the project's **`github`** property, matched against the `origin` remotes of every
+   repository found under `workspace_root`;
+3. failing that, a directory named after the repository.
+
+`ticket-runner projects` shows you the outcome for every referenced project — worth
+running once after installation; it is what saves you from surprises.
+
+### The four statuses
+
+This is where your control over the system lives.
+
+| Status | What it means |
 | --- | --- |
-| `object not found` sur la base | la base n'est pas partagée avec l'intégration (menu `···` → Connexions) |
-| « projet non situé sur le disque » | ajoutez `"Nom Notion" = "/chemin"` sous `[projects]` |
-| le minuteur ne part pas session fermée | `sudo loginctl enable-linger $USER` |
-| branche poussée, pas de PR | `gh` ne trouve pas ses identifiants dans un service systemd — trousseau verrouillé. `gh auth login` avec un jeton, ou `GH_TOKEN` dans l'unité |
-| `claude: command not found` dans le journal | le PATH gravé dans l'unité date d'avant un changement de version de node : relancez `install.sh` |
+| **Draft** | not ready. The runner leaves it alone. It is also where a **failed ticket lands**, with the reason in a comment. |
+| **Not started** | ready. The description is precise enough for an agent to handle it alone. **The only gesture that triggers work.** |
+| **In progress** | claimed by the runner. Stops the next run from taking it again. |
+| **Done** | branch pushed, pull request opened. Yours to review. |
 
-Les journaux de sessions sont dans `~/.local/state/ticket-runner/logs/` (un `.jsonl` par
-ticket, le flux brut de la session), l'historique dans `history.jsonl`, et le journal du
-minuteur dans `journalctl --user -u ticket-runner -f`.
+Nothing is ever merged automatically.
 
 ---
 
-## Désinstallation
+## Usage
+
+```sh
+ticket-runner list         # the ready tickets, and their project
+ticket-runner run          # one run, right now
+ticket-runner run --dry-run          # what it would do, touching nothing
+ticket-runner run --ticket <url>     # that one ticket, whatever its status
+ticket-runner logs -f      # follow the running session
+ticket-runner status       # timer, current run, recent tickets
+ticket-runner history      # what has been handled, with the pull requests
+ticket-runner projects     # Notion project → local repository mapping
+ticket-runner doctor       # full diagnostics
+ticket-runner clean --force          # remove worktrees left behind by failures
+ticket-runner disable      # stop the timer (enable to start it again)
+```
+
+The first attempt is best made by hand, on a ticket you choose:
+
+```sh
+ticket-runner run --ticket https://www.notion.so/... --dry-run   # look first
+ticket-runner run --ticket https://www.notion.so/...             # then go
+```
+
+---
+
+## What protects your code
+
+An agent working with nobody there to stop it needs a frame. Five guardrails, all of them
+on the program's normal path:
+
+- **The main repository is never touched.** Every ticket gets a disposable `git worktree`
+  on its own branch. Your working copy, your uncommitted files and your current branch
+  stay exactly as you left them — and two tickets on the same project can move at once.
+- **The agent commits, the runner publishes.** Pushing a branch and opening a PR are
+  outward-facing gestures: they happen afterwards, once it is established that there are
+  commits at all. A session that declares itself done without committing anything is
+  treated as a failure.
+- **An ambiguous ticket is not guessed.** The prompt explicitly asks the agent to answer
+  `RESULT: blocked` and stop rather than decide in your place. The ticket returns to
+  *Draft* with the question in a comment.
+- **A failing ticket takes only itself down.** The others in the same run carry on. Its
+  worktree is kept for the post-mortem, and the session ID reopens the conversation
+  exactly where it stopped: `claude --resume <id>`.
+- **Two runs never overlap.** A file lock means a run that outlasts the timer's interval
+  is not lapped by the next one.
+
+One thing to know: by default the runner starts the session with
+`permission_mode = "bypassPermissions"`, because a session with nobody to ask cannot ask,
+and would stall on the first test it needs to run. The isolation comes from the worktree,
+not from the permission model. If you would rather have it the other way round,
+`"acceptEdits"` forbids unapproved shell commands — at the cost of sessions that stop
+often.
+
+---
+
+## When it does not work
+
+| Symptom | Most likely cause |
+| --- | --- |
+| `object not found` on the database | the database is not shared with the integration (`···` → Connections) |
+| “project not found on disk” | add `"Notion name" = "/path"` under `[projects]` |
+| the timer does not fire with no session open | `sudo loginctl enable-linger $USER` |
+| branch pushed, no pull request | `gh` cannot reach its credentials from a systemd service — locked keyring. Use `gh auth login` with a token, or set `GH_TOKEN` in the unit |
+| `claude: command not found` in the journal | the PATH baked into the unit predates a node version change: run `install.sh` again |
+
+Session logs are in `~/.local/state/ticket-runner/logs/` (one `.jsonl` per ticket, the raw
+session stream), the history in `history.jsonl`, and the timer's own journal in
+`journalctl --user -u ticket-runner -f`.
+
+---
+
+## Uninstall
 
 ```sh
 curl -LsSf https://raw.githubusercontent.com/SalvadorCardona/ticket-runner/main/uninstall.sh | sh
 ```
 
-`TR_PURGE=1` supprime en plus la configuration, les journaux et l'historique. Les
-branches déjà poussées ne sont jamais touchées.
+`TR_PURGE=1` also removes the configuration, the logs and the history. Branches already
+pushed are never touched.
 
 ---
 

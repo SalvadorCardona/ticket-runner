@@ -1,8 +1,8 @@
-"""Lecture et validation de ~/.config/ticket-runner/config.toml.
+"""Reading and validating ~/.config/ticket-runner/config.toml.
 
-Le fichier est la seule source de vérité : rien n'est deviné à partir de
-l'environnement, et une valeur absente est signalée à l'installation plutôt
-qu'au milieu d'un ticket.
+The file is the single source of truth: nothing is inferred from the
+environment, and a missing value is reported at install time rather than in the
+middle of a ticket.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ def config_path() -> Path:
 
 
 class ConfigError(Exception):
-    """Configuration absente, illisible ou incomplète."""
+    """Configuration missing, unreadable or incomplete."""
 
 
 @dataclass
@@ -73,7 +73,7 @@ class Config:
     path: Path
 
     def require_usable(self) -> None:
-        """Lève ConfigError si le fichier ne permet pas de tourner."""
+        """Raise ConfigError if the file is not complete enough to run."""
         missing = []
         if not self.notion.token or self.notion.token == PLACEHOLDER:
             missing.append("notion.token")
@@ -81,8 +81,8 @@ class Config:
             missing.append("notion.tickets_database")
         if missing:
             raise ConfigError(
-                f"{', '.join(missing)} à renseigner dans {self.path}\n"
-                "  ticket-runner config   ouvre le fichier dans votre éditeur"
+                f"{', '.join(missing)} must be set in {self.path}\n"
+                "  ticket-runner config   opens the file in your editor"
             )
 
 
@@ -103,29 +103,41 @@ _DEFAULT_STATUS = {
 
 
 def _database_id(raw: str) -> str:
-    """Accepte un ID nu, avec tirets, ou une URL Notion complète."""
+    """Normalise whatever the user pasted into something resolvable.
+
+    A bare ID, a dashed ID and a full Notion URL all reduce to the 32-character
+    identifier. Anything else is handed back untouched — it is most likely the
+    database's name, which the client can look up by search.
+    """
     raw = raw.strip()
     if not raw:
         return ""
-    if "://" in raw:
-        raw = raw.split("?")[0].rstrip("/").rsplit("/", 1)[-1]
-        raw = raw.rsplit("-", 1)[-1]
-    raw = raw.replace("-", "")
-    return raw
+    candidate = raw
+    if "://" in candidate:
+        candidate = candidate.split("?")[0].rstrip("/").rsplit("/", 1)[-1]
+        candidate = candidate.rsplit("-", 1)[-1]
+    candidate = candidate.replace("-", "")
+    return candidate if is_identifier(candidate) else raw
+
+
+def is_identifier(value: str) -> bool:
+    """A Notion ID is 32 hexadecimal characters, once the dashes are gone."""
+    stripped = value.replace("-", "")
+    return len(stripped) == 32 and all(char in "0123456789abcdefABCDEF" for char in stripped)
 
 
 def load(path: Path | None = None) -> Config:
     target = path or config_path()
     if not target.exists():
         raise ConfigError(
-            f"configuration introuvable : {target}\n"
-            "  réinstallez avec install.sh, ou copiez config.example.toml"
+            f"configuration not found: {target}\n"
+            "  reinstall with install.sh, or copy config.example.toml"
         )
     try:
         with target.open("rb") as handle:
             raw = tomllib.load(handle)
     except tomllib.TOMLDecodeError as error:
-        raise ConfigError(f"{target} n'est pas un TOML valide : {error}") from error
+        raise ConfigError(f"{target} is not valid TOML: {error}") from error
 
     notion_raw = raw.get("notion", {})
     notion = Notion(

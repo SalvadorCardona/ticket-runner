@@ -1,17 +1,18 @@
-"""Client Notion minimal, sur la bibliothèque standard uniquement.
+"""A minimal Notion client, standard library only.
 
-Pas de SDK : trois verbes HTTP et une poignée de conversions suffisent, et une
-dépendance de moins est une dépendance qui ne casse pas l'installation.
+No SDK: three HTTP verbs and a handful of conversions are enough, and one less
+dependency is one less thing that can break the install.
 
-Le client lit **le schéma de la base** avant d'écrire quoi que ce soit. C'est ce
-qui permet de renommer une colonne dans Notion, ou de passer un `Status` de type
-« statut » à un type « sélection », sans toucher au code : la valeur est
-encodée selon le type déclaré, et une propriété absente est ignorée en silence
-plutôt que de faire échouer le ticket.
+The client reads **the database schema** before writing anything. That is what
+lets you rename a column in Notion, or switch `Status` from a status property to
+a select, without touching the code: values are encoded according to the
+declared type, and a property that does not exist is skipped silently rather
+than failing the ticket.
 """
 
 from __future__ import annotations
 
+import http.client
 import json
 import time
 import urllib.error
@@ -25,7 +26,7 @@ MAX_ATTEMPTS = 4
 
 
 class NotionError(Exception):
-    """Erreur renvoyée par l'API, ou réseau indisponible."""
+    """The API returned an error, or the network is unreachable."""
 
 
 @dataclass
@@ -71,18 +72,22 @@ class Client:
                 except json.JSONDecodeError:
                     pass
                 last = f"{error.code} {message}"
-                # 429 : quota. 5xx : panne passagère. Le reste est notre faute.
+                # 429: rate limited. 5xx: transient. Anything else is our fault.
                 if error.code not in (429, 500, 502, 503, 504):
-                    raise NotionError(f"{method} {path} : {last}") from error
+                    raise NotionError(f"{method} {path}: {last}") from error
             except urllib.error.URLError as error:
                 last = str(error.reason)
+            except (http.client.HTTPException, ValueError) as error:
+                # A malformed path never becomes valid by retrying — most often
+                # a configuration value that is not what it claims to be.
+                raise NotionError(f"{method} {path}: {error}") from error
             time.sleep(1.5 * (attempt + 1))
-        raise NotionError(f"{method} {path} : {last} (abandon après {MAX_ATTEMPTS} essais)")
+        raise NotionError(f"{method} {path}: {last} (gave up after {MAX_ATTEMPTS} attempts)")
 
-    # -- lecture -------------------------------------------------------------
+    # -- reading -------------------------------------------------------------
 
     def schema(self, database_id: str) -> dict[str, str]:
-        """{nom de propriété: type}, mis en cache pour la durée du run."""
+        """{property name: type}, cached for the lifetime of the run."""
         if database_id not in self._schemas:
             database = self._request("GET", f"/databases/{database_id}")
             self._schemas[database_id] = {
@@ -91,14 +96,48 @@ class Client:
             }
         return self._schemas[database_id]
 
-    def resolve_database(self, identifier: str) -> str:
-        """L'ID d'une base, à partir de la base ou de la page qui la contient.
+    def find_database(self, name: str) -> str:
+        """The ID of the database whose title matches `name`.
 
-        Copier l'URL d'une page Notion est le geste naturel ; mais une base
-        « inline » vit *dans* une page et porte un autre identifiant, et l'API
-        répond alors « object not found » sans dire pourquoi. On regarde donc
-        les blocs de la page, et on prend la base qu'on y trouve.
+        Writing the database's name in the configuration is a reasonable thing
+        to do, so it works: the search endpoint only ever sees what the
+        integration was given access to, which makes an exact match reliable.
         """
+        payload = self._request(
+            "POST",
+            "/search",
+            {"query": name, "filter": {"value": "database", "property": "object"}},
+        )
+        candidates = []
+        for item in payload.get("results", []):
+            title = "".join(part.get("plain_text", "") for part in item.get("title", []))
+            candidates.append((title.strip(), item.get("id", "").replace("-", "")))
+        for title, identifier in candidates:
+            if title.lower() == name.strip().lower():
+                return identifier
+        if len(candidates) == 1:
+            return candidates[0][1]
+        if not candidates:
+            raise NotionError(
+                f"no database named “{name}” is shared with this integration\n"
+                "  share it: the database's ··· menu → Connections → your integration"
+            )
+        names = ", ".join(f"“{title}”" for title, _ in candidates[:5])
+        raise NotionError(f"several databases match “{name}”: {names} — use its URL instead")
+
+    def resolve_database(self, identifier: str) -> str:
+        """A database ID, from an ID, the page holding it, or its name.
+
+        Copying a Notion page URL is the natural gesture, but an inline database
+        lives *inside* a page and carries a different ID — and the API then
+        answers "object not found" without saying why. So we look at the page's
+        blocks and take the database we find there. And a value that is not an
+        identifier at all is taken for a name and searched.
+        """
+        from .config import is_identifier
+
+        if not is_identifier(identifier):
+            return self.find_database(identifier)
         try:
             self.schema(identifier)
             return identifier
@@ -108,15 +147,15 @@ class Client:
             payload = self._request("GET", f"/blocks/{identifier}/children?page_size=100")
         except NotionError as error:
             raise NotionError(
-                f"ni base ni page accessible pour {identifier} : {error}\n"
-                "  la base doit être partagée avec l'intégration (menu ··· → Connexions)"
+                f"neither a database nor a readable page for {identifier}: {error}\n"
+                "  the database must be shared with the integration (··· menu → Connections)"
             ) from error
         for block in payload.get("results", []):
             if block.get("type") == "child_database":
                 return block["id"].replace("-", "")
         raise NotionError(
-            f"{identifier} est une page sans base de données — "
-            "donnez l'URL de la base elle-même (··· → Copier le lien de la vue)"
+            f"{identifier} is a page with no database in it — "
+            "give the URL of the database itself (··· → Copy link to view)"
         )
 
     def query(self, database_id: str, filter_: dict | None = None) -> list[Page]:
@@ -138,7 +177,7 @@ class Client:
         return _to_page(self._request("GET", f"/pages/{page_id}"))
 
     def blocks_text(self, block_id: str, depth: int = 0) -> str:
-        """Le contenu d'une page, aplati en texte lisible par un agent."""
+        """A page's content, flattened into something an agent can read."""
         if depth > 3:
             return ""
         lines: list[str] = []
@@ -157,10 +196,10 @@ class Client:
             cursor = payload.get("next_cursor")
         return "\n".join(line for line in lines if line is not None).strip()
 
-    # -- écriture ------------------------------------------------------------
+    # -- writing -------------------------------------------------------------
 
     def update(self, database_id: str, page_id: str, values: dict[str, Any]) -> None:
-        """Écrit des propriétés par nom ; celles absentes du schéma sont ignorées."""
+        """Write properties by name; those absent from the schema are ignored."""
         schema = self.schema(database_id)
         properties: dict[str, Any] = {}
         for name, value in values.items():
@@ -199,7 +238,7 @@ def _to_page(raw: dict) -> Page:
 
 
 def read(page: Page, name: str) -> Any:
-    """Valeur d'une propriété, ramenée à un type Python simple."""
+    """A property's value, reduced to a plain Python type."""
     prop = page.properties.get(name)
     if not prop:
         return None
@@ -242,7 +281,7 @@ def _encode(kind: str | None, value: Any) -> dict | None:
 
 
 def _rich_text(text: str) -> list[dict]:
-    """Notion refuse un bloc de texte au-delà de 2000 caractères."""
+    """Notion rejects a text block longer than 2000 characters."""
     chunks = [text[index : index + 1900] for index in range(0, len(text), 1900)] or [""]
     return [{"type": "text", "text": {"content": chunk}} for chunk in chunks[:20]]
 
@@ -283,12 +322,12 @@ def _block_text(block: dict, depth: int) -> str:
         source = payload.get("external", {}).get("url") or payload.get("file", {}).get("url", "")
         caption = "".join(part.get("plain_text", "") for part in payload.get("caption", []))
         label = caption or kind
-        # L'URL S3 est signée et expire : elle n'est utile qu'à titre indicatif.
-        return f"[{label} joint au ticket : {source.split('?')[0]}]"
+        # The S3 URL is signed and expires: it is indicative only.
+        return f"[{label} attached to the ticket: {source.split('?')[0]}]"
     if kind == "bookmark":
         return block.get(kind, {}).get("url", "")
     if kind == "child_page":
-        return f"[sous-page : {block.get(kind, {}).get('title', '')}]"
+        return f"[sub-page: {block.get(kind, {}).get('title', '')}]"
     if kind in ("table", "table_row", "column_list", "column"):
         return ""
     return _plain(block, kind)

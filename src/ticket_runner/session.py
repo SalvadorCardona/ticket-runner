@@ -1,13 +1,13 @@
-"""Lancer une session Claude Code sur un ticket, et savoir ce qu'elle a fait.
+"""Running a Claude Code session on a ticket, and knowing what it did.
 
-La session tourne en mode `--print` avec une sortie `stream-json` : le flux brut
-est écrit tel quel dans un journal, ce qui permet de suivre un ticket en direct
-(`ticket-runner logs -f`) et de relire après coup pourquoi il a échoué.
+The session runs in `--print` mode with `stream-json` output: the raw stream is
+written to a log as-is, which lets you follow a ticket live
+(`ticket-runner logs -f`) and read back afterwards why it failed.
 
-L'identifiant de session est **tiré avant** le lancement et passé en
-`--session-id`. On le connaît donc même si la session meurt en route, et
-`claude --resume <id>` rouvre la conversation exactement là où elle s'est
-arrêtée — c'est ce qui rend un échec réparable à la main plutôt qu'à refaire.
+The session ID is **drawn before** launching and passed as `--session-id`. So we
+know it even if the session dies halfway, and `claude --resume <id>` reopens the
+conversation exactly where it stopped — which is what makes a failure something
+to repair by hand rather than something to redo.
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ def run(
 ) -> Outcome:
     binary = available()
     if not binary:
-        raise FileNotFoundError("claude introuvable dans le PATH")
+        raise FileNotFoundError("claude not found in PATH")
 
     session_id = str(uuid.uuid4())
     command = [
@@ -85,7 +85,7 @@ def run(
             text=True,
             bufsize=1,
             env=environment,
-            start_new_session=True,  # groupe de processus à part, pour pouvoir tout tuer
+            start_new_session=True,  # its own process group, so we can kill it all
         )
 
         timed_out = threading.Event()
@@ -130,7 +130,7 @@ def run(
             session_id=session_id,
             summary="",
             log=log,
-            error=f"session interrompue après {timeout_minutes} min",
+            error=f"session killed after {timeout_minutes} min",
             seconds=seconds,
         )
 
@@ -139,7 +139,7 @@ def run(
     blocked = _verdict(answer) == "blocked"
     error = ""
     if failed:
-        error = answer[-800:] or _tail(stderr_path) or f"claude a quitté avec le code {process.returncode}"
+        error = answer[-800:] or _tail(stderr_path) or f"claude exited with code {process.returncode}"
 
     return Outcome(
         ok=not failed and not blocked,
@@ -167,10 +167,10 @@ def _verdict(answer: str) -> str:
 
 
 def _summary(answer: str) -> str:
-    """La ligne RESULT sans son verdict, sinon la fin de la réponse.
+    """The RESULT line without its verdict, else the tail of the answer.
 
-    « RESULT: ok — retiré le header » devient « retiré le header » : le verdict
-    est déjà porté par le statut Notion, le répéter n'apprend rien.
+    "RESULT: ok — removed the header" becomes "removed the header": the verdict
+    is already carried by the Notion status, repeating it teaches nothing.
     """
     for line in reversed(answer.splitlines()):
         stripped = line.strip().lstrip("*# ").rstrip("*")

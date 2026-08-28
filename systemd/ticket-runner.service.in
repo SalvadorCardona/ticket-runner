@@ -1,5 +1,5 @@
 [Unit]
-Description=ticket-runner — un tour de tickets Notion
+Description=ticket-runner — one pass over the Notion tickets
 Documentation=https://github.com/SalvadorCardona/ticket-runner
 After=network-online.target
 
@@ -7,11 +7,11 @@ After=network-online.target
 Type=oneshot
 ExecStart=@BIN@ run
 
-# Une session Claude dure ce qu'elle dure ; c'est le runner qui la borne
-# (runner.timeout_minutes), pas systemd, qui la tuerait au milieu d'un commit.
+# A Claude session takes as long as it takes; the runner is what bounds it
+# (runner.timeout_minutes), not systemd, which would kill it mid-commit.
 TimeoutStartSec=infinity
 
-# Le PATH d'une session utilisateur n'est pas celui d'un service : sans cette
-# ligne, ni claude, ni gh, ni node ne seraient trouvés.
+# A service's PATH is not a login shell's: without this line, neither claude,
+# nor gh, nor node would be found.
 Environment=PATH=@PATH@
 Environment=PYTHONUNBUFFERED=1

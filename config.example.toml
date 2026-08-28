@@ -2,19 +2,20 @@
 #
 #   ~/.config/ticket-runner/config.toml
 #
-# Après toute modification :  ticket-runner doctor
+# After any change:  ticket-runner doctor
 
 [notion]
-# Jeton d'une intégration interne Notion (https://www.notion.so/my-integrations).
-# La base de tickets ET la base de projets doivent être partagées avec elle :
-# menu ··· de la base → Connexions → votre intégration.
+# Token of an internal Notion integration (https://www.notion.so/my-integrations).
+# BOTH the tickets database AND the projects database must be shared with it:
+# the database's ··· menu → Connections → your integration.
 token = "ntn_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
-# L'URL de la base de tickets suffit, l'ID est extrait tout seul.
+# The URL of the tickets database is enough — the ID is extracted from it. If it
+# is an inline database, the URL of the page holding it works too.
 tickets_database = ""
 
-# Renommez ici si vos colonnes Notion portent d'autres noms.
-# Une propriété absente de la base est simplement ignorée.
+# Rename here if your Notion columns are named differently.
+# A property that does not exist in the database is simply skipped.
 [notion.properties]
 status = "Status"
 project = "Project"
@@ -22,12 +23,12 @@ agent = "Agent"
 pull_request = "Pull Request"
 session = "Session"
 
-# Les quatre états qui font tourner le système.
-#   ready   ce que le runner prend en charge — à vous d'y mettre un ticket
-#           quand sa description est assez précise pour être traitée seule
-#   running réservé, travail en cours (empêche un second tour de le reprendre)
-#   done    branche poussée, pull request ouverte, à relire
-#   failed  échec ou ticket trop ambigu : la raison est en commentaire
+# The four states that drive the whole system.
+#   ready    what the runner picks up — move a ticket here once its description
+#            is precise enough to be handled without you
+#   running  claimed, work in progress (stops a second pass from taking it)
+#   done     branch pushed, pull request opened, waiting for your review
+#   failed   failure or ticket too ambiguous: the reason is in a comment
 [notion.status]
 ready = "Not started"
 running = "In progress"
@@ -35,44 +36,44 @@ done = "Done"
 failed = "Draft"
 
 [runner]
-# Où chercher les dépôts. Le runner y repère les projets par leur remote origin.
+# Where to look for repositories. Projects are matched by their origin remote.
 workspace_root = "~/workspace"
 
-# Tickets menés de front en un tour. Chacun coûte une session Claude complète.
+# Tickets handled side by side in one run. Each costs a full Claude session.
 max_concurrent = 2
 
-# Au-delà, la session est tuée et le ticket repart en échec.
+# Past this, the session is killed and the ticket goes back as failed.
 timeout_minutes = 30
 
-# Vide = le modèle par défaut du CLI. Sinon "opus", "sonnet", "haiku"…
+# Empty = the CLI's default model. Otherwise "opus", "sonnet", "haiku"…
 model = ""
 
-# Une session sans personne pour répondre ne peut pas demander d'autorisation.
-# Le travail a lieu dans un worktree jetable, jamais dans votre copie de travail.
-# Mettez "acceptEdits" pour interdire les commandes shell non approuvées — au
-# prix de sessions qui se bloquent dès qu'un test doit être lancé.
+# A session with nobody to answer cannot ask for permission. The work happens in
+# a disposable worktree, never in your working copy. Use "acceptEdits" to forbid
+# unapproved shell commands — at the cost of sessions that stall as soon as a
+# test needs running.
 permission_mode = "bypassPermissions"
 
 branch_prefix = "ticket/"
 
-# Vide = la branche par défaut du dépôt (origin/HEAD, sinon main puis master).
+# Empty = the repository's default branch (origin/HEAD, else main then master).
 base_branch = ""
 
-fetch = true            # git fetch avant de créer la branche
-push = true             # pousser la branche une fois les commits faits
-open_pull_request = true  # gh pr create — jamais de fusion automatique
+fetch = true              # git fetch before creating the branch
+push = true               # push the branch once commits are in
+open_pull_request = true  # gh pr create — never an automatic merge
 
-# Un échec laisse son worktree en place pour l'autopsie.
-#   ticket-runner clean --force  pour faire le ménage
+# A failure leaves its worktree in place for the post-mortem.
+#   ticket-runner clean --force  to tidy up
 keep_worktree_on_failure = true
 
 dry_run = false
 
-# Gabarit de prompt maison. Vide = celui du runner, qui convient au cas général.
+# Your own prompt template. Empty = the runner's, which fits the general case.
 prompt_file = ""
 
-# Projets dont le dépôt ne se devine pas : nom exact dans Notion = chemin local.
-# Sans entrée ici, le runner rapproche la propriété `github` du projet des
-# remotes trouvés sous workspace_root.
+# Projects whose repository cannot be guessed: exact Notion name = local path.
+# Without an entry here, the runner matches the project's `github` property
+# against the remotes found under workspace_root.
 [projects]
 # "Trader Ia" = "~/workspace/labo/trader-ia"

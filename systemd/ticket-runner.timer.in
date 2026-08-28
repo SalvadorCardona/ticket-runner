@@ -1,12 +1,12 @@
 [Unit]
-Description=ticket-runner — relève les tickets Notion prêts
+Description=ticket-runner — picks up ready Notion tickets
 Documentation=https://github.com/SalvadorCardona/ticket-runner
 
 [Timer]
 OnBootSec=3min
 OnUnitActiveSec=@INTERVAL@min
 AccuracySec=30s
-# Rattrape le tour manqué si la machine était éteinte.
+# Catch up on the missed run if the machine was off.
 Persistent=true
 Unit=ticket-runner.service
 

@@ -1,13 +1,13 @@
-"""Le prompt donné à la session Claude.
+"""The prompt handed to the Claude session.
 
-Deux choix s'y jouent, et ils déterminent la qualité de tout le système :
+Two choices are made here, and they decide the quality of the whole system:
 
-- **l'agent commit, il ne pousse pas.** Publier une branche et ouvrir une PR
-  sont des gestes tournés vers l'extérieur ; c'est le runner qui les fait, après
-  avoir vérifié qu'il y a bien quelque chose à publier ;
-- **un ticket ambigu n'est pas deviné.** L'agent doit répondre `RESULT: blocked`
-  et s'arrêter. Un ticket mal spécifié qui revient en `Draft` avec la question
-  posée vaut mieux qu'une PR qui fait la mauvaise chose avec assurance.
+- **the agent commits, it does not push.** Publishing a branch and opening a PR
+  are outward-facing gestures; the runner performs them, once it has checked
+  there is actually something to publish;
+- **an ambiguous ticket is not guessed.** The agent must answer `RESULT: blocked`
+  and stop. A badly specified ticket coming back as a draft with the question
+  asked beats a pull request that confidently does the wrong thing.
 """
 
 from __future__ import annotations
@@ -15,37 +15,38 @@ from __future__ import annotations
 from pathlib import Path
 
 DEFAULT = """\
-Tu traites un ticket du projet {project}, seul et sans interlocuteur : personne \
-ne pourra répondre à une question pendant la session.
+You are working through a ticket for the {project} project, alone and with \
+nobody to talk to: no one can answer a question while the session runs.
 
 # Ticket — {title}
 
 {body}
 
-# Contexte
+# Context
 
-- Dépôt : {repo}
-- Tu travailles dans un worktree git dédié, sur la branche `{branch}`, créée \
-depuis `{base}`. Ta copie de travail n'est partagée avec personne.
-- Ticket Notion : {url}
+- Repository: {repo}
+- You are in a dedicated git worktree, on branch `{branch}`, created from \
+`{base}`. Your working copy is shared with no one.
+- Notion ticket: {url}
 
-# Attendu
+# What is expected
 
-1. Lis le dépôt avant d'écrire : conventions, CLAUDE.md ou AGENTS.md s'il y en a, \
-code voisin. Ton changement doit se lire comme le reste.
-2. Implémente la demande, rien de plus. Pas de refactorisation opportuniste, pas \
-de correction de bugs voisins : ils feront d'autres tickets.
-3. Fais tourner ce que le dépôt propose pour se vérifier — lint, tests, build — et \
-corrige ce que tu casses.
-4. Commit dans le worktree, un message clair en français. **Ne pousse pas** et \
-n'ouvre pas de pull request : c'est le rôle du runner.
-5. Si la demande est trop ambiguë pour être tranchée seul, ou si le ticket ne \
-correspond pas à ce dépôt, ne devine pas : ne commit rien et explique ce qui manque.
+1. Read the repository before writing: its conventions, its CLAUDE.md or \
+AGENTS.md if it has one, the neighbouring code. Your change must read like the rest.
+2. Implement what is asked, and nothing more. No opportunistic refactoring, no \
+fixing nearby bugs: those are other tickets.
+3. Run whatever the repository offers to check itself — lint, tests, build — and \
+fix what you break.
+4. Commit inside the worktree, with a clear message written in the language the \
+repository already uses. **Do not push** and do not open a pull request: that is \
+the runner's job.
+5. If the request is too ambiguous to settle alone, or if the ticket does not \
+match this repository, do not guess: commit nothing and explain what is missing.
 
-Termine par une dernière ligne, exactement l'une des deux :
+End with a final line, exactly one of these two:
 
-RESULT: ok — <ce que tu as changé, en une phrase>
-RESULT: blocked — <ce qui manque pour décider>
+RESULT: ok — <what you changed, in one sentence>
+RESULT: blocked — <what is missing to decide>
 """
 
 
@@ -63,7 +64,7 @@ def build(
     return template.format(
         project=project,
         title=title,
-        body=body.strip() or "(le ticket n'a pas de description : tout est dans le titre)",
+        body=body.strip() or "(the ticket has no description: everything is in the title)",
         repo=repo,
         branch=branch,
         base=base,
@@ -76,5 +77,5 @@ def template(prompt_file: str) -> str:
         return DEFAULT
     path = Path(prompt_file).expanduser()
     if not path.exists():
-        raise FileNotFoundError(f"prompt_file introuvable : {path}")
+        raise FileNotFoundError(f"prompt_file not found: {path}")
     return path.read_text(encoding="utf-8")

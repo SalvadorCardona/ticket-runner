@@ -1,8 +1,8 @@
-"""Verrou, journaux et historique, sous ~/.local/state/ticket-runner.
+"""Lock, logs and history, under ~/.local/state/ticket-runner.
 
-Le verrou est la seule chose qui empêche le minuteur systemd de relancer un
-ticket déjà en cours : un tour qui dure plus longtemps que l'intervalle est
-normal, deux tours simultanés ne le sont pas.
+The lock is the only thing stopping the systemd timer from picking up a ticket
+already in flight: a run lasting longer than the interval is normal, two
+simultaneous runs are not.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ def history_path() -> Path:
 
 
 class Busy(Exception):
-    """Un autre tour est déjà en cours."""
+    """Another run is already in progress."""
 
 
 @contextmanager
@@ -42,7 +42,7 @@ def lock():
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError as error:
         handle.close()
-        raise Busy(f"un tour est déjà en cours (verrou {path})") from error
+        raise Busy(f"a run is already in progress (lock {path})") from error
     handle.write(f"{os.getpid()} {datetime.now(timezone.utc).isoformat()}\n")
     handle.flush()
     try:

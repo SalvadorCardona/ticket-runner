@@ -1,16 +1,16 @@
-"""Un tour : prendre les tickets prêts, les faire, rendre compte dans Notion.
+"""One run: take the ready tickets, do them, report back to Notion.
 
-Le tour se déroule en deux temps, et l'ordre compte.
+A run has two phases, and the order matters.
 
-**D'abord, en série :** lire les tickets prêts, situer leur projet, et les
-*réserver* en les passant à « en cours ». Réserver avant de travailler est ce
-qui empêche le minuteur de relancer un ticket déjà pris — et le faire en série
-évite que deux tickets se disputent le même index de dépôts.
+**First, sequentially:** read the ready tickets, locate their project, and
+*claim* them by moving them to "in progress". Claiming before working is what
+stops the timer from picking up a ticket already taken — and doing it
+sequentially keeps two tickets from racing over the same repository index.
 
-**Ensuite, en parallèle :** chaque ticket réservé obtient son worktree, sa
-session Claude, sa branche et sa PR. Un ticket qui échoue n'emporte que
-lui-même : il retourne en « brouillon » avec la raison en commentaire, pendant
-que les autres continuent.
+**Then, in parallel:** each claimed ticket gets its worktree, its Claude
+session, its branch and its pull request. A ticket that fails takes only itself
+down: it goes back to "draft" with the reason in a comment, while the others
+carry on.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ class Ticket:
 
     @property
     def title(self) -> str:
-        return self.page.title or "(ticket sans titre)"
+        return self.page.title or "(untitled ticket)"
 
     @property
     def url(self) -> str:
@@ -73,18 +73,18 @@ class Runner:
 
     @property
     def database(self) -> str:
-        """L'ID de la base de tickets, résolu une fois pour toute la session."""
+        """The tickets database ID, resolved once for the whole session."""
         if not self._database:
             self._database = self.client.resolve_database(self.config.notion.tickets_database)
         return self._database
 
-    # -- sortie --------------------------------------------------------------
+    # -- output --------------------------------------------------------------
 
     def say(self, message: str) -> None:
         if not self.quiet:
             print(message, flush=True)
 
-    # -- lecture -------------------------------------------------------------
+    # -- reading -------------------------------------------------------------
 
     def ready(self) -> list[Ticket]:
         database = self.database
@@ -100,7 +100,7 @@ class Runner:
             page_id = page_id.split("?")[0].rstrip("/").rsplit("/", 1)[-1].rsplit("-", 1)[-1]
         return Ticket(self.client.page(page_id.replace("-", "")))
 
-    # -- écriture ------------------------------------------------------------
+    # -- writing -------------------------------------------------------------
 
     def _set(self, ticket: Ticket, **values: object) -> None:
         if self.dry_run:
@@ -113,29 +113,29 @@ class Runner:
         try:
             self.client.comment(ticket.page.id, text)
         except notion.NotionError as error:
-            self.say(f"    ! commentaire Notion refusé : {error}")
+            self.say(f"    ! Notion refused the comment: {error}")
 
     def _fail(self, ticket: Ticket, reason: str, detail: str = "") -> dict:
         self.say(f"    ✗ {ticket.title} — {reason}")
         self._set(ticket, **{self.config.notion.prop("status"): self.config.notion.state("failed")})
         self._comment(
             ticket,
-            f"{self.agent_label} — échec.\n{reason}" + (f"\n\n{detail}" if detail else ""),
+            f"{self.agent_label} — failed.\n{reason}" + (f"\n\n{detail}" if detail else ""),
         )
         return {"ticket": ticket.title, "id": ticket.id, "status": "failed", "reason": reason}
 
-    # -- préparation ---------------------------------------------------------
+    # -- preparation ---------------------------------------------------------
 
     def prepare(self, ticket: Ticket) -> Job | None:
-        """Situe le projet et réserve le ticket. None si le ticket est inexploitable."""
+        """Locate the project and claim the ticket. None if it is unusable."""
         relation = notion.read(ticket.page, self.config.notion.prop("project")) or []
         if not relation:
-            self._fail(ticket, "aucun projet lié : le runner ne sait pas dans quel dépôt travailler")
+            self._fail(ticket, "no project linked: the runner has no repository to work in")
             return None
         try:
             project = self.resolver.resolve(self.client, relation[0])
         except (LookupError, notion.NotionError) as error:
-            self._fail(ticket, "projet non situé sur le disque", str(error))
+            self._fail(ticket, "project not found on disk", str(error))
             return None
 
         base = self.config.runner.base_branch or git.default_branch(project.path)
@@ -145,7 +145,7 @@ class Runner:
         try:
             body = self.client.blocks_text(ticket.page.id)
         except notion.NotionError as error:
-            self._fail(ticket, "contenu du ticket illisible", str(error))
+            self._fail(ticket, "ticket content unreadable", str(error))
             return None
 
         job = Job(ticket, project, branch, base, worktree, body)
@@ -160,12 +160,12 @@ class Runner:
             )
         return job
 
-    # -- exécution -----------------------------------------------------------
+    # -- execution -----------------------------------------------------------
 
     def execute(self, job: Job) -> dict:
         ticket, project = job.ticket, job.project
         if self.dry_run:
-            self.say(f"    (simulation) {job.branch} depuis {job.base}")
+            self.say(f"    (dry run) {job.branch} from {job.base}")
             return {"ticket": ticket.title, "id": ticket.id, "status": "dry-run"}
 
         if self.config.runner.fetch:
@@ -173,7 +173,7 @@ class Runner:
         try:
             git.add_worktree(project.path, job.worktree, job.branch, job.base)
         except git.GitError as error:
-            return self._fail(ticket, "worktree impossible à créer", str(error))
+            return self._fail(ticket, "worktree could not be created", str(error))
 
         text = prompt_module.build(
             prompt_module.template(self.config.runner.prompt_file),
@@ -186,7 +186,7 @@ class Runner:
             url=ticket.url,
         )
         log = state.log_file(ticket.id)
-        self.say(f"    session Claude → {log}")
+        self.say(f"    Claude session → {log}")
 
         try:
             outcome = session.run(
@@ -199,19 +199,19 @@ class Runner:
             )
         except (OSError, FileNotFoundError) as error:
             git.remove_worktree(project.path, job.worktree)
-            return self._fail(ticket, "session Claude impossible à lancer", str(error))
+            return self._fail(ticket, "Claude session could not be started", str(error))
 
         trace = (
-            f"Session : `{outcome.session_id}` — reprendre avec `{outcome.resume_command}`\n"
-            f"Journal : `{log}`"
+            f"Session: `{outcome.session_id}` — resume with `{outcome.resume_command}`\n"
+            f"Log: `{log}`"
         )
 
         if not outcome.ok:
-            reason = "l'agent s'est arrêté sans trancher" if outcome.blocked else "la session a échoué"
+            reason = "the agent stopped without deciding" if outcome.blocked else "the session failed"
             detail = (outcome.summary if outcome.blocked else outcome.error) or ""
             kept = ""
             if self.config.runner.keep_worktree_on_failure:
-                kept = f"\nWorktree conservé : `{job.worktree}` (branche `{job.branch}`)"
+                kept = f"\nWorktree kept: `{job.worktree}` (branch `{job.branch}`)"
             else:
                 git.remove_worktree(project.path, job.worktree)
             return self._fail(ticket, reason, f"{detail}\n\n{trace}{kept}")
@@ -222,7 +222,7 @@ class Runner:
                 git.remove_worktree(project.path, job.worktree)
             return self._fail(
                 ticket,
-                "la session s'est déclarée terminée sans aucun commit",
+                "the session declared itself done without a single commit",
                 f"{outcome.summary}\n\n{trace}",
             )
 
@@ -232,21 +232,21 @@ class Runner:
             if not pushed.ok:
                 return self._fail(
                     ticket,
-                    "commits faits mais push refusé",
-                    f"{pushed.err or pushed.out}\n\nBranche locale `{job.branch}` conservée.\n{trace}",
+                    "commits made but the push was refused",
+                    f"{pushed.err or pushed.out}\n\nLocal branch `{job.branch}` kept.\n{trace}",
                 )
             if self.config.runner.open_pull_request:
                 body = (
                     f"{outcome.summary}\n\n"
-                    f"---\nTicket Notion : {ticket.url}\n"
-                    f"Session Claude Code : `{outcome.session_id}`\n"
-                    f"Ouverte par ticket-runner ({commits} commit{'s' if commits > 1 else ''})."
+                    f"---\nNotion ticket: {ticket.url}\n"
+                    f"Claude Code session: `{outcome.session_id}`\n"
+                    f"Opened by ticket-runner ({commits} commit{'s' if commits > 1 else ''})."
                 )
                 try:
                     pull_request = git.open_pull_request(job.worktree, ticket.title, body, job.base)
                 except git.GitError as error:
-                    self.say(f"    ! pull request non ouverte : {error}")
-                    job.notes.append(f"PR non ouverte : {error}")
+                    self.say(f"    ! pull request not opened: {error}")
+                    job.notes.append(f"Pull request not opened: {error}")
 
         git.remove_worktree(project.path, job.worktree)
 
@@ -259,15 +259,15 @@ class Runner:
         values[self.config.notion.prop("session")] = outcome.session_id
         self._set(ticket, **values)
 
-        cost = f" · {outcome.cost_usd:.3f} $" if outcome.cost_usd else ""
+        cost = f" · ${outcome.cost_usd:.3f}" if outcome.cost_usd else ""
         notes = ("\n" + "\n".join(job.notes)) if job.notes else ""
         self._comment(
             ticket,
-            f"{self.agent_label} — terminé.\n{outcome.summary}\n\n"
-            f"Branche `{job.branch}` · {commits} commit(s)"
-            + (f" · {pull_request}" if pull_request else " · pas de pull request")
+            f"{self.agent_label} — done.\n{outcome.summary}\n\n"
+            f"Branch `{job.branch}` · {commits} commit(s)"
+            + (f" · {pull_request}" if pull_request else " · no pull request")
             + notes
-            + f"\n{trace}\n{outcome.turns} tours · {outcome.seconds / 60:.1f} min{cost}",
+            + f"\n{trace}\n{outcome.turns} turns · {outcome.seconds / 60:.1f} min{cost}",
         )
         self.say(f"    ✓ {ticket.title} — {pull_request or job.branch}")
         return {
@@ -283,18 +283,18 @@ class Runner:
             "cost_usd": outcome.cost_usd,
         }
 
-    # -- tour complet --------------------------------------------------------
+    # -- a full run ----------------------------------------------------------
 
     def tick(self, *, limit: int | None = None, reference: str = "") -> list[dict]:
         if reference:
             tickets = [self.fetch_one(reference)]
-            self.say(f"Ticket demandé : {tickets[0].title}")
+            self.say(f"Requested ticket: {tickets[0].title}")
         else:
             tickets = self.ready()
             if not tickets:
-                self.say("Aucun ticket prêt.")
+                self.say("No ticket ready.")
                 return []
-            self.say(f"{len(tickets)} ticket(s) prêt(s).")
+            self.say(f"{len(tickets)} ticket(s) ready.")
 
         ceiling = limit if limit is not None else self.config.runner.max_concurrent
         jobs = [job for job in (self.prepare(ticket) for ticket in tickets[:ceiling]) if job]

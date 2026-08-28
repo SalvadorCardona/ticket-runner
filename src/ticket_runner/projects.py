@@ -1,15 +1,15 @@
-"""Faire correspondre un projet Notion à un dépôt sur le disque.
+"""Matching a Notion project to a repository on disk.
 
-Trois façons, dans cet ordre, de la plus explicite à la plus devinée :
+Three ways, in this order, from the most explicit to the most guessed:
 
-1. une entrée `[projects]` dans la configuration — le nom Notion, le chemin ;
-2. la propriété `github` du projet, confrontée aux `origin` des dépôts trouvés
-   sous `workspace_root` ;
-3. à défaut, un dossier portant le nom du dépôt.
+1. a `[projects]` entry in the configuration — the Notion name, the path;
+2. the project's `github` property, matched against the `origin` remotes of the
+   repositories found under `workspace_root`;
+3. failing that, a directory named after the repository.
 
-La première suffit toujours ; les deux autres évitent d'avoir à déclarer chaque
-projet à la main. Un projet qu'on ne sait pas situer n'est jamais deviné à
-moitié : le ticket est reposé avec la raison en commentaire.
+The first always works; the other two save you from declaring every project by
+hand. A project that cannot be located is never half-guessed: the ticket is put
+back with the reason in a comment.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ class Project:
 
 
 def _normalise(url: str) -> str:
-    """git@github.com:user/repo.git et https://github.com/user/repo → user/repo."""
+    """git@github.com:user/repo.git and https://github.com/user/repo → user/repo."""
     url = url.strip().removesuffix(".git")
     url = re.sub(r"^[a-z]+://", "", url)
     url = re.sub(r"^[^@/]+@", "", url)
@@ -42,7 +42,7 @@ def _normalise(url: str) -> str:
 
 
 def _walk(root: Path, max_depth: int = 4) -> list[Path]:
-    """Les dépôts git sous root, sans descendre dans les dossiers de dépendances."""
+    """Git repositories under root, without descending into dependency folders."""
     found: list[Path] = []
     stack = [(root, 0)]
     while stack:
@@ -55,7 +55,7 @@ def _walk(root: Path, max_depth: int = 4) -> list[Path]:
             continue
         if any(entry.name == ".git" for entry in entries):
             found.append(directory)
-            continue  # pas de dépôt dans un dépôt
+            continue  # no repository inside a repository
         for entry in entries:
             if entry.is_dir() and not entry.name.startswith(".") and entry.name not in SKIP:
                 stack.append((entry, depth + 1))
@@ -87,7 +87,7 @@ class Resolver:
         if override:
             path = Path(override)
             if not git.is_repo(path):
-                raise LookupError(f"« {name} » : {path} n'est pas un dépôt git")
+                raise LookupError(f"“{name}”: {path} is not a git repository")
             return Project(name, path, page_id, github)
 
         index = self._index()
@@ -104,7 +104,7 @@ class Resolver:
             return Project(name, guess, page_id, github)
 
         raise LookupError(
-            f"« {name} » : aucun dépôt trouvé sous {self._root}"
-            + (f" pour {github}" if github else " (propriété github vide)")
-            + f'\nAjoutez  "{name}" = "/chemin/vers/le/depot"  sous [projects].'
+            f"“{name}”: no repository found under {self._root}"
+            + (f" for {github}" if github else " (the github property is empty)")
+            + f'\nAdd  "{name}" = "/path/to/the/repo"  under [projects].'
         )
