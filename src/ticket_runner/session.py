@@ -76,6 +76,13 @@ def run(
     command = [
         binary,
         "--print",
+        # Claude in Chrome, so a ticket can be handled in the browser the way a
+        # person would. `--print` turns it off by default and only the flag
+        # overrides that, so the setting alone would never reach us here. It
+        # attaches to the Chrome already running — it cannot start one — and it
+        # needs the OAuth session of the CLI: an ANTHROPIC_API_KEY session gets
+        # `user:inference` alone and the integration refuses to load.
+        "--chrome",
         "--session-id", session_id,
         "--output-format", "stream-json",
         "--verbose",
