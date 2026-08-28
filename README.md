@@ -1,23 +1,33 @@
 # ticket-runner
 
 **Your Notion tickets, played by Claude Code.** You write a ticket, you move it to
-*Not started*, and a few minutes later a pull request is waiting for you — its own branch,
-its commits, a description, and the session link in the ticket's comments.
+*Not started*, and a few minutes later the work is waiting for you — a pull request on its
+own branch, or, for a ticket that asks for a document rather than code, the answer written
+straight into the Notion page.
 
 The runner lives on your machine, in the background, across **all of your projects at
-once**: it is the ticket's `Project` relation that decides where it goes to work. A
-project with a repository gets a pull request; a project without one gets its answer
-written straight back into the Notion ticket.
+once**. It never touches your working copy: every ticket gets a disposable git worktree of
+its own.
 
 ```
-Notion                    ticket-runner                     git
-──────                    ─────────────                     ───
-Not started    ──────▶    claims the ticket
-                          git worktree + branch       ──▶   ticket/remove-the-header-3ca45168
-In progress    ◀──────    claude --print
-                          commits verified
-Done + PR      ◀──────    push + gh pr create         ──▶   pull request to review
+Notion                    ticket-runner                       what you get
+──────                    ─────────────                       ────────────
+
+Not started   ──────▶     claims it, writes the session link
+                          │
+In progress   ◀───────────┤
+                          │
+                          ├─ has a repository ──▶  worktree, branch, commits
+                          │                        push + gh pr create      ──▶  a pull request
+                          │
+                          └─ has none ──────────▶  scratch dir, ANSWER.md
+                                                   published as Notion blocks ──▶  the page itself
+Need Review   ◀───────────
 ```
+
+Which of the two you get is decided by the project, not by a setting: a project that names
+a repository produces code, a project that names none — or a ticket with no project at all
+— produces a document.
 
 ---
 
@@ -337,7 +347,11 @@ often.
 | Symptom | Most likely cause |
 | --- | --- |
 | `object not found` on the database | the database is not shared with the integration (`···` → Connections) |
-| “project not found on disk” | add `"Notion name" = "/path"` under `[projects]` |
+| “project not found on disk” | the project names a repository that is not there: fix its `path` or `github` property, or add `"Notion name" = "/path"` under `[projects]` |
+| a ticket became a document when you wanted code | its project names no repository. Give the project page a `path` or a `github` |
+| “nothing to work from” | the ticket has neither a title nor a description — a page left on the bare template counts as empty |
+| a ticket sat in *In progress* forever | it no longer can: the next run puts back any ticket this host claimed while no run was alive |
+| no desktop notification | `notify-send` is missing, or the service has no session bus. `runner.notify = false` silences the attempt |
 | the timer does not fire with no session open | `sudo loginctl enable-linger $USER` |
 | branch pushed, no pull request | `gh` cannot reach its credentials from a systemd service — locked keyring. Use `gh auth login` with a token, or set `GH_TOKEN` in the unit |
 | `claude: command not found` in the journal | the PATH baked into the unit predates a node version change: run `install.sh` again |
