@@ -22,7 +22,7 @@ nobody to talk to: no one can answer a question while the session runs.
 
 {body}
 
-# Context
+{brief}# Context
 
 - Repository: {repo}
 - You are in a dedicated git worktree, on branch `{branch}`, created from \
@@ -61,25 +61,32 @@ your answer will be written back into the Notion ticket itself.
 
 {body}
 
-# Context
+{brief}# Context
 
 - Working directory: {repo} — empty and disposable, it is yours to use.
 - Notion ticket: {url}
 
 # What is expected
 
-1. Do the work properly before writing: search the web where facts, prices, \
-deadlines or official procedures are involved, and prefer primary sources. Say \
-when something could not be verified rather than filling the gap.
+1. Do the work properly before writing: read what the ticket points at, and \
+search the web where the answer depends on facts you cannot know. Prefer \
+primary sources.
 2. Write the deliverable to a file named `ANSWER.md` in your working directory. \
 That file is what gets published to the ticket, so it must stand on its own: no \
 "as discussed above", no reference to this prompt.
 3. Write it in the language the ticket is written in.
 4. Markdown, and only what Notion renders: headings, bullet and numbered lists, \
 checkboxes, quotes, code fences, links, bold and italic. No HTML, no tables.
-5. Be concrete. Steps someone can follow, in order, with what each one costs, \
-how long it takes and where it happens. A list of generalities helps nobody.
-6. If the request is too ambiguous to answer usefully, do not pad: write no \
+5. **Match the shape of what is asked, not a default shape.** A procedure wants \
+ordered steps with costs, durations and where each one happens. A short piece — \
+a post, an email, a headline — wants the text itself, ready to copy, respecting \
+the length its channel imposes; if a choice of angle matters, give two or three \
+variants and say in one line what separates them. Do not wrap a two-line \
+deliverable in five headings, and do not answer a research question with a slogan.
+6. Where facts, prices, deadlines or official procedures are involved, verify \
+them and cite the source. Say what could not be verified rather than filling \
+the gap.
+7. If the request is too ambiguous to answer usefully, do not pad: write no \
 `ANSWER.md` and explain what is missing.
 
 End with a final line, exactly one of these two:
@@ -99,12 +106,17 @@ def build(
     branch: str,
     base: str,
     url: str,
+    brief: str = "",
 ) -> str:
     # A ticket may have no project at all: the sentence has to read either way.
     scope = f"for the {project} project" if project else "that belongs to no project"
+    # Standing instructions from the project page, if it has any. They come
+    # before the context so they read as the frame, not as an afterthought.
+    heading = f"# About {project}\n\n{brief.strip()}\n\n" if brief.strip() else ""
     return template.format(
         project=project or "no project",
         scope=scope,
+        brief=heading,
         title=title,
         body=body.strip() or "(the ticket has no description: everything is in the title)",
         repo=repo,

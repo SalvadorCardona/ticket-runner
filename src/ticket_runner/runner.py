@@ -376,6 +376,7 @@ class Runner:
             branch=job.branch,
             base=job.base,
             url=job.ticket.url,
+            brief=job.project.brief,
         )
         log = job.log or state.log_file(short_id(job.ticket.id))
         chosen = job.model or self.config.runner.model

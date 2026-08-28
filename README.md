@@ -1,9 +1,12 @@
 # ticket-runner
 
 **Your Notion tickets, played by Claude Code.** You write a ticket, you move it to
-*Not started*, and a few minutes later the work is waiting for you — a pull request on its
-own branch, or, for a ticket that asks for a document rather than code, the answer written
-straight into the Notion page.
+*Not started*, and a few minutes later the work is waiting for you.
+
+Not only the tickets about code. *"Remove that header"* comes back as a pull request on
+its own branch; *"draft me a post about the new release"* comes back written into the
+ticket page itself. Both live on the same board, and it is the ticket that decides which
+one you get — not a setting.
 
 The runner lives on your machine, in the background, across **all of your projects at
 once**. It never touches your working copy: every ticket gets a disposable git worktree of
@@ -240,6 +243,19 @@ written back into the Notion ticket as real blocks: headings, lists, checkboxes,
 No branch, no pull request. That is what you want for *"draft me the steps to become a
 certified trainer"* or *"summarise this for me"*: there is nothing to commit, and the
 deliverable is the page itself.
+
+**Whatever you write on the project page becomes standing instructions** for every
+ticket of that project. Not the ticket's page — the *project's*. It is prepended to the
+brief the agent receives, so it is written once instead of retyped into every ticket:
+
+> **Communication**
+> Tone: first person, short sentences, no superlatives. No emoji, no hashtags. Show a
+> verifiable number, not a promise. If the tool has a limit, say it.
+> X: 280 characters for a single post. Always offer two or three angles.
+
+That is what turns *"write me a post about the new tool"* into your voice rather than a
+generic one — and, on a code project, what carries conventions that do not belong in any
+single ticket. An empty project page costs nothing and changes nothing.
 
 The runner never guesses from a project's name. A name that happens to match a folder is
 a coincidence, and turning a writing task into commits on a like-named repository is a

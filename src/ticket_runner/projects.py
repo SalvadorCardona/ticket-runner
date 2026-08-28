@@ -31,6 +31,7 @@ class Project:
     path: Path | None
     notion_id: str = ""
     github: str = ""
+    brief: str = ""
 
     @property
     def is_code(self) -> bool:
@@ -85,6 +86,21 @@ class Resolver:
                 self._by_remote.setdefault(repo.name.lower(), repo)
         return self._by_remote
 
+    def brief(self, client: notion.Client, page_id: str) -> str:
+        """Whatever is written on the project page, as standing instructions.
+
+        A project is more than a path: it has an audience, a voice, conventions,
+        things never to do. Written once on the project page, they reach every
+        ticket of that project without being retyped — which is what makes
+        "write me a tweet" produce your tone rather than a generic one.
+
+        An empty project page costs nothing and changes nothing.
+        """
+        try:
+            return client.blocks_text(page_id)
+        except notion.NotionError:
+            return ""
+
     def resolve(self, client: notion.Client, page_id: str) -> Project:
         page = client.page(page_id)
         name = page.title or page_id
@@ -99,7 +115,7 @@ class Resolver:
             path = Path(str(declared)).expanduser()
             if not git.is_repo(path):
                 raise LookupError(f"“{name}”: {path}, from {source}, is not a git repository")
-            return Project(name, path, page_id, github)
+            return Project(name, path, page_id, github, self.brief(client, page_id))
 
         if not github:
             # Nothing declares a repository, so the project does not have one:
@@ -107,15 +123,15 @@ class Resolver:
             # from the project's name would be worse than useless here — it
             # would silently turn a writing task into a commit on some repo that
             # merely happens to be named alike.
-            return Project(name, None, page_id, "")
+            return Project(name, None, page_id, "", self.brief(client, page_id))
 
         index = self._index()
         match = index.get(_normalise(github))
         if match:
-            return Project(name, match, page_id, github)
+            return Project(name, match, page_id, github, self.brief(client, page_id))
         slug = _normalise(github).split("/")[-1]
         if slug in index:
-            return Project(name, index[slug], page_id, github)
+            return Project(name, index[slug], page_id, github, self.brief(client, page_id))
 
         raise LookupError(
             f"“{name}”: {github} is declared but no matching repository exists "
