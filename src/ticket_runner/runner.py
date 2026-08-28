@@ -24,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import agents, git, notion, notify, prompt as prompt_module, session, state
+from . import agents, git, notion, notify, progress, prompt as prompt_module, session, state
 from . import update as update_module
 from . import workspace as workspace_module
 from .config import PRIORITIES, Config, state_dir
@@ -612,15 +612,33 @@ class Runner:
         # choice, the more deliberate it was.
         chosen = job.model or job.agent.model or self.config.runner.model
         self.say(f"    Claude session {job.session_id}{' · ' + chosen if chosen else ''} → {log}")
-        outcome = session.run(
-            text,
-            cwd=job.workdir,
-            log=log,
-            model=chosen,
-            permission_mode=self.config.runner.permission_mode,
-            timeout_minutes=self.config.runner.timeout_minutes,
-            session_id=job.session_id,
-        )
+        live = self._live(job)
+        try:
+            outcome = session.run(
+                text,
+                cwd=job.workdir,
+                log=log,
+                model=chosen,
+                permission_mode=self.config.runner.permission_mode,
+                timeout_minutes=self.config.runner.timeout_minutes,
+                session_id=job.session_id,
+                on_event=live.event if live else None,
+            )
+        except BaseException:
+            # A session that dies still leaves a ticket saying “⏳ Live” and a
+            # column stuck on whatever it was doing. Closing here is what makes
+            # the page tell the truth on the way out too.
+            if live:
+                live.close("interrupted")
+            raise
+        if live:
+            # The toggle's last word: what the session achieved, or which of the
+            # two ways of not achieving it this was.
+            live.close(
+                outcome.summary
+                if outcome.ok
+                else ("blocked — it asked a question" if outcome.blocked else "stopped")
+            )
         if self.config.runner.attach_sessions:
             # The session ran in a directory that is about to be deleted. Filed
             # under the project instead, it shows up in `claude --resume` there,
@@ -630,6 +648,24 @@ class Runner:
                 job.session_home = home
                 self.say(f"    session filed under {home}")
         return outcome
+
+    def _live(self, job: Job) -> progress.Live | None:
+        """The ticket's live report, or None when it is not wanted.
+
+        Off in a dry run, since a dry run writes nothing anywhere, and off when
+        `runner.progress` says so. Everything else it needs — the page, the
+        board and the column — it already has.
+        """
+        if self.dry_run or not self.config.runner.progress:
+            return None
+        return progress.Live(
+            self.client,
+            job.ticket.page.id,
+            database=self.database,
+            property_name=self.config.notion.prop("progress"),
+            interval=self.config.runner.progress_interval_seconds,
+            say=self.say,
+        )
 
     def _trace(self, job: Job, outcome: session.Outcome) -> str:
         picker = f", or pick it from `claude` in `{job.session_home}`" if job.session_home else ""

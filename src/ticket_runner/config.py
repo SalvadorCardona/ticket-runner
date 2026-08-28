@@ -97,6 +97,9 @@ class Runner:
     attach_sessions: bool = True
     session_host: str = ""
     notify: bool = True
+    # The steps of a running session, written into its ticket as they happen.
+    progress: bool = True
+    progress_interval_seconds: int = 10
     auto_update: bool = True
     update_interval_seconds: int = 3600
     log_retention_days: int = 14
@@ -143,6 +146,9 @@ _DEFAULT_PROPERTIES = {
     "priority": "Priority",    # which ready ticket goes first
     "cost": "Cost",            # written back, in dollars
     "duration": "Duration",    # written back, in minutes
+    # What the session is doing right now, rewritten every few seconds while it
+    # runs and cleared when it ends. The board's live column.
+    "progress": "Progress",
     # A date here holds the ticket until that moment. It is a start gate, not a
     # deadline — "Due Date" said the opposite of what the runner does with it.
     "due": "Scheduled",
@@ -312,6 +318,14 @@ def load(path: Path | None = None) -> Config:
         attach_sessions=bool(runner_raw.get("attach_sessions", defaults.attach_sessions)),
         session_host=str(runner_raw.get("session_host", defaults.session_host)).strip(),
         notify=bool(runner_raw.get("notify", defaults.notify)),
+        progress=bool(runner_raw.get("progress", defaults.progress)),
+        # Ten seconds reads as live and costs three writes a ticket per tick.
+        # The floor is five: below that, two tickets running at once would spend
+        # the integration's rate limit on saying what they are about to do.
+        progress_interval_seconds=max(
+            5,
+            int(runner_raw.get("progress_interval_seconds", defaults.progress_interval_seconds)),
+        ),
         auto_update=bool(runner_raw.get("auto_update", defaults.auto_update)),
         # A run asks the remote at most once per this interval. The floor is a
         # minute: at a ten-second cadence, an unbounded value would turn into a

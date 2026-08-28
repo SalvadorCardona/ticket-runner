@@ -4,6 +4,9 @@ The session runs in `--print` mode with `stream-json` output: the raw stream is
 written to a log as-is, which lets you follow a ticket live
 (`ticket-runner logs -f`) and read back afterwards why it failed.
 
+`on_event` sees every event of that stream as it arrives, which is what lets
+the runner write the steps into the Notion ticket while they happen.
+
 The session ID is **drawn before** launching and passed as `--session-id`. So we
 know it even if the session dies halfway, and `claude --resume <id>` reopens the
 conversation exactly where it stopped — which is what makes a failure something
@@ -24,6 +27,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 from urllib.parse import parse_qs, quote, urlparse
 
 
@@ -67,6 +71,7 @@ def run(
     permission_mode: str = "bypassPermissions",
     timeout_minutes: int = 30,
     session_id: str = "",
+    on_event: Callable[[dict], None] | None = None,
 ) -> Outcome:
     binary = available()
     if not binary:
@@ -133,6 +138,15 @@ def run(
                     event = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                if on_event is not None:
+                    try:
+                        on_event(event)
+                    except Exception as error:  # noqa: BLE001
+                        # Whoever watches the session is never allowed to stop
+                        # it: a reporter that throws is dropped, and the ticket
+                        # runs to its end unwatched.
+                        print(f"    ! live report dropped: {error}", flush=True)
+                        on_event = None
                 if event.get("type") == "result":
                     final = event
                 elif event.get("type") == "assistant":

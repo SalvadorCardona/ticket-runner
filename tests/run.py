@@ -25,7 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ticket_runner import config as C  # noqa: E402
-from ticket_runner import agents, markdown, notion, prompt, provision, session  # noqa: E402
+from ticket_runner import agents, markdown, notion, progress, prompt, provision, session  # noqa: E402
 from ticket_runner import update, workspace  # noqa: E402
 from ticket_runner.runner import Runner  # noqa: E402
 from ticket_runner.__main__ import _names  # noqa: E402
@@ -1150,6 +1150,192 @@ def a_board_without_a_review_column_is_never_even_queried():
         {"done": "Done"},
     )
     assert closed == 0 and client.written == []
+
+
+
+# -- the live report ---------------------------------------------------------
+
+
+def _assistant(*blocks) -> dict:
+    return {"type": "assistant", "message": {"content": list(blocks)}}
+
+
+def _tool(name: str, **payload) -> dict:
+    return {"type": "tool_use", "name": name, "input": payload}
+
+
+@case
+def an_event_becomes_the_line_a_human_would_write():
+    steps = progress.describe(
+        _assistant(
+            {"type": "text", "text": "I will read the\nconfiguration first."},
+            _tool("Bash", command="npm test -- --watch=false"),
+            _tool("Read", file_path="src/app/config.ts"),
+        )
+    )
+    assert [step.line for step in steps] == [
+        "I will read the configuration first.",
+        "Bash · npm test -- --watch=false",
+        "Read · src/app/config.ts",
+    ]
+
+
+@case
+def a_tool_nobody_named_still_says_what_it_touched():
+    """An MCP tool, a new built-in: unknown is not a reason to say nothing."""
+    steps = progress.describe(_assistant(_tool("mcp__github__create_pull_request", url="x/y#3")))
+    assert steps[0].line == "create_pull_request · x/y#3"
+
+
+@case
+def only_a_failing_tool_result_is_worth_a_line():
+    quiet = progress.describe(
+        {"type": "user", "message": {"content": [{"type": "tool_result", "content": "ok"}]}}
+    )
+    loud = progress.describe(
+        {
+            "type": "user",
+            "message": {
+                "content": [
+                    {"type": "tool_result", "is_error": True, "content": [{"text": "exit 1"}]}
+                ]
+            },
+        }
+    )
+    assert quiet == []
+    assert loud[0].line == "Error · exit 1"
+    # The payload is the log's business, never the ticket's.
+    assert progress.describe({"type": "result", "num_turns": 4}) == []
+
+
+class _Live:
+    """A Notion that counts what a live report would have written to it."""
+
+    def __init__(self, refuse=False):
+        self.refuse = refuse
+        self.blocks = []          # every child appended under the toggle
+        self.titles = []          # every title the toggle has carried
+        self.properties = []      # every value written to the board column
+
+    def append_blocks(self, block_id, blocks):
+        if self.refuse:
+            raise notion.NotionError("403 forbidden")
+        if block_id == "page":
+            return ["toggle"]
+        self.blocks += [
+            "".join(part["text"]["content"] for part in block["bulleted_list_item"]["rich_text"])
+            for block in blocks
+        ]
+        return ["block"] * len(blocks)
+
+    def update_block(self, block_id, payload):
+        if self.refuse:
+            raise notion.NotionError("403 forbidden")
+        self.titles.append(payload["toggle"]["rich_text"][0]["text"]["content"])
+
+    def update(self, database_id, page_id, values):
+        if self.refuse:
+            raise notion.NotionError("403 forbidden")
+        self.properties.append(values["Progress"])
+
+
+class _Clock:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+
+def _reporting(refuse=False, interval=10.0):
+    clock, client = _Clock(), _Live(refuse)
+    live = progress.Live(
+        client,
+        "page",
+        database="db",
+        property_name="Progress",
+        interval=interval,
+        clock=clock,
+        say=lambda message: None,
+    )
+    return live, client, clock
+
+
+@case
+def the_steps_are_written_on_the_cadence_and_not_before():
+    """Six events a second must not become six writes a second."""
+    live, client, clock = _reporting()
+    for index in range(5):
+        clock.now += 1
+        live.add(progress.Step("Read", f"file-{index}.py"))
+    assert client.blocks == [], "nothing written before the cadence came round"
+
+    clock.now += 6
+    live.add(progress.Step("Bash", "pytest"))
+    assert len(client.blocks) == 6, "one write, carrying everything that waited"
+    assert client.titles[-1].startswith("⏳ Live")
+    assert client.properties[-1] == "Bash · pytest", "the board column shows the last step"
+
+
+@case
+def what_is_still_waiting_is_written_when_the_session_ends():
+    live, client, clock = _reporting()
+    live.add(progress.Step("Edit", "src/x.py"))
+    clock.now += 120
+    live.close("removed the header")
+
+    assert client.blocks == ["Edit  src/x.py"]
+    assert client.titles[-1] == "✓ 1 step(s) · 2 min · removed the header"
+    # A finished ticket no longer claims to be doing anything.
+    assert client.properties[-1] == ""
+
+
+@case
+def a_session_that_did_nothing_leaves_no_toggle_behind():
+    live, client, _ = _reporting()
+    live.close("nothing to do")
+    assert client.blocks == [] and client.titles == []
+
+
+@case
+def the_same_step_twice_in_a_row_is_said_once():
+    live, client, clock = _reporting()
+    live.add(progress.Step("Read", "src/x.py"))
+    live.add(progress.Step("Read", "src/x.py"))
+    live.add(progress.Step("Read", "src/y.py"))
+    clock.now += 11
+    live.flush()
+    assert client.blocks == ["Read  src/x.py", "Read  src/y.py"]
+
+
+@case
+def a_notion_that_refuses_costs_the_report_and_not_the_ticket():
+    """Reporting is commentary: it never becomes a reason to fail a ticket."""
+    live, client, clock = _reporting(refuse=True)
+    for index in range(10):
+        clock.now += 11
+        live.add(progress.Step("Read", f"file-{index}.py"))
+    live.close("done anyway")
+    assert live.disabled and client.blocks == []
+
+
+@case
+def a_reporter_never_writes_more_than_a_page_can_hold():
+    live, client, clock = _reporting()
+    for index in range(progress.MAX_STEPS + 50):
+        live.add(progress.Step("Read", f"file-{index}.py"))
+    clock.now += 11
+    live.flush()
+    assert len(client.blocks) == progress.MAX_STEPS + 1, "the steps, then one line saying enough"
+    assert client.blocks[-1].startswith("…")
+
+    # Capped is not disabled: the steps stop, the report still says how it ended.
+    live.add(progress.Step("Read", "one-too-many.py"))
+    clock.now += 11
+    live.close("done")
+    assert len(client.blocks) == progress.MAX_STEPS + 1
+    assert client.titles[-1].startswith("✓") and client.titles[-1].endswith("· done")
+
 
 
 def main() -> int:
