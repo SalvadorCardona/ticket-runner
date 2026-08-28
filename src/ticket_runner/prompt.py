@@ -8,6 +8,10 @@ Two choices are made here, and they decide the quality of the whole system:
 - **an ambiguous ticket is not guessed.** The agent must answer `RESULT: blocked`
   and stop. A badly specified ticket coming back as a draft with the question
   asked beats a pull request that confidently does the wrong thing.
+
+What surrounds the ticket is composed from the widest frame to the narrowest —
+who you are, then the project, then the task — so that the specific is read last
+and wins when the two disagree.
 """
 
 from __future__ import annotations
@@ -22,7 +26,7 @@ nobody to talk to: no one can answer a question while the session runs.
 
 {body}
 
-{brief}# Context
+{context}{brief}# Context
 
 - Repository: {repo}
 - You are in a dedicated git worktree, on branch `{branch}`, created from \
@@ -61,7 +65,7 @@ your answer will be written back into the Notion ticket itself.
 
 {body}
 
-{brief}# Context
+{context}{brief}# Context
 
 - Working directory: {repo} — empty and disposable, it is yours to use.
 - Notion ticket: {url}
@@ -107,15 +111,22 @@ def build(
     base: str,
     url: str,
     brief: str = "",
+    context: str = "",
 ) -> str:
     # A ticket may have no project at all: the sentence has to read either way.
     scope = f"for the {project} project" if project else "that belongs to no project"
+    # Who the work is for: the workspace's context page, the same on every
+    # ticket of every project. It matters most on a document ticket, where the
+    # agent starts in an empty directory and has nothing else to go on.
+    frame = f"# Who you are working for\n\n{context.strip()}\n\n" if context.strip() else ""
     # Standing instructions from the project page, if it has any. They come
-    # before the context so they read as the frame, not as an afterthought.
+    # before the `# Context` block so they read as the frame, not as an
+    # afterthought — and after the page above, which frames them in turn.
     heading = f"# About {project}\n\n{brief.strip()}\n\n" if brief.strip() else ""
     return template.format(
         project=project or "no project",
         scope=scope,
+        context=frame,
         brief=heading,
         title=title,
         body=body.strip() or "(the ticket has no description: everything is in the title)",

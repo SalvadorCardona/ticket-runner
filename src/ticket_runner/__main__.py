@@ -18,6 +18,7 @@ from pathlib import Path
 from datetime import datetime
 
 from . import __version__, config as config_module, git, notion, session, state
+from . import workspace as workspace_module
 from .projects import Resolver
 from .runner import Runner
 
@@ -332,7 +333,7 @@ def command_doctor(args: argparse.Namespace) -> int:
             "gh authenticated" if authed.returncode == 0 else "gh not authenticated: gh auth login"
         )
 
-    title("Workspace")
+    title("Repositories")
     root = configuration.runner.workspace_root
     if root.is_dir():
         resolver = Resolver(root, configuration.projects)
@@ -355,16 +356,42 @@ def command_doctor(args: argparse.Namespace) -> int:
         bad(f"token refused: {error}")
         return 1
 
+    if configuration.notion.workspace:
+        title("Notion workspace")
     try:
-        database = client.resolve_database(configuration.notion.tickets_database)
+        space = workspace_module.resolve(client, configuration.notion)
+    except notion.NotionError as error:
+        for line in str(error).splitlines():
+            bad(line.strip())
+        warn("every page must be shared with the integration (··· menu → Connections)")
+        return 1
+    database = space.tickets
+
+    if configuration.notion.workspace:
+        listed = ", ".join(f"“{name}”" for name in sorted(space.rows)) or "nothing"
+        ok(f"{len(space.rows)} page(s): {listed}")
+        for message in space.warnings:
+            warn(message)
+        if space.context:
+            first = space.context.strip().splitlines()[0]
+            ok(
+                f"“{configuration.notion.page('context')}” — {len(space.context)} characters "
+                f"in every prompt: {DIM}{first[:60]}{RESET}"
+            )
+        if space.projects:
+            ok(f"“{configuration.notion.page('projects')}” → database {space.projects}")
+
+    title("Tickets database")
+    try:
         schema = client.schema(database)
     except notion.NotionError as error:
-        bad(f"tickets database unreachable: {str(error).splitlines()[0]}")
+        bad(f"unreachable: {str(error).splitlines()[0]}")
         warn("the database must be shared with the integration (··· menu → Connections)")
         return 1
-    ok(f"tickets database readable — {len(schema)} property(ies)")
-    if database != configuration.notion.tickets_database:
-        warn(f"resolved from “{configuration.notion.tickets_database}” to database {database}")
+    ok(f"readable — {len(schema)} property(ies)")
+    reference = configuration.notion.tickets_database or configuration.notion.page("tickets")
+    if database != reference:
+        warn(f"resolved from “{reference}” to database {database}")
 
     for key, expected in (
         ("status", ("status", "select")),

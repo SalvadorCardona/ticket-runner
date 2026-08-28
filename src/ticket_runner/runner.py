@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import git, notion, notify, prompt as prompt_module, session, state
+from . import workspace as workspace_module
 from .config import PRIORITIES, Config, state_dir
 from .projects import Project, Resolver
 
@@ -130,14 +131,24 @@ class Runner:
         self.client = notion.Client(config.notion.token)
         self.resolver = Resolver(config.runner.workspace_root, config.projects)
         self.agent_label = f"ticket-runner@{socket.gethostname()}"
-        self._database = ""
+        self._workspace: workspace_module.Workspace | None = None
+
+    @property
+    def workspace(self) -> workspace_module.Workspace:
+        """The databases and the standing context, resolved once per run.
+
+        Once, because a run can hold several tickets and they all read the same
+        thing — and because the context page would otherwise be fetched again
+        for every ticket, to be told the same story.
+        """
+        if self._workspace is None:
+            self._workspace = workspace_module.resolve(self.client, self.config.notion)
+        return self._workspace
 
     @property
     def database(self) -> str:
         """The tickets database ID, resolved once for the whole session."""
-        if not self._database:
-            self._database = self.client.resolve_database(self.config.notion.tickets_database)
-        return self._database
+        return self.workspace.tickets
 
     # -- output --------------------------------------------------------------
 
@@ -423,6 +434,7 @@ class Runner:
             base=job.base,
             url=job.ticket.url,
             brief=job.project.brief,
+            context=self.workspace.context,
         )
         log = job.log or state.log_file(short_id(job.ticket.id))
         chosen = job.model or self.config.runner.model
@@ -659,6 +671,11 @@ class Runner:
                 return []
             later = f", {len(waiting)} scheduled for later" if waiting else ""
             self.say(f"{len(tickets)} ticket(s) ready{later}.")
+
+        # Said here rather than on resolution: at a ten-second cadence, a run
+        # with nothing to do would repeat them forever into the journal.
+        for warning in self.workspace.warnings:
+            self.say(f"  ! {warning}")
 
         ceiling = limit if limit is not None else self.config.runner.max_concurrent
         jobs = [job for job in (self.prepare(ticket) for ticket in tickets[:ceiling]) if job]

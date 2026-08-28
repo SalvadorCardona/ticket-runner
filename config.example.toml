@@ -6,13 +6,35 @@
 
 [notion]
 # Token of an internal Notion integration (https://www.notion.so/my-integrations).
-# BOTH the tickets database AND the projects database must be shared with it:
-# the database's ··· menu → Connections → your integration.
+# The workspace page must be shared with it — everything under it is then
+# reachable: the page's ··· menu → Connections → your integration.
 token = "ntn_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
-# The URL of the tickets database is enough — the ID is extracted from it. If it
-# is an inline database, the URL of the page holding it works too.
+# The URL of your workspace database: one database whose rows are your master
+# pages, each holding its own inline database. Name it once, and the runner
+# finds the rest by the title of a row — see [notion.pages] below.
+workspace = ""
+
+# Only if you would rather point at one database than share a whole workspace.
+# Set, it wins over the workspace's tickets page. The URL is enough — the ID is
+# extracted from it — and if it is an inline database, the URL of the page
+# holding it works too.
 tickets_database = ""
+
+# Which row of the workspace is what, matched on its title, case ignored.
+#   tickets   REQUIRED: the page holding your tickets database
+#   projects  optional: the page holding your projects database. The runner
+#             reaches a project through the ticket's relation, so this only
+#             gives `doctor` something to check
+#   context   optional: a plain page saying who you are, what you work with,
+#             how you like things written. Its text goes into EVERY prompt,
+#             before the project's brief and before the ticket — which is what
+#             makes a document ticket come back sounding like you rather than
+#             like nobody. Keep it to one screen: you pay it on every ticket.
+[notion.pages]
+tickets = "Master Tickets"
+projects = "Master project"
+context = "Soul"
 
 # Rename here if your Notion columns are named differently.
 # A property that does not exist in the database is simply skipped.
