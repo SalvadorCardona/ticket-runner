@@ -70,6 +70,13 @@ class Notion:
         # whole reason the runner distinguishes them.
         if key == "blocked" and "blocked" not in self.status and "failed" in self.status:
             return self.state("failed")
+        # "review" reads the same way, against a named `done`: a file that says
+        # where a finished ticket goes but not where it waits for its pull
+        # request has one column for both, and nothing to watch for a merge. A
+        # file that names neither gets the defaults, which are two — the pull
+        # request being open and it being merged are not the same day.
+        if key == "review" and "review" not in self.status and "done" in self.status:
+            return self.state("done")
         return self.status.get(key, _DEFAULT_STATUS[key])
 
 
@@ -90,6 +97,8 @@ class Runner:
     attach_sessions: bool = True
     session_host: str = ""
     notify: bool = True
+    auto_update: bool = True
+    update_interval_seconds: int = 3600
     log_retention_days: int = 14
     dry_run: bool = False
     prompt_file: str = ""
@@ -175,7 +184,8 @@ PRIORITIES = ("Urgent", "High", "Normal", "Low")
 _DEFAULT_STATUS = {
     "ready": "Ready",
     "running": "In progress",
-    "done": "In review",
+    "review": "In review",
+    "done": "Done",
     "failed": "Failed",
     "blocked": "Blocked",
 }
@@ -302,6 +312,13 @@ def load(path: Path | None = None) -> Config:
         attach_sessions=bool(runner_raw.get("attach_sessions", defaults.attach_sessions)),
         session_host=str(runner_raw.get("session_host", defaults.session_host)).strip(),
         notify=bool(runner_raw.get("notify", defaults.notify)),
+        auto_update=bool(runner_raw.get("auto_update", defaults.auto_update)),
+        # A run asks the remote at most once per this interval. The floor is a
+        # minute: at a ten-second cadence, an unbounded value would turn into a
+        # `git fetch` six times a minute, forever.
+        update_interval_seconds=max(
+            60, int(runner_raw.get("update_interval_seconds", defaults.update_interval_seconds))
+        ),
         log_retention_days=max(
             0, int(runner_raw.get("log_retention_days", defaults.log_retention_days))
         ),

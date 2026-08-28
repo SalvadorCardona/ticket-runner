@@ -123,3 +123,19 @@ def open_pull_request(worktree: Path, title: str, body: str, base: str) -> str:
     if existing.ok and existing.out.startswith("http"):
         return existing.out
     raise GitError(f"gh pr create: {result.err or result.out}")
+
+
+def pull_request_state(url: str) -> str:
+    """What GitHub says of that pull request: MERGED, OPEN, CLOSED — or nothing.
+
+    Nothing means the question could not be asked: `gh` missing, not
+    authenticated, the pull request deleted. A ticket is never moved on an
+    answer we did not get — the next run asks again.
+
+    The URL carries its repository, so this needs no worktree: the ticket's own
+    one is long gone by the time anyone merges.
+    """
+    if not shutil.which("gh"):
+        return ""
+    result = run(["gh", "pr", "view", url, "--json", "state", "-q", ".state"], timeout=60)
+    return result.out if result.ok else ""

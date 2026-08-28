@@ -90,9 +90,15 @@ due = "Scheduled"
 #   ready    what the runner picks up — move a ticket here once its description
 #            is precise enough to be handled without you
 #   running  claimed, work in progress (stops a second pass from taking it)
-#   done     branch pushed, pull request opened, waiting for your review. It is
-#            called "In review" and not "Done" because nothing is done: a human
-#            has still to look at it
+#   review   branch pushed, pull request opened, waiting for your review. It is
+#            where a ticket waits, and not "Done", because nothing is done: a
+#            human has still to look at it. Each run asks GitHub about those
+#            pull requests and moves on the tickets whose own has been merged
+#   done     the pull request has been merged — merging is the only gesture,
+#            nothing else to close by hand. A ticket that produced a document
+#            rather than a pull request lands here directly, having nothing to
+#            wait for. Name `done` and leave `review` out and you get one column
+#            for both, as before: the ticket stops at the pull request
 #   failed   something broke: the session, the push, the worktree
 #   blocked  the agent could not settle the ticket and asked a question instead
 #            of guessing — or the project could not be located. Its own column:
@@ -100,12 +106,16 @@ due = "Scheduled"
 [notion.status]
 ready = "Ready"
 running = "In progress"
-done = "In review"
+review = "In review"
+done = "Done"
 failed = "Failed"
 blocked = "Blocked"
 
-# One column for both is a fine board too — name `failed` and leave `blocked`
-# out, and questions land wherever failures do:
+# One column for two states is a fine board too — name `failed` and leave
+# `blocked` out, and questions land wherever failures do; name `done` and leave
+# `review` out, and a ticket stops at its open pull request, with nothing
+# watching for the merge:
+#   done = "Done"
 #   failed = "Needs you"
 
 [runner]
@@ -163,6 +173,20 @@ session_host = ""
 # One desktop notification per finished ticket. The point of the runner is that
 # you are not watching it; without this you discover your pull request tomorrow.
 notify = true
+
+# Keep the installation on the latest version, on its own. A run looks at the
+# clock before it looks at the tickets: once every update_interval_seconds it
+# asks the repository whether the installed code is still the newest, and brings
+# it up to date if it is not. The update happens before any ticket is claimed,
+# so it never lands in the middle of a session, and the new code takes over on
+# the next pass.
+#   ticket-runner update --check   what is available, right now
+#   ticket-runner update           apply it by hand
+# Only works on an installation made by install.sh from the repository: one made
+# from a local copy (TR_SRC=.) has no remote to compare itself against, and says
+# so once instead of updating.
+auto_update = true
+update_interval_seconds = 3600   # one hour; a minute is the floor
 
 # Drop session logs older than this. 0 keeps everything. The Notion comment
 # keeps the summary either way, and the transcript lives in ~/.claude/projects.

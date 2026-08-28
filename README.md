@@ -25,7 +25,8 @@ In progress   ◀───────────┤
                           │
                           └─ has none ──────────▶  scratch dir, ANSWER.md
                                                    published as Notion blocks ──▶  the page itself
-In review     ◀───────────
+In review     ◀───────────  a pull request is waiting for you
+Done          ◀───────────  once you merge it — or straight away, for a document
 ```
 
 Which of the two you get is decided by the project, not by a setting: a project that names
@@ -54,6 +55,23 @@ which tells you, line by line, what is still missing.
 Running the same command again **updates** the installation: the code is replaced, your
 configuration is kept.
 
+You will rarely need to. The installer clones the repository into
+`~/.local/share/ticket-runner/app`, which is what lets the runner answer *"am I still on
+the latest version"* with one `git fetch`. A run looks at the clock before it looks at the
+tickets: **once an hour** it asks, and if the answer is no it updates itself — the
+launcher and the systemd units included — before claiming a single ticket. The change
+therefore lands between two sessions, never inside one, and the new code takes over on the
+next pass.
+
+```sh
+ticket-runner update --check   # what is available, changing nothing
+ticket-runner update           # apply it now
+```
+
+`runner.auto_update = false` turns the automatic half off; `runner.update_interval_seconds`
+changes the hour. An installation made from a local copy (`TR_SRC=.`) has no remote to
+compare itself against: it says so once per check and carries on.
+
 > **Requirements** — Linux with systemd in the user session, `python3` >= 3.11 (no
 > dependencies to install, everything is in the standard library), `git`,
 > [Claude Code](https://claude.com/claude-code), and `gh` authenticated for pull requests.
@@ -62,7 +80,8 @@ configuration is kept.
 | --- | --- |
 | `TR_INTERVAL=10` | seconds between two runs (default: 1800, i.e. 30 min) |
 | `TR_NO_SERVICE=1` | no timer: you run `ticket-runner run` yourself |
-| `TR_SRC=.` | install from a local clone, without the network |
+| `TR_SRC=.` | install from a local clone, without the network — and without self-updating |
+| `TR_REF=v1.2` | install a tag instead of `main`, and stay on it |
 
 ---
 
@@ -184,6 +203,8 @@ presence of each status — and names whichever of those was missed.
 | `runner.open_pull_request` | `true` | `false`: the branch is pushed, without a PR |
 | `runner.keep_worktree_on_failure` | `true` | keep enough around to understand a failure |
 | `runner.notify` | `true` | one desktop notification per finished ticket |
+| `runner.auto_update` | `true` | a run keeps the installation on the latest version |
+| `runner.update_interval_seconds` | `3600` | how often a run asks; one minute is the floor |
 | `runner.log_retention_days` | `14` | drop older session logs; `0` keeps everything |
 | `runner.attach_sessions` | `true` | file each session under its project, so `claude --resume` there lists it |
 | `runner.prompt_file` | `""` | your own prompt template, for repository tickets |
@@ -396,8 +417,25 @@ as it always has, and a ticket that names no agent runs on the runner's own prom
 ### The discussion on a ticket
 
 The comments of a ticket go into the prompt, oldest first, which closes the loop the
-`blocked` status opens: a run asks a question, you answer it in a comment, you move the
-ticket back to ready — and the next run reads your answer instead of asking again.
+`blocked` status opens: a run asks a question, you answer it in a comment — and the next
+run reads your answer instead of asking again.
+
+**Answering is the whole gesture.** The reply itself puts the ticket back in the queue:
+nothing to move on the board, the runner claims it and it goes to *in progress* for as
+long as the new run lasts. Which is narrow on purpose, because not every comment is an
+instruction:
+
+- only tickets **the runner has already reported on** wake up. A comment on a ticket no
+  run of ours ever touched is a conversation of yours, and one handled by another machine
+  is that machine's to pick up — a report is signed `ticket-runner@<host>`;
+- only when **someone else has had the last word** since that report. The report the next
+  run posts is also what closes the ticket again;
+- and never a ticket that came back with its pull request. *In review* and *Done* are
+  both answers already: comment on one and nothing happens — the discussion belongs to
+  the pull request. A ticket already ready, or one in flight, is left where it is too.
+
+So it is `blocked` and `failed` that come back to life, which is where a run leaves a
+ticket it could not finish, and precisely where an answer is expected.
 
 The runner's own reports are included too, trimmed to their verdict and reason; the branch
 names, session IDs and log paths they carry are of no use to a session. At most the last
@@ -406,7 +444,8 @@ does not spend more of its prompt on its own history than on the work.
 
 This needs one capability the integration does not have by default:
 [notion.so/my-integrations](https://www.notion.so/my-integrations) → your integration →
-**Capabilities** → *Read comments*. Without it the runner says so once and carries on.
+**Capabilities** → *Read comments*. Without it the runner says so once and carries on —
+and no ticket ever wakes up, since it cannot see the answer.
 
 ### The statuses
 
@@ -415,32 +454,49 @@ This is where your control over the system lives. The names are yours — map th
 board, because a status the database does not offer would only fail at the very end of a
 ticket.
 
-`ticket-runner init` creates these five:
+`ticket-runner init` creates these six:
 
 | Key | Default | What it means |
 | --- | --- | --- |
-| `ready` | **Ready** | the description is precise enough for an agent to handle it alone. **The only gesture that triggers work.** |
+| `ready` | **Ready** | the description is precise enough for an agent to handle it alone. **The gesture that triggers work** — the other being a comment answering a ticket already handled once. |
 | `running` | **In progress** | claimed by the runner. Stops the next run from taking it again. |
-| `done` | **In review** | branch pushed, pull request opened. Yours to review. |
+| `review` | **In review** | branch pushed, pull request opened. Yours to review. |
+| `done` | **Done** | that pull request has been merged — or the ticket produced a document, which has nothing to wait for. |
 | `failed` | **Failed** | something broke: the session, the push, the worktree. |
-| `blocked` | **Blocked** | the agent would not guess and asked a question instead — or its project could not be located. |
+| `blocked` | **Blocked** | the agent would not guess and asked a question instead — or its project could not be located. Answer in a comment and the ticket runs again. |
 
-Two of those names are deliberate. *In review* rather than *Done*, because nothing is
+Three of those names are deliberate. *In review* rather than *Done*, because nothing is
 done when the runner lets go of a ticket: a pull request is waiting for a human, and a
-board that calls that *Done* stops being believed by the second week. And *Blocked* is
-its own column rather than a shade of *Failed*, because the runner works hard to tell
-them apart — a ticket waiting for **you** and a session that crashed are different days,
-and pouring both into one column throws that away.
+board that calls that *Done* stops being believed by the second week. *Done* is then kept
+for what it says — merged. And *Blocked* is its own column rather than a shade of
+*Failed*, because the runner works hard to tell them apart — a ticket waiting for **you**
+and a session that crashed are different days, and pouring both into one column throws
+that away.
 
-One column for both is still a fine board, if yours is small. Name `failed` and leave
-`blocked` out, and questions land wherever failures do:
+One column for two states is still a fine board, if yours is small. Name `failed` and
+leave `blocked` out, and questions land wherever failures do; name `done` and leave
+`review` out, and a ticket stops at its open pull request:
 
 ```toml
 [notion.status]
+done = "Shipped"
 failed = "Needs you"
 ```
 
-Nothing is ever merged automatically.
+### Merging is the only gesture
+
+A ticket that came back as a pull request waits in *In review*. Every run then asks
+GitHub — through `gh` — what became of those pull requests, and a ticket whose own has
+been **merged** moves to *Done*, with a comment saying so. So you merge, and the board
+catches up on its own; nothing else to close by hand.
+
+The cadence is the runner's own: `interval_seconds`, not a second timer to install and
+forget. A ticket whose pull request is still open, closed without merging, or unreachable
+because `gh` is not authenticated simply stays in review — the next run asks again. A
+board whose `review` and `done` are one column has nowhere for a ticket to wait, so
+nothing is watched.
+
+Nothing is ever merged automatically. The merge is yours; only its consequence is not.
 
 ---
 
@@ -458,6 +514,8 @@ ticket-runner history      # what has been handled, with the pull requests
 ticket-runner projects     # Notion project → local repository mapping
 ticket-runner doctor       # full diagnostics
 ticket-runner clean --force          # remove worktrees and scratch dirs left by failures
+ticket-runner update       # move the installation to the newest version
+ticket-runner update --check         # what is available, changing nothing
 ticket-runner enable       # apply interval_seconds and start the timer
 ticket-runner disable      # stop the timer
 ```
@@ -512,7 +570,9 @@ often.
 | `object not found` on the database | the page is not shared with the integration (`···` → Connections). Sharing the page that holds the workspace covers everything under it |
 | “no page named … in the workspace” | the row is called something else. `doctor` lists what it did find — rename the row, set `[notion.pages]`, or run `ticket-runner init` to create it |
 | the agent knows nothing about you | no `Context` row in the workspace, or the page is empty. `doctor` says which, and the run says so once |
-| “comments not readable” | the integration lacks *Read comments* (my-integrations → Capabilities). The ticket runs, without its discussion |
+| “comments not readable” | the integration lacks *Read comments* (my-integrations → Capabilities). The ticket runs, without its discussion, and answering it in a comment no longer wakes it |
+| a comment on a ticket changes nothing | the ticket is *done*, or no run of this host ever reported on it — those two never wake |
+| a ticket keeps running again and again | its report never gets posted, so your answer stays the last word: the integration lost *Insert comments* |
 | a ticket ignores its agent | the `Agent` column is missing or is not a relation — `doctor` names it |
 | “project not found on disk” | the project names a repository that is not there: fix its `Path` or `Repository` property, or add `"Notion name" = "/path"` under `[projects]` |
 | a ticket became a document when you wanted code | its project names no repository. Give the project page a `Path` or a `Repository` |
@@ -520,6 +580,7 @@ often.
 | a ticket sat in *In progress* forever | it no longer can: the next run puts back any ticket this host claimed while no run was alive |
 | no desktop notification | `notify-send` is missing, or the service has no session bus. `runner.notify = false` silences the attempt |
 | the timer does not fire with no session open | `sudo loginctl enable-linger $USER` |
+| the version never moves | the install directory is a copy, not a clone: an installation older than self-updating, or one made with `TR_SRC`. `doctor` says which — run `install.sh` again |
 | branch pushed, no pull request | `gh` cannot reach its credentials from a systemd service — locked keyring. Use `gh auth login` with a token, or set `GH_TOKEN` in the unit |
 | `claude: command not found` in the journal | the PATH baked into the unit predates a node version change: run `install.sh` again |
 
@@ -590,8 +651,9 @@ database someone else can edit — it is a different proposition. What makes it 
   runner already writes to;
 - **editing rights on the tickets database limited** to the people you would let run a
   command on that machine — which is the honest way to read that permission. Since the
-  comments of a ticket reach the prompt too, that now includes **comment-only**
-  collaborators: on a shared board, they are the same permission.
+  comments of a ticket reach the prompt too, and since answering a ticket the runner has
+  already handled starts a run of its own, that includes **comment-only** collaborators:
+  on a shared board, they are the same permission.
 
 Setting `permission_mode = "acceptEdits"` narrows it further, at the cost of sessions that
 stall the first time one needs to run the test suite. It is the right setting for a shared

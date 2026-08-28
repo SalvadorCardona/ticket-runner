@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import agents, git, notion, notify, prompt as prompt_module, session, state
+from . import update as update_module
 from . import workspace as workspace_module
 from .config import PRIORITIES, Config, state_dir
 from .projects import Project, Resolver
@@ -172,6 +173,11 @@ class Runner:
     def queue(self) -> tuple[list[Ticket], list[tuple[Ticket, datetime]]]:
         """The tickets to run now, and those waiting for their date.
 
+        Two ways in: the ready column, and a ticket the runner already handled
+        that has been commented on since (see `woken`). Both are ranked and
+        held back by their date the same way — once a ticket is to be run,
+        what put it there changes nothing.
+
         A ticket carrying a date is **scheduled**, not merely deadlined: it is
         left alone until that moment comes. Which is the only reading that means
         anything here — a ticket without a date starts within seconds of being
@@ -183,6 +189,7 @@ class Runner:
         by a steady trickle of newer work.
         """
         tickets = [Ticket(page) for page in self.client.query(self.database, self._ready_filter())]
+        tickets += self.woken()
         priorities = {name: index for index, name in enumerate(PRIORITIES)}
         default = priorities.get("Normal", len(PRIORITIES))
         now = datetime.now().astimezone()
@@ -215,6 +222,68 @@ class Runner:
         status_property = self.config.notion.prop("status")
         kind = self.client.schema(self.database).get(status_property, "status")
         return {"property": status_property, kind: {"equals": self.config.notion.state("ready")}}
+
+    def _woken_filter(self) -> dict:
+        """Every status but the ones that already speak for a ticket.
+
+        Ready is on its way, running is in flight, in review is waiting on a
+        merge, and done is done: a comment on a ticket that came back with its
+        pull request is a conversation about the work, not a request to do it
+        again. What is left is where a run leaves a ticket it could not finish
+        — which is precisely where an answer is expected.
+        """
+        status_property = self.config.notion.prop("status")
+        kind = self.client.schema(self.database).get(status_property, "status")
+        settled = {
+            self.config.notion.state(key) for key in ("done", "review", "ready", "running")
+        }
+        return {
+            "and": [
+                {"property": status_property, kind: {"does_not_equal": value}}
+                for value in sorted(settled)
+            ]
+        }
+
+    def woken(self) -> list[Ticket]:
+        """Tickets this runner has already reported on, and answered since.
+
+        A comment is how a ticket is answered: a run that ends `blocked` leaves
+        its question on the page, and the reply lands underneath. That reply is
+        now the whole gesture — no need to also move the ticket back to the
+        ready column. It rejoins the queue and is claimed like any other, so it
+        goes to "in progress" for as long as the new run lasts.
+
+        Narrow on purpose, because not every comment is an instruction. A
+        ticket wakes only if this runner reported on it and someone else has
+        had the last word since: a ticket it never touched belongs to a
+        conversation of yours, and one handled by another host is that host's
+        to pick up. The report the next run posts is also what closes the
+        ticket again — without it, the same comment would wake it forever.
+        """
+        woken: list[Ticket] = []
+        for page in self.client.query(self.database, self._woken_filter()):
+            ticket = Ticket(page)
+            if not self._answered(ticket):
+                continue
+            self.say(f"  ↻ {ticket.title} — answered in a comment, picked up again")
+            woken.append(ticket)
+        return woken
+
+    def _answered(self, ticket: Ticket) -> bool:
+        """Did someone have the last word on a ticket this runner reported on?"""
+        try:
+            comments = self.client.comments(ticket.page.id)
+        except notion.NotionError:
+            # Comments the integration cannot read already cost a ticket its
+            # discussion; they are not going to become a reason to run it again.
+            # `discussion` is where that is said out loud, once per ticket.
+            return False
+        reports = [
+            index
+            for index, comment in enumerate(comments)
+            if comment.text.startswith(self.agent_label)
+        ]
+        return bool(reports) and reports[-1] < len(comments) - 1
 
     def sweep(self) -> int:
         """Put back tickets a dead runner left claimed.
@@ -256,6 +325,45 @@ class Runner:
             )
             recovered += 1
         return recovered
+
+    def close_merged(self) -> int:
+        """Close the tickets whose pull request has been merged.
+
+        A pull request is not the end of a ticket: it is a question asked of
+        you. The ticket waits in "in review" until you answer it by merging —
+        and merging is the answer, so nobody should have to move the ticket by
+        hand afterwards.
+
+        Asked at the start of every run rather than by a watcher of its own: the
+        runner already wakes up on a timer, and a second one would only be a
+        second thing to install, to enable and to forget. `interval_seconds` is
+        the cadence of this too.
+
+        A board whose `review` and `done` are the same status has nowhere for a
+        ticket to wait, so there is nothing to look at.
+        """
+        review = self.config.notion.state("review")
+        if review == self.config.notion.state("done"):
+            return 0
+        status_property = self.config.notion.prop("status")
+        kind = self.client.schema(self.database).get(status_property, "status")
+        pages = self.client.query(
+            self.database, {"property": status_property, kind: {"equals": review}}
+        )
+        closed = 0
+        for page in pages:
+            url = str(notion.read(page, self.config.notion.prop("pull_request")) or "")
+            if not url.startswith("http") or git.pull_request_state(url) != "MERGED":
+                continue
+            ticket = Ticket(page)
+            self.say(f"  ✓ {ticket.title} — pull request merged, moved to done")
+            self._set(ticket, **{status_property: self.config.notion.state("done")})
+            self._comment(
+                ticket,
+                f"{self.agent_label} — done.\nIts pull request has been merged: {url}",
+            )
+            closed += 1
+        return closed
 
     def fetch_one(self, reference: str) -> Ticket:
         page_id = reference.strip()
@@ -679,8 +787,14 @@ class Runner:
 
         git.remove_worktree(project.path, job.workdir)
 
+        # With a pull request the ticket is not finished, it is waiting for you:
+        # it goes to "in review", and `close_merged` takes it to done once you
+        # have merged. Without one there is nothing to wait for — and on a board
+        # with no review column, `review` is `done` and nothing changes.
         values: dict[str, object] = {
-            self.config.notion.prop("status"): self.config.notion.state("done"),
+            self.config.notion.prop("status"): self.config.notion.state(
+                "review" if pull_request else "done"
+            ),
             self.config.notion.prop("agent"): self.agent_label,
         }
         if pull_request:
@@ -721,13 +835,46 @@ class Runner:
 
     # -- a full run ----------------------------------------------------------
 
+    def update(self) -> None:
+        """Once an hour, make sure the installed code is still the newest.
+
+        Here rather than in a timer of its own: a run already wakes up on a
+        schedule, and doing it at the top of one — under the run lock, before a
+        single ticket is claimed — is what makes an update land between two
+        sessions instead of underneath one. The new code takes over on the next
+        pass.
+
+        Nothing here can fail a run: an unreachable remote, an installation made
+        from a copy, a refused write are all one line and then the tickets.
+        """
+        if not self.config.runner.auto_update or self.dry_run:
+            return
+        if not update_module.due(self.config.runner.update_interval_seconds):
+            return
+        status = update_module.check()
+        if status.reason:
+            self.say(f"  ! version not checked: {status.reason}")
+            return
+        if not status.stale:
+            return
+        short = f"{status.current[:8]} → {status.latest[:8]}"
+        self.say(f"  ↑ a newer version is out ({short}) — updating")
+        error = update_module.apply(status, self.config.runner.interval_seconds)
+        if error:
+            self.say(f"  ! update failed: {error}")
+            return
+        self.say("    updated — the next run uses it")
+        self._notify("ticket-runner updated", short)
+
     def tick(self, *, limit: int | None = None, reference: str = "") -> list[dict]:
+        self.update()
         if reference:
             tickets = [self.fetch_one(reference)]
             self.say(f"Requested ticket: {tickets[0].title}")
         else:
             if not self.dry_run:
                 self.sweep()
+                self.close_merged()
             tickets, waiting = self.queue()
             if not tickets:
                 if self.announce_idle:
