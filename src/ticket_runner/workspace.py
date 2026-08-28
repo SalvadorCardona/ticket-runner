@@ -70,10 +70,15 @@ def resolve(client: notion.Client, settings: Notion) -> Workspace:
 
         The title is something you typed twice — once in Notion, once in the
         configuration — so a stray capital is not a reason to say the page does
-        not exist.
+        not exist. Names the runner used to ship with are tried after the
+        current one, so a board built before they were settled still resolves.
         """
-        wanted = settings.page(key).strip().lower()
-        return next((page for title, page in rows.items() if title.lower() == wanted), "")
+        for candidate in settings.page_aliases(key):
+            wanted = candidate.strip().lower()
+            page = next((page for title, page in rows.items() if title.lower() == wanted), "")
+            if page:
+                return page
+        return ""
 
     if settings.tickets_database:
         space.tickets = client.resolve_database(settings.tickets_database)

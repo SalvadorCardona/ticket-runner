@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ticket_runner import config as C  # noqa: E402
-from ticket_runner import agents, markdown, notion, prompt, session, workspace  # noqa: E402
+from ticket_runner import agents, markdown, notion, prompt, provision, session, workspace  # noqa: E402
 from ticket_runner.runner import Runner  # noqa: E402
 from ticket_runner.__main__ import _names  # noqa: E402
 from ticket_runner.runner import short_id, slugify  # noqa: E402
@@ -113,15 +113,16 @@ def a_database_reference_is_normalised_but_a_name_is_not():
 def blocked_falls_back_on_failed_but_only_when_unset():
     config = _config('[notion.status]\nfailed = "Blocked"\n')
     assert config.notion.state("blocked") == "Blocked"
-    assert config.notion.state("ready") == "Not started", "defaults survive a partial block"
+    assert config.notion.state("ready") == "Ready", "defaults survive a partial block"
 
     config = _config('[notion.status]\nfailed = "Draft"\nblocked = "Blocked"\n')
     assert config.notion.state("failed") == "Draft"
     assert config.notion.state("blocked") == "Blocked"
 
     config = _config("")
-    assert config.notion.state("done") == "Done"
-    assert config.notion.state("blocked") == "Draft"
+    assert config.notion.state("done") == "In review"
+    assert config.notion.state("blocked") == "Blocked", "its own column, not the failure one"
+    assert config.notion.state("failed") == "Failed"
 
 
 @case
@@ -142,11 +143,11 @@ def optional_properties_have_names_even_when_absent():
 @case
 def a_workspace_is_named_once_and_the_rest_is_found():
     config = _config("")
-    assert config.notion.page("tickets") == "Master Tickets"
-    assert config.notion.page("context") == "Soul"
+    assert config.notion.page("tickets") == "Tickets"
+    assert config.notion.page("context") == "Context"
     renamed = _config('[notion.pages]\ncontext = "Qui je suis"\n')
     assert renamed.notion.page("context") == "Qui je suis"
-    assert renamed.notion.page("tickets") == "Master Tickets", "defaults survive a partial block"
+    assert renamed.notion.page("tickets") == "Tickets", "defaults survive a partial block"
 
 
 @case
@@ -200,7 +201,7 @@ class _FakeClient:
 
 
 def _settings(**overrides) -> C.Notion:
-    values = {"token": "ntn_real", "workspace": "space", "pages": dict(C._DEFAULT_PAGES)}
+    values = {"token": "ntn_real", "workspace": "space", "pages": {}}
     values.update(overrides)
     return C.Notion(**values)
 
@@ -208,7 +209,7 @@ def _settings(**overrides) -> C.Notion:
 @case
 def the_rows_of_a_workspace_become_the_runners_databases():
     client = _FakeClient(
-        {"Master Tickets": "p-tickets", "Master project": "p-projects", "Soul": "p-soul"},
+        {"Tickets": "p-tickets", "Projects": "p-projects", "Context": "p-context"},
         text="Je suis Salvador Cardona.",
     )
     space = workspace.resolve(client, _settings())
@@ -220,42 +221,75 @@ def the_rows_of_a_workspace_become_the_runners_databases():
 
 @case
 def a_row_is_found_however_its_title_is_capitalised():
-    client = _FakeClient({"master tickets": "p-tickets", "SOUL": "p-soul"}, text="x")
+    client = _FakeClient({"tickets": "p-tickets", "CONTEXT": "p-context"}, text="x")
     space = workspace.resolve(client, _settings())
     assert space.tickets == "db-of-p-tickets"
     assert space.context == "x"
 
 
 @case
+def a_board_built_before_the_names_were_settled_still_resolves():
+    """The rows shipped as "Master Tickets" and "Soul" before those names settled.
+
+    Renaming four rows by hand is not a migration anyone should be asked to run,
+    so the old titles are tried after the current ones — and only while the
+    configuration itself names none, since a title someone typed is a title
+    they meant.
+    """
+    client = _FakeClient(
+        {"Master Tickets": "p-tickets", "Master project": "p-projects", "Soul": "p-soul"},
+        text="who I am",
+    )
+    space = workspace.resolve(client, _settings())
+    assert space.tickets == "db-of-p-tickets"
+    assert space.projects == "db-of-p-projects"
+    assert space.context == "who I am"
+    assert not space.warnings
+
+    # The new names win when a board carries both, rather than the older row.
+    both = _FakeClient({"Tickets": "p-new", "Master Tickets": "p-old"})
+    assert workspace.resolve(both, _settings()).tickets == "db-of-p-new"
+
+    # And a configuration that names a row is never second-guessed.
+    named = _settings(pages={"tickets": "Backlog"})
+    try:
+        workspace.resolve(_FakeClient({"Master Tickets": "p-old"}), named)
+    except notion.NotionError as error:
+        assert "Backlog" in str(error)
+    else:
+        raise AssertionError("a named row must not fall back on a legacy title")
+
+
+@case
 def a_missing_context_page_warns_but_never_fails_a_run():
-    client = _FakeClient({"Master Tickets": "p-tickets"})
+    client = _FakeClient({"Tickets": "p-tickets"})
     space = workspace.resolve(client, _settings())
     assert space.tickets == "db-of-p-tickets"
     assert space.context == "" and space.projects == ""
-    assert any("Soul" in warning for warning in space.warnings)
+    assert any("Context" in warning for warning in space.warnings)
 
     # Present but unreadable, and present but empty, are both worth saying too.
-    unreadable = _FakeClient({"Master Tickets": "p-t", "Soul": "p-soul"}, broken={"p-soul"})
+    unreadable = _FakeClient({"Tickets": "p-t", "Context": "p-context"}, broken={"p-context"})
     assert any("unreadable" in warning for warning in workspace.resolve(unreadable, _settings()).warnings)
-    empty = _FakeClient({"Master Tickets": "p-t", "Soul": "p-soul"}, text="   ")
+    empty = _FakeClient({"Tickets": "p-t", "Context": "p-context"}, text="   ")
     assert any("empty" in warning for warning in workspace.resolve(empty, _settings()).warnings)
 
 
 @case
 def a_missing_tickets_page_is_the_one_thing_that_fails():
-    client = _FakeClient({"Soul": "p-soul", "Master project": "p-projects"})
+    client = _FakeClient({"Context": "p-context", "Projects": "p-projects"})
     try:
         workspace.resolve(client, _settings())
     except notion.NotionError as error:
-        assert "Master Tickets" in str(error)
-        assert "Soul" in str(error), "the message lists what was actually found"
+        assert "Tickets" in str(error)
+        assert "Context" in str(error), "the message lists what was actually found"
     else:
         raise AssertionError("a workspace without a tickets page must not resolve")
 
 
 @case
 def an_explicit_database_still_wins_over_the_workspace():
-    client = _FakeClient({"Master Tickets": "p-tickets"})
+    client = _FakeClient({"Tickets": "p-tickets"})
     space = workspace.resolve(client, _settings(tickets_database="chosen"))
     assert space.tickets == "db-of-chosen"
 
@@ -263,6 +297,194 @@ def an_explicit_database_still_wins_over_the_workspace():
     legacy = workspace.resolve(client, _settings(workspace="", tickets_database="chosen"))
     assert legacy.tickets == "db-of-chosen"
     assert legacy.rows == {} and not legacy.warnings
+
+
+# -- provisioning ------------------------------------------------------------
+
+
+class _Board:
+    """A Notion that remembers what was created, without a network in sight."""
+
+    def __init__(self, databases=None, rows=None, schemas=None, text=""):
+        self._databases = databases or {}          # page id -> {title: db id}
+        self._rows = rows or {}                    # db id -> {title: page id}
+        self._schemas = schemas or {}              # db id -> {name: {shape}}
+        self._text = text
+        self.created = []
+        self.patched = []
+        self.appended = []
+
+    # reading
+    def child_databases(self, page_id):
+        return dict(self._databases.get(page_id, {}))
+
+    def schema(self, database_id):
+        return {name: next(iter(shape)) for name, shape in self._schemas.get(database_id, {}).items()}
+
+    def database(self, database_id):
+        return {"properties": {
+            name: {"type": next(iter(shape)), **shape}
+            for name, shape in self._schemas.get(database_id, {}).items()
+        }}
+
+    def query(self, database_id, filter_=None):
+        return [
+            notion.Page(id=page, url="", title=title)
+            for title, page in self._rows.get(database_id, {}).items()
+        ]
+
+    def blocks_text(self, page_id, depth=0):
+        return self._text
+
+    # writing
+    def create_database(self, parent_page_id, title, properties, *, inline=True):
+        identifier = f"db-{title.lower().replace(' ', '-')}"
+        self._databases.setdefault(parent_page_id, {})[title] = identifier
+        self._schemas[identifier] = dict(properties)
+        self._rows.setdefault(identifier, {})
+        self.created.append(identifier)
+        return identifier
+
+    def add_properties(self, database_id, properties):
+        self._schemas.setdefault(database_id, {}).update(properties)
+        self.patched.append((database_id, sorted(properties)))
+
+    def create_row(self, database_id, title, values=None):
+        page = f"page-{title.lower().replace(' ', '-')}"
+        self._rows.setdefault(database_id, {})[title] = page
+        self.created.append(page)
+        return page
+
+    def append_markdown(self, page_id, markdown):
+        # A page that has just been written to is no longer empty — which is
+        # what stops the second `init` from seeding the context page again.
+        self.appended.append(page_id)
+        self._text = markdown
+        return 1
+
+
+@case
+def a_bare_page_becomes_the_whole_board():
+    board = _Board()
+    report = provision.provision(board, _settings(), "root")
+
+    assert report.workspace == "db-ticket-runner"
+    assert report.tickets == "db-tickets"
+    rows = board._rows["db-ticket-runner"]
+    assert set(rows) == {"Tickets", "Projects", "Agents", "Context"}
+
+    schema = board._schemas["db-tickets"]
+    for expected in ("Status", "Project", "Agent", "Runner", "Session", "Scheduled"):
+        assert expected in schema, expected
+
+    # The relations point at databases that existed before the tickets did.
+    assert schema["Project"]["relation"]["database_id"] == "db-projects"
+    assert schema["Agent"]["relation"]["database_id"] == "db-agents"
+
+    # A status property cannot be created through the API; a select can, and the
+    # runner reads both. The five columns must all be there.
+    options = [option["name"] for option in schema["Status"]["select"]["options"]]
+    assert options == ["Ready", "In progress", "In review", "Failed", "Blocked"]
+
+    assert board.appended, "the context page is seeded rather than left blank"
+
+
+@case
+def running_init_twice_changes_nothing():
+    board = _Board()
+    provision.provision(board, _settings(), "root")
+    before = dict(board._schemas["db-tickets"])
+    board.created.clear()
+
+    second = provision.provision(board, _settings(), "root")
+    assert board.created == [], "nothing is created a second time"
+    assert board._schemas["db-tickets"] == before
+    assert second.tickets == "db-tickets"
+    assert all(verb == "kept" for verb, _ in second.steps), second.steps
+
+
+@case
+def init_completes_a_board_that_predates_a_column():
+    """The second reason this command exists: adding what a version did not have.
+
+    A board built before `Scheduled` gets the column rather than a line in a
+    changelog telling its owner to add it by hand.
+    """
+    board = _Board(
+        databases={"root": {"ticket-runner": "dir"}, "page-tickets": {"Tickets": "db-tickets"}},
+        rows={"dir": {"Tickets": "page-tickets"}},
+        schemas={"db-tickets": {"Name": {"title": {}}, "Status": {"select": {"options": [
+            {"name": "Ready", "color": "blue"}, {"name": "Mine", "color": "purple"},
+        ]}}}},
+    )
+    provision.provision(board, _settings(), "root")
+
+    schema = board._schemas["db-tickets"]
+    assert "Scheduled" in schema and "Cost" in schema
+
+    # Options are merged, never replaced: a column somebody added is still there.
+    options = [option["name"] for option in schema["Status"]["select"]["options"]]
+    assert "Mine" in options and "Blocked" in options
+    assert options.index("Mine") < options.index("Blocked"), "what exists keeps its place"
+
+
+@case
+def a_real_status_column_is_reported_rather_than_patched():
+    """The one thing the API cannot do, said out loud instead of discovered late.
+
+    A `status` property built in Notion's own interface accepts no new options
+    from the API. Silence here would surface as a ticket failing to be marked
+    "Blocked", weeks later, at the end of a session.
+    """
+    board = _Board(
+        databases={"root": {"ticket-runner": "dir"}, "page-tickets": {"Tickets": "db-tickets"}},
+        rows={"dir": {"Tickets": "page-tickets"}},
+        schemas={"db-tickets": {"Name": {"title": {}}, "Status": {"status": {"options": [
+            {"name": "Ready"}, {"name": "In progress"},
+        ]}}}},
+    )
+    report = provision.provision(board, _settings(), "root")
+
+    assert not any(name == "Status" for _, names in board.patched for name in names)
+    told = [what for verb, what in report.steps if verb == "by hand"]
+    assert told and "In review" in told[0] and "Blocked" in told[0], told
+    assert "Ready" not in told[0], "only what is actually missing"
+
+
+@case
+def a_column_someone_retyped_is_left_alone():
+    board = _Board(
+        databases={"root": {"ticket-runner": "dir"}, "page-tickets": {"Tickets": "db-tickets"}},
+        rows={"dir": {"Tickets": "page-tickets"}},
+        schemas={"db-tickets": {"Name": {"title": {}}, "Cost": {"rich_text": {}}}},
+    )
+    provision.provision(board, _settings(), "root")
+    assert board._schemas["db-tickets"]["Cost"] == {"rich_text": {}}, "not overruled"
+
+
+@case
+def two_states_on_one_column_produce_one_option():
+    """Notion refuses a select that lists the same option twice."""
+    settings = _settings()
+    settings.status = {"failed": "Needs you", "blocked": "Needs you"}
+    names = [option["name"] for option in provision.status_options(settings)]
+    assert names.count("Needs you") == 1
+    assert len(names) == 4
+
+
+@case
+def the_workspace_is_written_back_into_the_configuration():
+    path = Path(tempfile.mkdtemp()) / "config.toml"
+    path.write_text('[notion]\n# keep me\ntoken = "ntn_x"\nworkspace = ""\n\n[runner]\nfetch = true\n')
+
+    assert C.write_notion_value(path, "workspace", "abc") is True
+    assert C.write_notion_value(path, "workspace", "abc") is False, "already says that"
+
+    text = path.read_text()
+    assert 'workspace = "abc"' in text
+    assert "# keep me" in text, "a hand-edited file keeps its comments"
+    assert "[runner]\nfetch = true" in text, "other tables are untouched"
+    assert C.load(path).notion.workspace == "abc"
 
 
 # -- the prompt --------------------------------------------------------------

@@ -49,6 +49,24 @@ def _normalise(url: str) -> str:
     return "/".join(parts[-2:]).lower() if len(parts) >= 2 else url.lower()
 
 
+def _property(page: notion.Page, *names: str) -> object:
+    """The first of those columns the project page actually carries.
+
+    A project database is written by hand, so its columns are named by hand:
+    "Repository", "repository", or the bare "github" the runner used to ask
+    for. Reading them all costs nothing and spares everyone a rename.
+    """
+    lookup = {key.lower(): key for key in page.properties}
+    for name in names:
+        key = lookup.get(name.lower())
+        if key is None:
+            continue
+        value = notion.read(page, key)
+        if value not in (None, "", []):
+            return value
+    return None
+
+
 def _walk(root: Path, max_depth: int = 4) -> list[Path]:
     """Git repositories under root, without descending into dependency folders."""
     found: list[Path] = []
@@ -104,11 +122,11 @@ class Resolver:
     def resolve(self, client: notion.Client, page_id: str) -> Project:
         page = client.page(page_id)
         name = page.title or page_id
-        github = str(notion.read(page, "github") or "")
+        github = str(_property(page, "Repository", "github", "repo") or "")
 
         for source, declared in (
             ("[projects] in your configuration", self._overrides.get(name)),
-            ("the project's path property", notion.read(page, "path")),
+            ("the project's Path property", _property(page, "Path", "path")),
         ):
             if not declared:
                 continue

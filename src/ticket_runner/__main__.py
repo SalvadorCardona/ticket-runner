@@ -17,7 +17,7 @@ from pathlib import Path
 
 from datetime import datetime
 
-from . import __version__, config as config_module, git, notion, session, state
+from . import __version__, config as config_module, git, notion, provision, session, state
 from . import workspace as workspace_module
 from .projects import Resolver
 from .runner import Runner
@@ -299,6 +299,92 @@ def _render(line: str) -> str:
         cost = event.get("total_cost_usd") or 0
         return f"{BOLD}— end —{RESET} {event.get('num_turns', 0)} turns · ${cost:.3f}"
     return ""
+
+
+def command_init(args: argparse.Namespace) -> int:
+    """Build the whole Notion side from one page link.
+
+    The only thing asked of the user beforehand is the one thing no API can do:
+    share a page with the integration. An integration cannot grant itself
+    access, so that click is the floor — everything past it is done here.
+    """
+    try:
+        configuration = config_module.load()
+    except config_module.ConfigError as error:
+        bad(str(error))
+        return 2
+
+    token = (args.token or configuration.notion.token).strip()
+    if not token or token == config_module.PLACEHOLDER:
+        bad("no Notion token yet")
+        print(
+            f"    {DIM}create an internal integration at "
+            f"https://www.notion.so/my-integrations{RESET}\n"
+            f"    {DIM}then: ticket-runner init <page-url> --token ntn_…{RESET}"
+        )
+        return 2
+
+    page = config_module.identifier(args.page)
+    if not config_module.is_identifier(page):
+        bad(f"“{args.page}” does not contain a Notion page ID")
+        print(f"    {DIM}copy the page's link: ··· → Copy link{RESET}")
+        return 2
+
+    client = notion.Client(token)
+
+    title("Page")
+    try:
+        target = client.page(page)
+    except notion.NotionError as error:
+        bad(f"unreachable: {str(error).splitlines()[0]}")
+        warn("open the page in Notion → ··· → Connections → add your integration")
+        return 1
+    ok(f"“{target.title or page}”")
+
+    title("Workspace")
+    try:
+        report = provision.provision(
+            client, configuration.notion, page, demo=not args.no_demo
+        )
+    except notion.NotionError as error:
+        bad(str(error).splitlines()[0])
+        warn("nothing is half-built: run the same command again once it is fixed")
+        return 1
+    for verb, what in report.steps:
+        if verb == "created":
+            ok(what)
+        elif verb == "kept":
+            _kept(what)
+        else:
+            warn(what)
+
+    title("Configuration")
+    if args.token:
+        config_module.write_notion_value(configuration.path, "token", token)
+        ok("token saved")
+    if config_module.write_notion_value(configuration.path, "workspace", report.workspace):
+        ok(f"workspace = {report.workspace} — written to {configuration.path}")
+    else:
+        ok(f"workspace already pointed here ({report.workspace})")
+    if configuration.notion.tickets_database:
+        warn(
+            "notion.tickets_database is still set and wins over the workspace — "
+            "clear it unless you meant it"
+        )
+
+    print(
+        f"\n{BOLD}ready.{RESET}\n\n"
+        f"  Check it end to end:\n\n    {BOLD}ticket-runner doctor{RESET}\n\n"
+        f"  {DIM}board{RESET}    {target.url}\n"
+        f"  {DIM}next{RESET}     write a ticket, move it to "
+        f"“{configuration.notion.state('ready')}”, and wait for the next pass\n"
+    )
+    return 0
+
+
+def _kept(message: str) -> None:
+    """Already there, and left alone. Worth one dim line, not a green tick."""
+    print(f"  {DIM}·{RESET} {message}")
 
 
 def command_doctor(args: argparse.Namespace) -> int:
@@ -594,6 +680,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = subparsers.add_parser("doctor", help="full diagnostics")
     doctor.set_defaults(function=command_doctor)
+
+    initialise = subparsers.add_parser(
+        "init", help="create the Notion databases from one page link"
+    )
+    initialise.add_argument("page", help="URL of the Notion page to build under")
+    initialise.add_argument("--token", help="Notion integration token, saved to the configuration")
+    initialise.add_argument(
+        "--no-demo", action="store_true", help="do not create the demonstration ticket"
+    )
+    initialise.set_defaults(function=command_init)
 
     configure = subparsers.add_parser("config", help="open the configuration")
     configure.set_defaults(function=command_config)
