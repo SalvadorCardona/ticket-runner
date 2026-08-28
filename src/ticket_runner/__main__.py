@@ -73,7 +73,9 @@ def load_config() -> config_module.Config:
 
 def command_run(args: argparse.Namespace) -> int:
     configuration = load_config()
-    runner = Runner(configuration, dry_run=args.dry_run)
+    runner = Runner(
+        configuration, dry_run=args.dry_run, announce_idle=sys.stdout.isatty()
+    )
     try:
         with state.lock():
             results = runner.tick(limit=args.limit, reference=args.ticket or "")

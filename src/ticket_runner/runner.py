@@ -94,10 +94,21 @@ def slugify(text: str, limit: int = 40) -> str:
 
 
 class Runner:
-    def __init__(self, config: Config, *, dry_run: bool = False, quiet: bool = False) -> None:
+    def __init__(
+        self,
+        config: Config,
+        *,
+        dry_run: bool = False,
+        quiet: bool = False,
+        announce_idle: bool = True,
+    ) -> None:
         self.config = config
         self.dry_run = dry_run or config.runner.dry_run
         self.quiet = quiet
+        # At a ten-second cadence, saying "nothing to do" writes six lines a
+        # minute into the systemd journal forever, and buries the runs that
+        # matter. A terminal wants the reassurance; a log does not.
+        self.announce_idle = announce_idle
         self.client = notion.Client(config.notion.token)
         self.resolver = Resolver(config.runner.workspace_root, config.projects)
         self.agent_label = f"ticket-runner@{socket.gethostname()}"
@@ -595,7 +606,8 @@ class Runner:
                 self.sweep()
             tickets = self.ready()
             if not tickets:
-                self.say("No ticket ready.")
+                if self.announce_idle:
+                    self.say("No ticket ready.")
                 return []
             self.say(f"{len(tickets)} ticket(s) ready.")
 
