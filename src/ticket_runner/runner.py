@@ -19,13 +19,13 @@ import re
 import shutil
 import socket
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import git, notion, prompt as prompt_module, session, state
-from .config import Config, state_dir
+from . import git, notion, notify, prompt as prompt_module, session, state
+from .config import PRIORITIES, Config, state_dir
 from .projects import Project, Resolver
 
 
@@ -57,6 +57,7 @@ class Job:
     session_id: str = ""
     log: Path | None = None
     session_home: Path | None = None
+    model: str = ""
     notes: list[str] = field(default_factory=list)
 
 
@@ -100,15 +101,75 @@ class Runner:
         if not self.quiet:
             print(message, flush=True)
 
+    def _notify(self, title: str, body: str, *, urgent: bool = False) -> None:
+        if self.config.runner.notify and not self.dry_run:
+            notify.send(title, body, urgent=urgent)
+
     # -- reading -------------------------------------------------------------
 
     def ready(self) -> list[Ticket]:
-        database = self.database
+        """Ready tickets, most urgent first, then oldest first.
+
+        Order matters as soon as more tickets are ready than `max_concurrent`
+        allows: without it, which ticket runs is whatever Notion returned first.
+        Age breaks ties so that nothing can be starved by a steady trickle of
+        newer work.
+        """
+        tickets = [Ticket(page) for page in self.client.query(self.database, self._ready_filter())]
+        priorities = {name: index for index, name in enumerate(PRIORITIES)}
+        default = priorities.get("Normal", len(PRIORITIES))
+
+        def rank(ticket: Ticket) -> tuple[int, str]:
+            value = notion.read(ticket.page, self.config.notion.prop("priority"))
+            return (priorities.get(str(value), default), ticket.page.raw.get("created_time", ""))
+
+        return sorted(tickets, key=rank)
+
+    def _ready_filter(self) -> dict:
         status_property = self.config.notion.prop("status")
-        kind = self.client.schema(database).get(status_property, "status")
-        wanted = self.config.notion.state("ready")
-        filter_ = {"property": status_property, kind: {"equals": wanted}}
-        return [Ticket(page) for page in self.client.query(database, filter_)]
+        kind = self.client.schema(self.database).get(status_property, "status")
+        return {"property": status_property, kind: {"equals": self.config.notion.state("ready")}}
+
+    def sweep(self) -> int:
+        """Put back tickets a dead runner left claimed.
+
+        A run holds an exclusive lock, so at the start of a run no other run of
+        ours can be in flight — any ticket still marked "in progress" under this
+        host's name was therefore abandoned, by a reboot, a `systemctl stop`, or
+        a crash. It goes back to ready rather than staying stuck for good.
+
+        A two-minute grace covers clock skew, and a ticket claimed by another
+        machine is left alone: only this host can know its own runs are over.
+        """
+        status_property = self.config.notion.prop("status")
+        kind = self.client.schema(self.database).get(status_property, "status")
+        running = self.client.query(
+            self.database,
+            {"property": status_property, kind: {"equals": self.config.notion.state("running")}},
+        )
+        recovered = 0
+        for page in running:
+            if notion.read(page, self.config.notion.prop("agent")) != self.agent_label:
+                continue
+            edited = page.raw.get("last_edited_time", "")
+            try:
+                age = datetime.now(timezone.utc) - datetime.fromisoformat(edited)
+            except ValueError:
+                age = timedelta(days=1)
+            if age < timedelta(minutes=2):
+                continue
+            ticket = Ticket(page)
+            self.say(f"  ↺ {ticket.title} — claimed but no run alive, put back")
+            self._set(ticket, **{status_property: self.config.notion.state("ready")})
+            self._comment(
+                ticket,
+                f"{self.agent_label} — put back in the queue.\n"
+                f"This ticket was still claimed while no run was in flight, "
+                f"{age.total_seconds() / 60:.0f} min after it was last touched: "
+                "its runner was stopped or died mid-session. It will be picked up again.",
+            )
+            recovered += 1
+        return recovered
 
     def fetch_one(self, reference: str) -> Ticket:
         page_id = reference.strip()
@@ -119,9 +180,38 @@ class Runner:
     # -- writing -------------------------------------------------------------
 
     def _set(self, ticket: Ticket, **values: object) -> None:
+        """Write ticket properties, the status above all.
+
+        The status is what the board runs on: it says whether a ticket is taken,
+        finished or waiting for someone. The others — who ran it, the session
+        link, the cost — are commentary. So a write that Notion rejects is tried
+        again with the status alone, rather than leaving a finished ticket stuck
+        in "in progress" because an optional column disagreed about its type.
+        """
         if self.dry_run:
             return
-        self.client.update(self.database, ticket.page.id, values)
+        try:
+            self.client.update(self.database, ticket.page.id, values)
+        except notion.NotionError as error:
+            status = self.config.notion.prop("status")
+            if status not in values:
+                raise
+            self.say(f"    ! Notion refused some properties ({error}) — writing the status alone")
+            self.client.update(self.database, ticket.page.id, {status: values[status]})
+
+    def _measures(self, outcome: session.Outcome) -> dict[str, object]:
+        """What the run cost, for the columns that want to know.
+
+        Skipped silently when the database has no such columns — and `cost` is
+        zero on a subscription, where the CLI reports none, so it is only
+        written when there is something to write.
+        """
+        values: dict[str, object] = {
+            self.config.notion.prop("duration"): round(outcome.seconds / 60, 1)
+        }
+        if outcome.cost_usd:
+            values[self.config.notion.prop("cost")] = round(outcome.cost_usd, 3)
+        return values
 
     def _session_value(self, session_id: str, home: Path | None) -> str:
         """A deep link if the Session property is a URL, the bare ID otherwise.
@@ -155,6 +245,9 @@ class Runner:
     ) -> dict:
         outcome = "blocked" if blocked else "failed"
         self.say(f"    ✗ {ticket.title} — {reason}")
+        self._notify(
+            f"{'Blocked' if blocked else 'Failed'} · {ticket.title}", reason, urgent=not blocked
+        )
         self._set(ticket, **{self.config.notion.prop("status"): self.config.notion.state(outcome)})
         self._comment(
             ticket,
@@ -207,6 +300,7 @@ class Runner:
             body,
             session_id=session.new_id(),
             log=state.log_file(short),
+            model=str(notion.read(ticket.page, self.config.notion.prop("model")) or ""),
         )
         where = f"{project.path} · {branch}" if project.is_code else "document → Notion"
         self.say(f"  → {ticket.title}\n    {project.name} · {where}")
@@ -247,12 +341,13 @@ class Runner:
             url=job.ticket.url,
         )
         log = job.log or state.log_file(short_id(job.ticket.id))
-        self.say(f"    Claude session {job.session_id} → {log}")
+        chosen = job.model or self.config.runner.model
+        self.say(f"    Claude session {job.session_id}{' · ' + chosen if chosen else ''} → {log}")
         outcome = session.run(
             text,
             cwd=job.workdir,
             log=log,
-            model=self.config.runner.model,
+            model=job.model or self.config.runner.model,
             permission_mode=self.config.runner.permission_mode,
             timeout_minutes=self.config.runner.timeout_minutes,
             session_id=job.session_id,
@@ -331,6 +426,7 @@ class Runner:
                 self.config.notion.prop("session"): self._session_value(
                     outcome.session_id, job.session_home
                 ),
+                **self._measures(outcome),
             },
         )
         cost = f" · ${outcome.cost_usd:.3f}" if outcome.cost_usd else ""
@@ -341,6 +437,7 @@ class Runner:
             f"{outcome.turns} turns · {outcome.seconds / 60:.1f} min{cost}",
         )
         self.say(f"    ✓ {ticket.title} — {blocks} block(s) written to the ticket")
+        self._notify(f"Ready to review · {ticket.title}", f"Written into the Notion ticket.")
         return {
             "ticket": ticket.title,
             "id": ticket.id,
@@ -430,6 +527,7 @@ class Runner:
         values[self.config.notion.prop("session")] = self._session_value(
             outcome.session_id, job.session_home or project.path
         )
+        values.update(self._measures(outcome))
         self._set(ticket, **values)
 
         cost = f" · ${outcome.cost_usd:.3f}" if outcome.cost_usd else ""
@@ -443,6 +541,10 @@ class Runner:
             + f"\n{trace}\n{outcome.turns} turns · {outcome.seconds / 60:.1f} min{cost}",
         )
         self.say(f"    ✓ {ticket.title} — {pull_request or job.branch}")
+        self._notify(
+            f"Ready to review · {ticket.title}",
+            pull_request or f"Branch {job.branch}, {commits} commit(s)",
+        )
         return {
             "ticket": ticket.title,
             "id": ticket.id,
@@ -463,6 +565,8 @@ class Runner:
             tickets = [self.fetch_one(reference)]
             self.say(f"Requested ticket: {tickets[0].title}")
         else:
+            if not self.dry_run:
+                self.sweep()
             tickets = self.ready()
             if not tickets:
                 self.say("No ticket ready.")
@@ -482,4 +586,5 @@ class Runner:
 
         for result in results:
             state.record(result)
+        state.prune_logs(self.config.runner.log_retention_days)
         return results

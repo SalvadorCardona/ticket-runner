@@ -125,6 +125,8 @@ presence of each status — and names whichever of those was missed.
 | `runner.push` | `true` | `false`: commits stay local |
 | `runner.open_pull_request` | `true` | `false`: the branch is pushed, without a PR |
 | `runner.keep_worktree_on_failure` | `true` | keep enough around to understand a failure |
+| `runner.notify` | `true` | one desktop notification per finished ticket |
+| `runner.log_retention_days` | `14` | drop older session logs; `0` keeps everything |
 | `runner.attach_sessions` | `true` | file each session under its project, so `claude --resume` there lists it |
 | `runner.prompt_file` | `""` | your own prompt template, for repository tickets |
 | `runner.document_prompt_file` | `""` | the same, for tickets with no repository |
@@ -146,6 +148,15 @@ presence of each status — and names whichever of those was missed.
 | `Agent` | text | filled by the runner: who took the ticket |
 | `Pull Request` | URL | filled by the runner at the end |
 | `Session` | **URL** or text | written as soon as the ticket is claimed. Make it a URL and it becomes a link that opens the session; leave it text and it holds the bare ID |
+| `Priority` | select | *optional* — `Urgent`, `High`, `Normal`, `Low`. Decides which ready ticket runs first |
+| `Model` | select | *optional* — `opus`, `sonnet`, `haiku`. This ticket's model, over `runner.model` |
+| `Cost` | number | *optional* — written back, in dollars |
+| `Duration` | number | *optional* — written back, in minutes |
+
+The last four are optional in the strict sense: a database without them behaves exactly as
+before, because the runner only ever writes properties the schema declares. Add them and
+you get a queue you can steer — a cheap model for a documentation ticket, an expensive one
+for a refactor — and a board that shows what each ticket cost.
 
 The **body** of the ticket page is sent to the agent as the description. Write there what
 you would tell a developer who does not know the subject: what must change, where, and
@@ -268,7 +279,7 @@ ticket-runner status       # timer, current run, recent tickets
 ticket-runner history      # what has been handled, with the pull requests
 ticket-runner projects     # Notion project → local repository mapping
 ticket-runner doctor       # full diagnostics
-ticket-runner clean --force          # remove worktrees left behind by failures
+ticket-runner clean --force          # remove worktrees and scratch dirs left by failures
 ticket-runner enable       # apply interval_seconds and start the timer
 ticket-runner disable      # stop the timer
 ```
@@ -302,6 +313,10 @@ on the program's normal path:
   exactly where it stopped: `claude --resume <id>`.
 - **Two runs never overlap.** A file lock means a run that outlasts the timer's interval
   is not lapped by the next one.
+- **A ticket is never stuck for good.** Because a run holds that lock, any ticket still
+  marked *in progress* at the start of a run was abandoned — by a reboot, a
+  `systemctl stop`, a crash. It goes back in the queue with a comment saying so, instead
+  of sitting claimed forever. Tickets claimed by another machine are left alone.
 
 One thing to know: by default the runner starts the session with
 `permission_mode = "bypassPermissions"`, because a session with nobody to ask cannot ask,
@@ -325,6 +340,19 @@ often.
 Session logs are in `~/.local/state/ticket-runner/logs/` (one `.jsonl` per ticket, the raw
 session stream), the history in `history.jsonl`, and the timer's own journal in
 `journalctl --user -u ticket-runner -f`.
+
+---
+
+## Tests
+
+```sh
+python3 tests/run.py
+```
+
+No framework and no dependency, for the same reason the runner has none: a suite that
+needs an install is a suite that stops being run. It covers the pure part — identifier
+collisions, status mapping, the markdown-to-Notion conversion, deep links, property
+encoding — which is to say what has already gone wrong once, or would go wrong silently.
 
 ---
 

@@ -73,6 +73,27 @@ def history(limit: int = 20) -> list[dict]:
     return entries
 
 
+def prune_logs(days: int) -> int:
+    """Drop session logs older than `days`. Zero keeps everything.
+
+    A session log is a few hundred kilobytes and one is written per ticket; at
+    a ten-second cadence that adds up quietly. The Notion comment keeps the
+    summary either way, and the transcript lives in ~/.claude/projects.
+    """
+    if days <= 0:
+        return 0
+    cutoff = time.time() - days * 86400
+    removed = 0
+    for path in logs_dir().glob("*"):
+        try:
+            if path.is_file() and path.stat().st_mtime < cutoff:
+                path.unlink()
+                removed += 1
+        except OSError:
+            continue
+    return removed
+
+
 def log_file(short: str) -> Path:
     """One log per session, named by the ticket's short id (see `short_id`)."""
     stamp = time.strftime("%Y%m%d-%H%M%S")

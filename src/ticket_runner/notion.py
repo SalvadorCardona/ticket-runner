@@ -214,16 +214,34 @@ class Client:
     # -- writing -------------------------------------------------------------
 
     def update(self, database_id: str, page_id: str, values: dict[str, Any]) -> None:
-        """Write properties by name; those absent from the schema are ignored."""
-        schema = self.schema(database_id)
-        properties: dict[str, Any] = {}
-        for name, value in values.items():
-            kind = schema.get(name)
-            encoded = _encode(kind, value)
-            if encoded is not None:
-                properties[name] = encoded
-        if properties:
+        """Write properties by name; those absent from the schema are ignored.
+
+        The schema is cached for the run, and a run can last half an hour — long
+        enough for someone to change a column's type in Notion meanwhile. Values
+        are then encoded for a type the database no longer has, and Notion
+        answers `400 X is expected to be url`. So a rejection on those grounds
+        refreshes the schema and tries once more, rather than losing the write.
+        """
+        def encode(schema: dict[str, str]) -> dict[str, Any]:
+            properties: dict[str, Any] = {}
+            for name, value in values.items():
+                encoded = _encode(schema.get(name), value)
+                if encoded is not None:
+                    properties[name] = encoded
+            return properties
+
+        properties = encode(self.schema(database_id))
+        if not properties:
+            return
+        try:
             self._request("PATCH", f"/pages/{page_id}", {"properties": properties})
+        except NotionError as error:
+            if "expected to be" not in str(error):
+                raise
+            self._databases.pop(database_id, None)
+            retry = encode(self.schema(database_id))
+            if retry:
+                self._request("PATCH", f"/pages/{page_id}", {"properties": retry})
 
     def append_markdown(self, page_id: str, markdown: str) -> int:
         """Append markdown to a page, as real Notion blocks. Returns the count.

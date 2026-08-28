@@ -21,7 +21,16 @@ status = "Status"
 project = "Project"
 agent = "Agent"
 pull_request = "Pull Request"
+
+# Written when the ticket is claimed. As a URL column it becomes a link that
+# opens the session; as a text column it holds the bare identifier.
 session = "Session"
+
+# All four are optional — a database without them behaves exactly as before.
+model = "Model"          # select: pick the model per ticket, over runner.model
+priority = "Priority"    # select: Urgent, High, Normal, Low — which one runs first
+cost = "Cost"            # number: what the run cost, written back
+duration = "Duration"    # number: how long it took, in minutes
 
 # The states that drive the whole system. Point them at whatever your board
 # calls them — `ticket-runner doctor` checks that each one really exists.
@@ -89,6 +98,14 @@ keep_worktree_on_failure = true
 # under the disposable worktree it ran in — a directory that no longer exists.
 # Tickets with no repository are filed under workspace_root.
 attach_sessions = true
+
+# One desktop notification per finished ticket. The point of the runner is that
+# you are not watching it; without this you discover your pull request tomorrow.
+notify = true
+
+# Drop session logs older than this. 0 keeps everything. The Notion comment
+# keeps the summary either way, and the transcript lives in ~/.claude/projects.
+log_retention_days = 14
 
 dry_run = false
 

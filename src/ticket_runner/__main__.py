@@ -96,16 +96,23 @@ def command_list(args: argparse.Namespace) -> int:
     if not tickets:
         print("No ticket ready.")
         return 0
-    title(f"{len(tickets)} ticket(s) in “{configuration.notion.state('ready')}”")
-    for ticket in tickets:
+    title(f"{len(tickets)} ticket(s) in “{configuration.notion.state('ready')}”, in the order they will run")
+    for position, ticket in enumerate(tickets, 1):
         relation = notion.read(ticket.page, configuration.notion.prop("project")) or []
-        project = "?"
+        project, kind = "?", ""
         if relation:
             try:
-                project = runner.resolver.resolve(runner.client, relation[0]).name
+                resolved = runner.resolver.resolve(runner.client, relation[0])
+                project = resolved.name
+                kind = "code" if resolved.is_code else "document"
             except (LookupError, notion.NotionError):
                 project = f"{YELLOW}project not found{RESET}"
-        print(f"  {ticket.title}\n    {DIM}{project} · {ticket.url}{RESET}")
+        badges = [
+            str(notion.read(ticket.page, configuration.notion.prop(key)) or "")
+            for key in ("priority", "model")
+        ]
+        tail = " · ".join([part for part in [project, kind, *badges] if part])
+        print(f"  {position}. {ticket.title}\n     {DIM}{tail}{RESET}\n     {DIM}{ticket.url}{RESET}")
     return 0
 
 
@@ -176,12 +183,20 @@ def command_status(args: argparse.Namespace) -> int:
     else:
         ok("no run in progress")
 
-    title("Tickets")
+    title("Board")
     try:
         configuration.require_usable()
         runner = Runner(configuration, quiet=True)
-        ready = runner.ready()
-        ok(f"{len(ready)} ready in “{configuration.notion.state('ready')}”")
+        counts: dict[str, int] = {}
+        for page in runner.client.query(runner.database):
+            name = str(notion.read(page, configuration.notion.prop("status")) or "—")
+            counts[name] = counts.get(name, 0) + 1
+        if not counts:
+            print(f"  {DIM}no ticket{RESET}")
+        ready_state = configuration.notion.state("ready")
+        for name, number in sorted(counts.items(), key=lambda item: -item[1]):
+            highlight = GREEN if name == ready_state else DIM
+            print(f"  {highlight}{number:>3}{RESET}  {name}")
     except (config_module.ConfigError, notion.NotionError) as error:
         bad(f"Notion unreachable: {str(error).splitlines()[0]}")
 
@@ -191,7 +206,16 @@ def command_status(args: argparse.Namespace) -> int:
         print(f"  {DIM}none{RESET}")
     for entry in entries:
         status = entry.get("status", "?")
-        print(f"  {_colour(status)}{status:<7}{RESET} {entry.get('ticket', '')}")
+        seconds = entry.get("seconds")
+        timing = f" {DIM}({seconds / 60:.0f} min){RESET}" if isinstance(seconds, (int, float)) else ""
+        print(f"  {_colour(status)}{status:<7}{RESET} {entry.get('ticket', '')}{timing}")
+        detail = entry.get("pull_request") or entry.get("reason") or ""
+        if detail:
+            print(f"          {DIM}{str(detail)[:90]}{RESET}")
+
+    spend = sum(float(entry.get("cost_usd") or 0) for entry in state.history(10_000))
+    if spend:
+        print(f"\n  {DIM}reported spend so far: ${spend:.2f}{RESET}")
     return 0
 
 
@@ -337,9 +361,22 @@ def command_doctor(args: argparse.Namespace) -> int:
             warn(f"“{name}” is a {kind}, expected {' or '.join(expected)}")
         else:
             ok(f"“{name}” ({kind})")
-    session_property = configuration.notion.prop("session")
-    if session_property not in schema:
-        warn(f"property “{session_property}” missing — the session ID will go in a comment")
+    optional = (
+        ("session", "url", "a clickable link to the session; as text, the bare ID"),
+        ("model", "select", "pick the model per ticket, overriding runner.model"),
+        ("priority", "select", "which ready ticket runs first"),
+        ("cost", "number", "what the run cost, written back"),
+        ("duration", "number", "how long it took, in minutes"),
+    )
+    for key, preferred, why in optional:
+        name = configuration.notion.prop(key)
+        kind = schema.get(name)
+        if kind is None:
+            warn(f"“{name}” missing — {why}")
+        elif kind != preferred:
+            ok(f"“{name}” ({kind}) — {preferred} would be better: {why}")
+        else:
+            ok(f"“{name}” ({kind})")
 
     title("Statuses")
     options = client.options(database, configuration.notion.prop("status"))
@@ -378,15 +415,21 @@ def command_config(args: argparse.Namespace) -> int:
 
 
 def command_clean(args: argparse.Namespace) -> int:
-    root = config_module.state_dir() / "worktrees"
-    directories = sorted(root.iterdir()) if root.exists() else []
+    """Remove what failures left behind: worktrees and scratch directories."""
+    state_root = config_module.state_dir()
+    directories = [
+        directory
+        for parent in ("worktrees", "scratch")
+        if (state_root / parent).exists()
+        for directory in sorted((state_root / parent).iterdir())
+    ]
     if not directories:
-        print("No leftover worktree.")
+        print("Nothing left behind.")
         return 0
-    title(f"{len(directories)} worktree(s) kept")
+    title(f"{len(directories)} directory(ies) kept")
     for directory in directories:
-        branch = git.git(["rev-parse", "--abbrev-ref", "HEAD"], directory).out or "?"
-        print(f"  {directory}  {DIM}{branch}{RESET}")
+        branch = git.git(["rev-parse", "--abbrev-ref", "HEAD"], directory).out
+        print(f"  {directory}  {DIM}{branch or 'no repository'}{RESET}")
     if not args.force:
         print(f"\n{DIM}ticket-runner clean --force to remove them{RESET}")
         return 0
@@ -398,6 +441,9 @@ def command_clean(args: argparse.Namespace) -> int:
         else:
             shutil.rmtree(directory, ignore_errors=True)
         print(f"  removed {directory}")
+    removed = state.prune_logs(args.days)
+    if removed:
+        print(f"  removed {removed} log file(s) older than {args.days} days")
     return 0
 
 
@@ -505,6 +551,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     clean = subparsers.add_parser("clean", help="remove worktrees left by failures")
     clean.add_argument("--force", action="store_true")
+    clean.add_argument("--days", type=int, default=14, help="also drop logs older than this")
     clean.set_defaults(function=command_clean)
 
     for name, help_text in (

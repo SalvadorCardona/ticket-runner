@@ -69,6 +69,8 @@ class Runner:
     open_pull_request: bool = True
     keep_worktree_on_failure: bool = True
     attach_sessions: bool = True
+    notify: bool = True
+    log_retention_days: int = 14
     dry_run: bool = False
     prompt_file: str = ""
     document_prompt_file: str = ""
@@ -101,7 +103,16 @@ _DEFAULT_PROPERTIES = {
     "agent": "Agent",
     "pull_request": "Pull Request",
     "session": "Session",
+    # Optional. A database without them behaves exactly as before: the runner
+    # skips a property the schema does not declare.
+    "model": "Model",          # per-ticket model, overrides runner.model
+    "priority": "Priority",    # which ready ticket goes first
+    "cost": "Cost",            # written back, in dollars
+    "duration": "Duration",    # written back, in minutes
 }
+
+# Highest first. Anything else — including an empty cell — sorts as normal.
+PRIORITIES = ("Urgent", "High", "Normal", "Low")
 
 _DEFAULT_STATUS = {
     "ready": "Not started",
@@ -185,6 +196,10 @@ def load(path: Path | None = None) -> Config:
             runner_raw.get("keep_worktree_on_failure", defaults.keep_worktree_on_failure)
         ),
         attach_sessions=bool(runner_raw.get("attach_sessions", defaults.attach_sessions)),
+        notify=bool(runner_raw.get("notify", defaults.notify)),
+        log_retention_days=max(
+            0, int(runner_raw.get("log_retention_days", defaults.log_retention_days))
+        ),
         dry_run=bool(runner_raw.get("dry_run", defaults.dry_run)),
         prompt_file=str(runner_raw.get("prompt_file", defaults.prompt_file)).strip(),
         document_prompt_file=str(
