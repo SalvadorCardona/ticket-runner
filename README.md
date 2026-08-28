@@ -140,11 +140,34 @@ presence of each status — and names whichever of those was missed.
 | `Project` | relation | to the projects database: decides the repository |
 | `Agent` | text | filled by the runner: who took the ticket |
 | `Pull Request` | URL | filled by the runner at the end |
-| `Session` | text | *optional* — the session ID, for `claude --resume` |
+| `Session` | text | the session ID, written as soon as the ticket is claimed |
 
 The **body** of the ticket page is sent to the agent as the description. Write there what
 you would tell a developer who does not know the subject: what must change, where, and
 how you will know it is done.
+
+### Following the work
+
+`Session` is filled **when the ticket is claimed**, not when it finishes — so a ticket
+sitting in *In progress* is exactly the one you can look into:
+
+```sh
+claude --resume <session id>          # reopen the conversation, read it, carry on
+ticket-runner logs -f                 # the live feed of the running session
+ticket-runner logs <ticket id>        # a past session, rendered
+ticket-runner logs <ticket id> --raw  # the raw JSON stream
+```
+
+`claude --resume` works from any directory, and keeps working after the worktree is gone:
+the transcript lives in `~/.claude/projects/`, not in the checkout. While a session runs,
+its worktree is also a normal repository — `git -C ~/.local/state/ticket-runner/worktrees/<name> diff`
+shows you what it has changed so far.
+
+The runner also posts a comment on the ticket when it finishes, carrying the summary, the
+branch, the pull request and the resume command. That one needs a capability the
+integration does not get by default: **notion.so/my-integrations → your integration →
+Capabilities → Insert comments**. Without it the run still succeeds, and the log says the
+comment was refused with a 403.
 
 ### The projects database
 

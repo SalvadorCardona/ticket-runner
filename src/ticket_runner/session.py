@@ -45,6 +45,15 @@ def available() -> str:
     return shutil.which("claude") or ""
 
 
+def new_id() -> str:
+    """A session identifier, drawn before the session exists.
+
+    The runner draws it at claim time so the Notion ticket can point at the work
+    from the moment it starts, not only once it is finished.
+    """
+    return str(uuid.uuid4())
+
+
 def run(
     prompt: str,
     *,
@@ -53,12 +62,13 @@ def run(
     model: str = "",
     permission_mode: str = "bypassPermissions",
     timeout_minutes: int = 30,
+    session_id: str = "",
 ) -> Outcome:
     binary = available()
     if not binary:
         raise FileNotFoundError("claude not found in PATH")
 
-    session_id = str(uuid.uuid4())
+    session_id = session_id or new_id()
     command = [
         binary,
         "--print",

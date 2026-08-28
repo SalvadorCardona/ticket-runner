@@ -52,6 +52,8 @@ class Job:
     base: str
     worktree: Path
     body: str = ""
+    session_id: str = ""
+    log: Path | None = None
     notes: list[str] = field(default_factory=list)
 
 
@@ -113,7 +115,14 @@ class Runner:
         try:
             self.client.comment(ticket.page.id, text)
         except notion.NotionError as error:
-            self.say(f"    ! Notion refused the comment: {error}")
+            hint = ""
+            if "403" in str(error):
+                hint = (
+                    "\n      the integration lacks comment capability: "
+                    "notion.so/my-integrations → your integration → Capabilities → "
+                    "Insert comments"
+                )
+            self.say(f"    ! Notion refused the comment: {error}{hint}")
 
     def _fail(self, ticket: Ticket, reason: str, detail: str = "") -> dict:
         self.say(f"    ✗ {ticket.title} — {reason}")
@@ -148,14 +157,27 @@ class Runner:
             self._fail(ticket, "ticket content unreadable", str(error))
             return None
 
-        job = Job(ticket, project, branch, base, worktree, body)
+        job = Job(
+            ticket,
+            project,
+            branch,
+            base,
+            worktree,
+            body,
+            session_id=session.new_id(),
+            log=state.log_file(ticket.id),
+        )
         self.say(f"  → {ticket.title}\n    {project.name} · {project.path} · {branch}")
         if not self.dry_run:
+            # The session identifier is written now, not at the end: a ticket
+            # still in progress is exactly the one you want to look into, and
+            # `claude --resume <id>` replays it even while it runs.
             self._set(
                 ticket,
                 **{
                     self.config.notion.prop("status"): self.config.notion.state("running"),
                     self.config.notion.prop("agent"): self.agent_label,
+                    self.config.notion.prop("session"): job.session_id,
                 },
             )
         return job
@@ -185,8 +207,8 @@ class Runner:
             base=job.base,
             url=ticket.url,
         )
-        log = state.log_file(ticket.id)
-        self.say(f"    Claude session → {log}")
+        log = job.log or state.log_file(ticket.id)
+        self.say(f"    Claude session {job.session_id} → {log}")
 
         try:
             outcome = session.run(
@@ -196,6 +218,7 @@ class Runner:
                 model=self.config.runner.model,
                 permission_mode=self.config.runner.permission_mode,
                 timeout_minutes=self.config.runner.timeout_minutes,
+                session_id=job.session_id,
             )
         except (OSError, FileNotFoundError) as error:
             git.remove_worktree(project.path, job.worktree)
