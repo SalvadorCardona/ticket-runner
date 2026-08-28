@@ -1,0 +1,14 @@
+[Unit]
+Description=ticket-runner — relève les tickets Notion prêts
+Documentation=https://github.com/SalvadorCardona/ticket-runner
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=@INTERVAL@min
+AccuracySec=30s
+# Rattrape le tour manqué si la machine était éteinte.
+Persistent=true
+Unit=ticket-runner.service
+
+[Install]
+WantedBy=timers.target

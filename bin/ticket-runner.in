@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Généré par install.sh — lance ticket-runner depuis son dossier d'installation.
+set -euo pipefail
+
+APP_DIR="@APP_DIR@"
+export PYTHONPATH="$APP_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONUNBUFFERED=1
+
+exec "@PYTHON@" -m ticket_runner "$@"
