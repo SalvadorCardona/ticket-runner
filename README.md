@@ -144,7 +144,7 @@ presence of each status — and names whichever of those was missed.
 | --- | --- | --- |
 | `Name` | title | what the agent must do, in one line |
 | `Status` | status | **what drives the whole system** — see below |
-| `Project` | relation | to the projects database: decides the repository |
+| `Project` | relation | *optional* — to the projects database: decides the repository |
 | `Agent` | text | filled by the runner: who took the ticket |
 | `Pull Request` | URL | filled by the runner at the end |
 | `Session` | **URL** or text | written as soon as the ticket is claimed. Make it a URL and it becomes a link that opens the session; leave it text and it holds the bare ID |
@@ -215,21 +215,26 @@ comment was refused with a 403.
 
 One row per project, and **the project decides what kind of work its tickets are.**
 
-A project that names a repository — a `github` property, or a `[projects]` entry in your
-configuration — is a **code project**. Its tickets get a git worktree, a branch, commits
-and a pull request. The repository is located by matching `github` against the `origin`
-remotes of everything found under `workspace_root`; if it names one that does not exist
-on disk, the ticket is blocked rather than guessed at.
+A project that names a repository is a **code project**. Its tickets get a git worktree, a
+branch, commits and a pull request. Three ways to name it, most explicit first:
 
-A project that names none is a **document project**. Its tickets get a disposable scratch
-directory instead of a worktree, and the agent's answer is written back into the Notion
-ticket as real blocks — headings, lists, checkboxes, links. No branch, no pull request.
-That is what you want for a ticket like *"draft me the steps to become a certified
-trainer"*: there is nothing to commit, and the deliverable is the page itself.
+1. a `[projects]` entry in your configuration — `"Trader Ia" = "~/workspace/labo/trader-ia"`;
+2. a **`path` property on the project page**, which keeps the mapping on the board rather
+   than in a file on one machine;
+3. a **`github` property**, matched against the `origin` remotes of every repository found
+   under `workspace_root`.
+
+A project that names none — and **a ticket with no project at all** — is **document work**.
+It gets a disposable scratch directory instead of a worktree, and the agent's answer is
+written back into the Notion ticket as real blocks: headings, lists, checkboxes, links.
+No branch, no pull request. That is what you want for *"draft me the steps to become a
+certified trainer"* or *"summarise this for me"*: there is nothing to commit, and the
+deliverable is the page itself.
 
 The runner never guesses from a project's name. A name that happens to match a folder is
 a coincidence, and turning a writing task into commits on a like-named repository is a
-worse outcome than asking you to be explicit.
+worse outcome than asking you to be explicit. But a repository that *is* named and does
+not exist is an error, and blocks the ticket rather than silently falling back.
 
 `ticket-runner projects` shows you which is which for every referenced project — worth
 running once after installation; it is what saves you from surprises.

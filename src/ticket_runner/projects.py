@@ -1,15 +1,17 @@
 """Matching a Notion project to a repository on disk.
 
-Three ways, in this order, from the most explicit to the most guessed:
+Three ways, in this order, from the most explicit to the least:
 
 1. a `[projects]` entry in the configuration — the Notion name, the path;
-2. the project's `github` property, matched against the `origin` remotes of the
-   repositories found under `workspace_root`;
-3. failing that, a directory named after the repository.
+2. a **`path` property on the project page** in Notion, which keeps the mapping
+   on the board rather than in a file on one machine;
+3. the project's `github` property, matched against the `origin` remotes of the
+   repositories found under `workspace_root`.
 
-The first always works; the other two save you from declaring every project by
-hand. A project that cannot be located is never half-guessed: the ticket is put
-back with the reason in a comment.
+A project that declares none of them has no repository, and its tickets produce
+a document instead of a pull request. A project that declares one that does not
+exist is an error, not an invitation to guess: the ticket is put back with the
+reason in a comment.
 """
 
 from __future__ import annotations
@@ -88,11 +90,15 @@ class Resolver:
         name = page.title or page_id
         github = str(notion.read(page, "github") or "")
 
-        override = self._overrides.get(name)
-        if override:
-            path = Path(override)
+        for source, declared in (
+            ("[projects] in your configuration", self._overrides.get(name)),
+            ("the project's path property", notion.read(page, "path")),
+        ):
+            if not declared:
+                continue
+            path = Path(str(declared)).expanduser()
             if not git.is_repo(path):
-                raise LookupError(f"“{name}”: {path} is not a git repository")
+                raise LookupError(f"“{name}”: {path}, from {source}, is not a git repository")
             return Project(name, path, page_id, github)
 
         if not github:

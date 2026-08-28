@@ -72,6 +72,21 @@ def short_id(page_id: str) -> str:
     return page_id.replace("-", "")[-8:]
 
 
+def is_blank(body: str) -> bool:
+    """A ticket body that says nothing, template headings included.
+
+    A database template fills a new page with empty headings. They are not
+    blank text, so they would travel into the prompt as noise and — worse —
+    stop the "everything is in the title" fallback from firing on a ticket
+    whose whole content is its title.
+    """
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and set(stripped) != {"-"}:
+            return False
+    return True
+
+
 def slugify(text: str, limit: int = 40) -> str:
     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
     text = re.sub(r"[^a-zA-Z0-9]+", "-", text).strip("-").lower()
@@ -261,17 +276,17 @@ class Runner:
         """Locate the project and claim the ticket. None if it is unusable."""
         relation = notion.read(ticket.page, self.config.notion.prop("project")) or []
         if not relation:
-            self._fail(
-                ticket,
-                "no project linked: the runner has no repository to work in",
-                blocked=True,
-            )
-            return None
-        try:
-            project = self.resolver.resolve(self.client, relation[0])
-        except (LookupError, notion.NotionError) as error:
-            self._fail(ticket, "project not found on disk", str(error), blocked=True)
-            return None
+            # No project at all is not an error: it is the plainest possible
+            # document ticket. "Draft me an email", "summarise this" — there is
+            # nothing to commit and nowhere to commit it, so the answer goes
+            # back into the page, exactly as for a project without a repository.
+            project = Project(name="", path=None)
+        else:
+            try:
+                project = self.resolver.resolve(self.client, relation[0])
+            except (LookupError, notion.NotionError) as error:
+                self._fail(ticket, "project not found on disk", str(error), blocked=True)
+                return None
 
         short = short_id(ticket.id)
         stem = f"{slugify(project.name, 24)}-{short}"
@@ -290,6 +305,17 @@ class Runner:
         except notion.NotionError as error:
             self._fail(ticket, "ticket content unreadable", str(error))
             return None
+        if is_blank(body):
+            body = ""
+            if not ticket.page.title.strip():
+                self._fail(
+                    ticket,
+                    "nothing to work from: the ticket has neither a title nor a description",
+                    "Give it a title, or fill in the template headings, then move it back "
+                    "to the ready column.",
+                    blocked=True,
+                )
+                return None
 
         job = Job(
             ticket,
@@ -303,7 +329,7 @@ class Runner:
             model=str(notion.read(ticket.page, self.config.notion.prop("model")) or ""),
         )
         where = f"{project.path} · {branch}" if project.is_code else "document → Notion"
-        self.say(f"  → {ticket.title}\n    {project.name} · {where}")
+        self.say(f"  → {ticket.title}\n    {project.name or 'no project'} · {where}")
         if not self.dry_run:
             # The session identifier is written now, not at the end: a ticket
             # still in progress is exactly the one you want to look into, and

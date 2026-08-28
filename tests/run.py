@@ -289,6 +289,22 @@ def blocks_are_chunked_below_notions_append_limit():
 # -- runner ------------------------------------------------------------------
 
 
+@case
+def a_template_only_body_counts_as_blank():
+    """A Notion template fills a new page with empty headings.
+
+    They are not blank text, so without this they would travel into the prompt
+    as noise and stop the "everything is in the title" fallback from firing.
+    """
+    from ticket_runner.runner import is_blank
+
+    assert is_blank("## Ce qu'il faut faire\n## Où\n## Comment on saura\n")
+    assert is_blank("")
+    assert is_blank("   \n\n---\n")
+    assert not is_blank("## Ce qu'il faut faire\nRetirer le header.")
+    assert not is_blank("Une seule ligne de texte")
+
+
 def main() -> int:
     failures = 0
     for function in CASES:

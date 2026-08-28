@@ -131,7 +131,8 @@ def command_projects(args: argparse.Namespace) -> int:
     for page_id in seen:
         try:
             project = runner.resolver.resolve(runner.client, page_id)
-            ok(f"{project.name} → {project.path}")
+            where = project.path if project.is_code else f"{DIM}document — no repository{RESET}"
+            ok(f"{project.name} → {where}")
         except (LookupError, notion.NotionError) as error:
             failed += 1
             bad(str(error).replace("\n", "\n    "))

@@ -51,11 +51,11 @@ RESULT: blocked — <what is missing to decide>
 
 
 DOCUMENT = """\
-You are handling a ticket for {project}, alone and with nobody to talk to: no \
+You are handling a Notion ticket {scope}, alone and with nobody to talk to: no \
 one can answer a question while the session runs.
 
-This project has no code repository. What the ticket asks for is a document, \
-and your answer will be written back into the Notion ticket itself.
+There is no code repository here. What the ticket asks for is a document, and \
+your answer will be written back into the Notion ticket itself.
 
 # Ticket — {title}
 
@@ -100,8 +100,11 @@ def build(
     base: str,
     url: str,
 ) -> str:
+    # A ticket may have no project at all: the sentence has to read either way.
+    scope = f"for the {project} project" if project else "that belongs to no project"
     return template.format(
-        project=project,
+        project=project or "no project",
+        scope=scope,
         title=title,
         body=body.strip() or "(the ticket has no description: everything is in the title)",
         repo=repo,
