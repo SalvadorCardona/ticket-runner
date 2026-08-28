@@ -147,7 +147,11 @@ def command_history(args: argparse.Namespace) -> int:
     for entry in entries:
         status = entry.get("status", "?")
         colour = _colour(status)
-        line = f"  {colour}{status:<7}{RESET} {entry.get('at', '')}  {entry.get('ticket', '')}"
+        seconds = entry.get("seconds")
+        timing = f" {DIM}({seconds / 60:.0f} min){RESET}" if isinstance(seconds, (int, float)) else ""
+        cost = entry.get("cost_usd")
+        price = f" {DIM}(${float(cost):.2f}){RESET}" if isinstance(cost, (int, float)) else ""
+        line = f"  {colour}{status:<7}{RESET} {entry.get('at', '')}  {entry.get('ticket', '')}{timing}{price}"
         print(line)
         detail = entry.get("pull_request") or entry.get("reason") or ""
         if detail:
