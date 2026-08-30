@@ -17,7 +17,8 @@ from pathlib import Path
 
 from datetime import datetime
 
-from . import __version__, config as config_module, git, notion, provision, session, state
+from . import __version__, channels, config as config_module, git, notion, provision
+from . import session, state
 from . import update as update_module
 from . import workspace as workspace_module
 from .projects import Resolver
@@ -431,6 +432,39 @@ def command_doctor(args: argparse.Namespace) -> int:
     else:
         print(f"  {DIM}runner.auto_update = false — ticket-runner update to do it by hand{RESET}")
 
+    title("Notifications")
+    settings = configuration.notify
+    if not settings.desktop:
+        print(f"  {DIM}desktop notifications off{RESET}")
+    elif shutil.which("notify-send"):
+        ok("desktop — notify-send")
+    else:
+        warn("desktop notifications asked for, but notify-send is missing")
+    live = channels.open(settings)
+    if not live:
+        print(
+            f"  {DIM}no messaging channel — [notify.telegram] or [notify.slack] "
+            f"to be told, and to answer, from your phone{RESET}"
+        )
+    for channel in live:
+        try:
+            ok(f"{channel.name} — {channel.check()}")
+        except channels.ChannelError as error:
+            bad(f"{channel.name} — {error}")
+            problems += 1
+    if live:
+        moments = ", ".join(settings.events) or "nothing"
+        print(f"  {DIM}sent on: {moments}{RESET}")
+        print(
+            f"  {DIM}"
+            + (
+                "answers come back as comments on the ticket"
+                if settings.replies
+                else "replies not read (notify.replies = false)"
+            )
+            + f"{RESET}"
+        )
+
     title("Repositories")
     root = configuration.runner.workspace_root
     if root.is_dir():
@@ -569,6 +603,93 @@ def command_config(args: argparse.Namespace) -> int:
         return 1
     editor = os.environ.get("EDITOR") or os.environ.get("VISUAL") or "nano"
     return subprocess.call([editor, str(path)])
+
+
+def command_notify(args: argparse.Namespace) -> int:
+    """Prove the channel works, before a question depends on it.
+
+    A messaging channel is the one part of the runner that fails silently by
+    design — nothing about a ticket goes wrong when the message does not
+    arrive, you simply never hear about it. So it gets a command of its own,
+    and it is the first thing to run after filling the token in.
+    """
+    try:
+        configuration = config_module.load()
+    except config_module.ConfigError as error:
+        print(f"{RED}error:{RESET} {error}", file=sys.stderr)
+        return 2
+    settings = configuration.notify
+
+    if args.pair:
+        return _pair(configuration, settings)
+
+    live = channels.open(settings)
+    if not live:
+        warn("no channel configured")
+        print(
+            f"  {DIM}[notify.telegram] token + chat, or [notify.slack] token + channel"
+            f"\n  ticket-runner config   to fill them in"
+            f"\n  ticket-runner notify --pair   to find your Telegram chat id{RESET}"
+        )
+        return 1
+
+    text = args.message or (
+        "ticket-runner speaking. Questions arrive here, and what you answer "
+        "lands on the ticket."
+    )
+    problems = 0
+    for channel in live:
+        try:
+            who = channel.check()
+        except channels.ChannelError as error:
+            bad(f"{channel.name} — {error}")
+            problems += 1
+            continue
+        if channel.send(text):
+            ok(f"{channel.name} — {who}")
+        else:
+            bad(f"{channel.name} — connected as {who}, but the message was refused")
+            problems += 1
+    if problems:
+        return 1
+    print(f"\n{DIM}replies come back on the next run (ticket-runner run){RESET}")
+    return 0
+
+
+def _pair(configuration: config_module.Config, settings: config_module.Notify) -> int:
+    """Find the Telegram chat id by reading who has written to the bot.
+
+    A chat id is the one value of this configuration nobody can look up: the
+    usual advice is to paste your token into somebody else's bot, which is the
+    same as handing them the channel. Saying hello to your own bot and reading
+    it back costs one GET and trusts no one.
+    """
+    from .channels import telegram as telegram_module
+
+    token = settings.telegram.get("token", "")
+    if not token:
+        bad("[notify.telegram] token is not set")
+        print(f"  {DIM}@BotFather → /newbot → paste the token into the configuration{RESET}")
+        return 1
+    try:
+        found = telegram_module.chats(token)
+    except channels.ChannelError as error:
+        bad(f"Telegram refused: {error}")
+        return 1
+    if not found:
+        warn("nobody has written to this bot in the last 24 hours")
+        print(f"  {DIM}open the chat with your bot, say anything, and run this again{RESET}")
+        return 1
+    if len(found) > 1:
+        warn(f"{len(found)} chats have written to this bot — pick one and set it by hand:")
+        for identifier, name in found:
+            print(f"  {identifier}  {DIM}{name}{RESET}")
+        return 1
+    identifier, name = found[0]
+    config_module.write_value(configuration.path, "notify.telegram", "chat", identifier)
+    ok(f"paired with “{name}” ({identifier}) — written to {configuration.path}")
+    print(f"  {DIM}ticket-runner notify   to send yourself a first message{RESET}")
+    return 0
 
 
 def command_clean(args: argparse.Namespace) -> int:
@@ -741,6 +862,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--print-token", action="store_true", help="print the console's token and exit"
     )
     serving.set_defaults(function=command_serve)
+
+    notifying = subparsers.add_parser(
+        "notify", help="send yourself a test message, or pair a Telegram chat"
+    )
+    notifying.add_argument("message", nargs="?", help="what to send (default: a test line)")
+    notifying.add_argument(
+        "--pair", action="store_true", help="find the Telegram chat id and save it"
+    )
+    notifying.set_defaults(function=command_notify)
 
     clean = subparsers.add_parser("clean", help="remove worktrees left by failures")
     clean.add_argument("--force", action="store_true")
