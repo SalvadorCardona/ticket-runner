@@ -28,7 +28,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ticket_runner import config as C  # noqa: E402
-from ticket_runner import agents, markdown, notion, progress, prompt, provision, session  # noqa: E402
+from ticket_runner import agents, channels, markdown, notion, progress, prompt, provision, session  # noqa: E402
+from ticket_runner.channels import slack as slack_channel, telegram as telegram_channel  # noqa: E402
 from ticket_runner import update, workspace  # noqa: E402
 from ticket_runner.runner import Runner  # noqa: E402
 from ticket_runner.__main__ import _names, subcommands  # noqa: E402
@@ -1526,6 +1527,421 @@ def a_relation_is_written_as_notion_spells_it():
     assert notion._encode("relation", page) == {"relation": [{"id": page}]}
     assert notion._encode("relation", [page]) == {"relation": [{"id": page}]}
     assert notion._encode("relation", []) == {"relation": []}
+
+
+# -- being told, and answering ------------------------------------------------
+
+
+@contextmanager
+def _state():
+    """A state directory of its own, so a test never reads yesterday's cursor."""
+    previous = os.environ.get("XDG_STATE_HOME")
+    with tempfile.TemporaryDirectory() as directory:
+        os.environ["XDG_STATE_HOME"] = directory
+        try:
+            yield Path(directory)
+        finally:
+            if previous is None:
+                os.environ.pop("XDG_STATE_HOME", None)
+            else:
+                os.environ["XDG_STATE_HOME"] = previous
+
+
+@contextmanager
+def _api(module, answers: dict):
+    """Replace one channel's HTTP call with a table of canned answers."""
+    calls: list[tuple[str, dict | None]] = []
+
+    def fake(url, payload=None, headers=None):
+        calls.append((url, payload))
+        for fragment, body in answers.items():
+            if fragment in url:
+                return body
+        return {"ok": True, "result": {}}
+
+    original = module.request
+    module.request = fake
+    try:
+        yield calls
+    finally:
+        module.request = original
+
+
+@case
+def a_word_is_a_verdict_only_when_it_opens_the_sentence():
+    assert channels.decide("oui") == "yes"
+    assert channels.decide("Yes, and rename the column while you are there") == "yes"
+    assert channels.decide("👍") == "yes"
+    assert channels.decide("non") == "no"
+    assert channels.decide("No — that column stays") == "no"
+    assert channels.decide("aucune idée, demande à Marie") == "", "not every sentence is a verdict"
+    assert channels.decide("I have no idea") == "", "a no in the middle is not an answer"
+    assert channels.decide("   ") == ""
+
+
+@case
+def a_bare_yes_reaches_the_agent_as_a_sentence():
+    """"oui" means nothing to a session that never saw the notification."""
+    written = channels.answer(channels.Reply(channel="telegram", text="oui", who="Salvador"))
+    assert "Salvador" in written
+    assert "go ahead" in written
+    assert written.count("oui") == 0, "the word itself adds nothing once it is spelled out"
+
+    kept = channels.answer(
+        channels.Reply(channel="slack", text="oui, et renomme la colonne aussi")
+    )
+    assert "go ahead" in kept
+    assert "renomme la colonne" in kept, "what was said around the word is the instruction"
+
+    free = channels.answer(channels.Reply(channel="telegram", text="celui du dashboard"))
+    assert "celui du dashboard" in free
+    assert "go ahead" not in free and "do not" not in free
+
+
+TICKET = "3ca451680af480ae9443de0b65d9abf8"
+OTHER = "3ca451680af480beb02ac9d2cb79078c"
+
+
+def _asks() -> list[channels.Ask]:
+    return [
+        channels.Ask(ref="10", ticket=OTHER, title="Le footer"),
+        channels.Ask(ref="11", ticket=TICKET, title="Le header"),
+    ]
+
+
+@case
+def an_answer_finds_its_ticket_by_thread_first_then_by_name():
+    channel = telegram_channel.Telegram("token", "42")
+    replied = channel._route(channels.Incoming(ref="12", thread="10", text="oui"), _asks())
+    assert replied.ticket == OTHER, "a reply to a message answers that message"
+
+    named = channel._route(
+        channels.Incoming(ref="12", text="oui pour 3ca45168-0af4-80be-b02a-c9d2cb79078c"),
+        _asks(),
+    )
+    assert named.ticket == OTHER, "a ticket named in the text is not a guess either"
+
+    last = channel._route(channels.Incoming(ref="12", text="oui"), _asks())
+    assert last.ticket == TICKET, "a bare yes answers the question just asked"
+    assert channel._route(channels.Incoming(ref="12", text="oui"), []) is None
+
+
+@case
+def a_telegram_message_from_anywhere_else_is_not_an_answer():
+    """A bot token is a public address: anyone can write to it."""
+    channel = telegram_channel.Telegram("token", "42")
+    updates = {
+        "ok": True,
+        "result": [
+            {"update_id": 7, "message": {"message_id": 1, "chat": {"id": 42},
+                                         "from": {"first_name": "Salvador"}, "text": "oui"}},
+            {"update_id": 8, "message": {"message_id": 2, "chat": {"id": 99},
+                                         "from": {"first_name": "Someone"}, "text": "rm -rf"}},
+            {"update_id": 9, "message": {"message_id": 3, "chat": {"id": 42},
+                                         "from": {"is_bot": True}, "text": "echo"}},
+        ],
+    }
+    with _api(telegram_channel, {"getUpdates": updates}) as calls:
+        incoming, cursor = channel._fetch("", [])
+    assert [message.text for message in incoming] == ["oui"]
+    assert incoming[0].who == "Salvador"
+    assert cursor == "10", "the offset acknowledges what was read, so it is read once"
+    assert calls[0][1]["allowed_updates"] == ["message"]
+
+
+def _update(identifier: int, message: int, text: str) -> dict:
+    return {
+        "update_id": identifier,
+        "message": {
+            "message_id": message,
+            "chat": {"id": 42},
+            "from": {"first_name": "Salvador"},
+            "text": text,
+        },
+    }
+
+
+SENT = {"sendMessage": {"ok": True, "result": {"message_id": 5}}}
+
+
+@case
+def nothing_said_before_the_runner_was_listening_is_an_answer():
+    """Telegram keeps a day of updates; Slack keeps everything ever said."""
+    channel = telegram_channel.Telegram("token", "42")
+    backlog = {"ok": True, "result": [_update(7, 1, "oui"), _update(8, 2, "et le footer ?")]}
+    with _state():
+        with _api(telegram_channel, {"getUpdates": backlog, **SENT}):
+            channel.send("?", ticket=TICKET, title="Le header", ask=True)
+            assert channel.collect() == [], "a backlog is a conversation, not a queue"
+        with _api(telegram_channel, {"getUpdates": {"ok": True, "result": [_update(9, 3, "oui")]}}) as calls:
+            assert [reply.text for reply in channel.collect()] == ["oui"]
+            assert calls[0][1]["offset"] == 9, "the first poll only settled where now is"
+
+
+@case
+def what_a_channel_reads_once_it_never_reads_again():
+    channel = telegram_channel.Telegram("token", "42")
+    with _state():
+        with _api(telegram_channel, {"getUpdates": {"ok": True, "result": []}, **SENT}):
+            channel.send("Blocked · le header ?", ticket=TICKET, title="Le header", ask=True)
+            assert channel.collect() == []
+        with _api(telegram_channel, {"getUpdates": {"ok": True, "result": [_update(7, 1, "oui")]}}):
+            first = channel.collect()
+        assert [reply.ticket for reply in first] == [TICKET]
+        assert first[0].title == "Le header", "the question remembers what it was about"
+        with _api(telegram_channel, {"getUpdates": {"ok": True, "result": []}}) as calls:
+            assert channel.collect() == []
+            assert calls[0][1]["offset"] == 8, "resumed where the last run stopped"
+
+
+@case
+def a_room_shared_with_other_people_never_guesses():
+    """In Slack the message beside yours belongs to somebody else's thread."""
+    ask = [channels.Ask(ref="100.0", ticket=TICKET, title="Le header")]
+    loose = channels.Incoming(ref="100.4", text="ok")
+    assert slack_channel.Slack("xoxb", "C1")._route(loose, ask) is None
+    assert telegram_channel.Telegram("token", "42")._route(loose, ask).ticket == TICKET
+    threaded = channels.Incoming(ref="100.4", thread="100.0", text="ok")
+    assert slack_channel.Slack("xoxb", "C1")._route(threaded, ask).ticket == TICKET
+    named = channels.Incoming(ref="100.4", text=f"ok pour {TICKET}")
+    assert slack_channel.Slack("xoxb", "C1")._route(named, ask).ticket == TICKET
+
+
+@case
+def an_acknowledgement_hangs_where_each_service_counts_threads_from():
+    """Slack threads from the first message; Telegram quotes the last one."""
+    reply = channels.Reply(channel="", text="oui", ref="100.4", thread="100.0")
+    assert slack_channel.Slack("xoxb", "C1")._thread_of(reply) == "100.0"
+    assert telegram_channel.Telegram("token", "42")._thread_of(reply) == "100.4"
+
+
+@case
+def slack_reads_the_thread_the_question_opened():
+    """A message in a thread never appears in the channel's history."""
+    channel = slack_channel.Slack("xoxb-token", "C1")
+    answers = {
+        "conversations.history": {"ok": True, "messages": [
+            {"ts": "100.2", "user": "U1", "text": "et le footer ?"},
+            {"ts": "100.1", "bot_id": "B1", "text": "🙋 Blocked · le header"},
+            {"ts": "099.9", "user": "U1", "text": "déjà lu"},
+        ]},
+        "conversations.replies": {"ok": True, "messages": [
+            {"ts": "100.0", "bot_id": "B1", "text": "🙋 Blocked · le header"},
+            {"ts": "100.3", "user": "U1", "thread_ts": "100.0", "text": "oui"},
+        ]},
+    }
+    with _api(slack_channel, answers):
+        incoming, cursor = channel._fetch("100.0", [channels.Ask(ref="100.0", ticket=TICKET)])
+    said = [(message.text, message.thread) for message in incoming]
+    assert said == [("et le footer ?", ""), ("oui", "100.0")], said
+    assert cursor == "100.3", "the newest timestamp seen, whichever call saw it"
+
+
+@case
+def slack_never_reads_its_own_voice_back():
+    channel = slack_channel.Slack("xoxb-token", "C1")
+    assert channel._read({"ts": "2", "bot_id": "B1", "text": "posted by us"}, "1") is None
+    assert channel._read({"ts": "2", "subtype": "channel_join", "user": "U1"}, "1") is None
+    assert channel._read({"ts": "1", "user": "U1", "text": "old"}, "1") is None
+    assert channel._read({"ts": "2", "user": "U1", "text": "oui"}, "1").text == "oui"
+
+
+@case
+def a_question_outlives_the_run_that_asked_it():
+    """An answer typed tomorrow morning still knows which ticket it settles."""
+    channel = telegram_channel.Telegram("token", "42")
+    with _state():
+        with _api(telegram_channel, {"sendMessage": {"ok": True, "result": {"message_id": 1}}}):
+            for index in range(channels.ASKS + 3):
+                channel.send("?", ticket=f"{index:032d}", title=f"ticket {index}", ask=True)
+        remembered = channels._memory()["telegram"]["asks"]
+    assert len(remembered) == channels.ASKS, "a bounded memory, not a growing file"
+    assert remembered[-1]["title"] == f"ticket {channels.ASKS + 2}"
+
+
+@case
+def a_channel_exists_only_once_both_of_its_values_are_there():
+    half = _config('[notify.telegram]\ntoken = "123:abc"\n')
+    assert not half.notify.remote and channels.open(half.notify) == []
+
+    whole = _config('[notify.telegram]\ntoken = "123:abc"\nchat = 4242\n')
+    assert whole.notify.remote
+    assert whole.notify.telegram["chat"] == "4242", "a chat id is compared to JSON, so it is text"
+    assert [channel.name for channel in channels.open(whole.notify)] == ["telegram"]
+
+    both = _config(
+        '[notify.telegram]\ntoken = "123:abc"\nchat = "42"\n'
+        '[notify.slack]\ntoken = "xoxb"\nchannel = "C1"\n'
+    )
+    assert [channel.name for channel in channels.open(both.notify)] == ["telegram", "slack"]
+
+
+@case
+def the_switch_that_came_first_still_means_what_it_said():
+    """`runner.notify` was the desktop notification, and stays it."""
+    assert _config("").notify.desktop is True
+    assert _config('[runner]\nnotify = false\n').notify.desktop is False
+    assert _config('[runner]\nnotify = false\n\n[notify]\ndesktop = true\n').notify.desktop is True
+
+
+@case
+def a_moment_nobody_named_is_dropped_rather_than_never_sent():
+    every = _config("")
+    assert every.notify.wants("blocked") and every.notify.wants("done")
+    only = _config('[notify]\nevents = ["blocked", "Failed", "merged"]\n')
+    assert only.notify.events == ("blocked", "failed"), only.notify.events
+    assert not only.notify.wants("done")
+    assert not only.notify.wants("merged"), "a typo is not a moment"
+
+
+@case
+def a_value_can_be_written_into_a_table_that_has_a_dot_in_its_name():
+    path = Path(tempfile.mkdtemp()) / "config.toml"
+    path.write_text('[notion]\ntoken = "ntn_real"\ntickets_database = "abc"\n')
+    assert C.write_value(path, "notify.telegram", "chat", "4242") is True
+    assert C.write_value(path, "notify.telegram", "chat", "4242") is False, "already says that"
+    assert C.load(path).notify.telegram["chat"] == "4242"
+    assert 'token = "ntn_real"' in path.read_text(), "the rest of the file is untouched"
+
+
+class _AnsweringClient:
+    """A Notion that only has to remember what was written on which page."""
+
+    def __init__(self, error: str = ""):
+        self.written: list[tuple[str, str]] = []
+        self._error = error
+
+    def comment(self, page_id: str, text: str) -> None:
+        if self._error:
+            raise notion.NotionError(self._error)
+        self.written.append((page_id, text))
+
+
+class _StubChannel(channels.Channel):
+    name = "telegram"
+
+    def __init__(self, replies: list[channels.Reply]):
+        self._replies = replies
+        self.said: list[str] = []
+
+    def collect(self) -> list[channels.Reply]:
+        return list(self._replies)
+
+    def acknowledge(self, reply: channels.Reply, text: str) -> bool:
+        self.said.append(text)
+        return True
+
+
+@contextmanager
+def _channel(stub):
+    original = channels.open
+    channels.open = lambda settings: [stub]
+    try:
+        yield stub
+    finally:
+        channels.open = original
+
+
+def _answering(replies: list[channels.Reply], error: str = "") -> tuple[Runner, _StubChannel]:
+    runner = Runner.__new__(Runner)
+    runner.config = _config('[notify.telegram]\ntoken = "123:abc"\nchat = "42"\n')
+    runner.client = _AnsweringClient(error)
+    runner.dry_run = False
+    runner.quiet = True
+    stub = _StubChannel(replies)
+    with _channel(stub):
+        runner.answers()
+    return runner, stub
+
+
+@case
+def an_answer_from_a_phone_becomes_the_comment_that_wakes_the_ticket():
+    """One path, not two: the reply is a comment, and comments already wake."""
+    runner, stub = _answering(
+        [channels.Reply(channel="telegram", text="oui", ticket=TICKET, title="Le header")]
+    )
+    assert len(runner.client.written) == 1
+    page, text = runner.client.written[0]
+    assert page == TICKET
+    assert "go ahead" in text
+    assert not text.startswith("ticket-runner@"), (
+        "signed as ours, the answer would close the ticket instead of waking it"
+    )
+    assert stub.said and "Le header" in stub.said[0], "an answer nobody confirms is a phone call"
+
+
+@case
+def a_message_that_answers_nothing_is_never_written_to_a_ticket():
+    runner, stub = _answering([channels.Reply(channel="telegram", text="tiens, une idée")])
+    assert runner.client.written == []
+    assert stub.said == [], "a bot that answers ordinary talk is a bot nobody keeps"
+
+    runner, stub = _answering([channels.Reply(channel="telegram", text="oui")])
+    assert runner.client.written == []
+    assert stub.said, "a yes that landed nowhere was meant for us, and is told it missed"
+
+
+@case
+def a_notion_that_refuses_the_answer_says_so_where_it_was_typed():
+    runner, stub = _answering(
+        [channels.Reply(channel="telegram", text="oui", ticket=TICKET, title="Le header")],
+        error="403 API token does not have access",
+    )
+    assert runner.client.written == []
+    assert "403" in stub.said[0]
+
+
+@case
+def a_blocked_ticket_travels_with_its_question_and_its_link():
+    sent: list[dict] = []
+    runner = Runner.__new__(Runner)
+    runner.config = _config(
+        '[notify]\ndesktop = false\n\n[notify.telegram]\ntoken = "123:abc"\nchat = "42"\n'
+    )
+    runner.dry_run = False
+    runner.quiet = True
+    ticket = type("T", (), {
+        "page": notion.Page(id=TICKET, url="https://notion.so/t", title="Le header"),
+        "title": "Le header",
+        "url": "https://notion.so/t",
+    })()
+
+    original = channels.announce
+    channels.announce = lambda settings, text, **rest: sent.append({"text": text, **rest})
+    try:
+        runner._tell(
+            "blocked", ticket, "Blocked · Le header",
+            "Which header — the dashboard one or the public site?",
+            ask=True,
+        )
+    finally:
+        channels.announce = original
+
+    assert len(sent) == 1
+    message = sent[0]
+    assert "Which header" in message["text"], "the agent's question, not the runner's summary"
+    assert "https://notion.so/t" in message["text"], "a notification you have to go and find"
+    assert "Answer here" in message["text"]
+    assert message["ask"] is True and message["ticket"] == TICKET
+
+
+@case
+def nothing_is_sent_anywhere_during_a_dry_run():
+    sent: list[str] = []
+    runner = Runner.__new__(Runner)
+    runner.config = _config('[notify.telegram]\ntoken = "123:abc"\nchat = "42"\n')
+    runner.dry_run = True
+    runner.quiet = True
+    ticket = type("T", (), {
+        "page": notion.Page(id=TICKET, url="u", title="t"), "title": "t", "url": "u",
+    })()
+    original = channels.announce
+    channels.announce = lambda settings, text, **rest: sent.append(text)
+    try:
+        runner._tell("done", ticket, "Ready to review · t", "branch")
+    finally:
+        channels.announce = original
+    assert sent == []
 
 
 def main() -> int:

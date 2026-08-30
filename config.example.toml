@@ -176,6 +176,8 @@ session_host = ""
 
 # One desktop notification per finished ticket. The point of the runner is that
 # you are not watching it; without this you discover your pull request tomorrow.
+# [notify] further down carries the same line to your phone — and lets you
+# answer it with one word.
 notify = true
 
 # The steps of a running session, written into its own ticket while it happens.
@@ -217,6 +219,56 @@ dry_run = false
 #                         ANSWER.md and the runner publishes it into the ticket
 prompt_file = ""
 document_prompt_file = ""
+
+# ---------------------------------------------------------------------------
+# Being told where you are, and answering with one word
+# ---------------------------------------------------------------------------
+# A desktop notification only works if you are in front of that desktop. So the
+# runner can also write to Telegram or Slack — and what you answer there lands
+# on the ticket: a blocked ticket asks its question in the chat, you reply
+# "oui", and that reply becomes a Notion comment, which is already what puts a
+# blocked ticket back in the queue. Nothing to move on the board.
+#
+#   ticket-runner notify          send yourself a test message
+#   ticket-runner notify --pair   find your Telegram chat id and save it here
+[notify]
+
+# The notification on this machine's screen. Defaults to runner.notify above.
+# desktop = true
+
+# Read what you write back. false: the runner still tells you things, it just
+# never listens — answers then go on the ticket in Notion, as they always could.
+replies = true
+
+# Which moments are worth a message. "blocked" is the one that expects something
+# back from you; "done" is the pull request waiting; "failed" is a log to read.
+events = ["blocked", "failed", "done"]
+
+# Telegram — the two-minute channel, and the one to start with. No public URL,
+# no webhook, no domain: the runner polls, so it works from a laptop behind a
+# NAT.
+#   1. Talk to @BotFather → /newbot → paste the token below
+#   2. Open the chat with your new bot and say anything to it
+#   3. ticket-runner notify --pair   reads that message and fills in `chat`
+# Only that chat is ever read: a bot token is a public address, and anyone who
+# guesses the bot's name can write to it.
+[notify.telegram]
+token = ""
+chat = ""
+
+# Slack — the same conversation, where the team already is. A question is posted
+# to the channel and answered in its thread, so two tickets can wait at once —
+# and so that the rest of the room's talk never lands on a ticket.
+#   1. api.slack.com/apps → Create New App → From scratch
+#   2. OAuth & Permissions → Bot Token Scopes: chat:write and channels:history
+#      (groups:history for a private channel, im:history for a direct message)
+#   3. Install to Workspace → copy the xoxb- token
+#   4. /invite @your-bot in the channel — the step everyone forgets
+# `channel` is the channel ID: in Slack, ··· → View channel details, at the
+# bottom of the panel.
+[notify.slack]
+token = ""
+channel = ""
 
 # ---------------------------------------------------------------------------
 # The web console — ticket-runner serve

@@ -16,6 +16,11 @@ And when you would rather have your hands on it than wait for a board to refresh
 `ticket-runner serve` opens a console on `127.0.0.1`: the same board live, this CLI in a
 browser, and a chat with your whole workspace. See [The web console](#the-web-console).
 
+And when you are not at a keyboard at all, it comes to you: a ticket the agent would not
+guess at asks its question on **Telegram or Slack**, and *oui* is the whole answer — the
+reply lands on the ticket and the next run carries on. See
+[Being told, and answering with one word](#being-told-and-answering-with-one-word).
+
 ```
 Notion                    ticket-runner                       what you get
 ──────                    ─────────────                       ────────────
@@ -206,7 +211,7 @@ presence of each status — and names whichever of those was missed.
 | `runner.push` | `true` | `false`: commits stay local |
 | `runner.open_pull_request` | `true` | `false`: the branch is pushed, without a PR |
 | `runner.keep_worktree_on_failure` | `true` | keep enough around to understand a failure |
-| `runner.notify` | `true` | one desktop notification per finished ticket |
+| `runner.notify` | `true` | one desktop notification per finished ticket — `[notify]` carries it to your phone |
 | `runner.auto_update` | `true` | a run keeps the installation on the latest version |
 | `runner.update_interval_seconds` | `3600` | how often a run asks; one minute is the floor |
 | `runner.log_retention_days` | `14` | drop older session logs; `0` keeps everything |
@@ -552,6 +557,110 @@ Nothing is ever merged automatically. The merge is yours; only its consequence i
 
 ---
 
+## Being told, and answering with one word
+
+A desktop notification only works if you are in front of that desktop, and the two
+moments that need you are exactly the two you are least likely to be there for: the agent
+asked a question, and a pull request is waiting. So the runner can also write to
+**Telegram** or **Slack** — and this is the half that matters: **what you answer there
+lands on the ticket.**
+
+```
+   the runner                  your phone                   the ticket
+
+   blocked ────────▶  🙋 Blocked · Le header
+                      Which header — the dashboard
+                      one or the public site?
+                      notion.so/…
+                                   │
+                                   │  “celui du dashboard”
+                                   ▼
+                      ✓ noted on “Le header”  ──────▶  a comment on the page
+                                                       │
+   next run  ◀──────────────────────────────────────────┘  the ticket runs again
+```
+
+Nothing new on the board, and no second mechanism: the reply becomes a **Notion comment**,
+and a comment is already what wakes a blocked ticket (see
+[The discussion on a ticket](#the-discussion-on-a-ticket)). A *oui* typed on a phone
+travels the exact path a *oui* typed into Notion does — same waking rules, same prompt.
+
+*yes*, *oui*, *ok*, *go*, 👍 — and their opposites — are read as a verdict and spelled out
+for the session that will read them, because a bare "oui" means nothing to an agent that
+never saw the notification. Anything else travels verbatim; a word plus a sentence keeps
+both.
+
+Answers are read **at the top of each run**, so a ticket answered thirty seconds ago is
+picked up by that very run. Which question an answer belongs to is settled in three steps,
+narrowest first: a reply *to* the runner's message (a Telegram reply, a Slack thread), then
+a ticket named in the text — its link, or the eight characters the runner prints
+everywhere — and failing both, the last question asked, which is what "oui" means when it
+arrives thirty seconds after the phone buzzed.
+
+That third step is the one a **shared room does not get**: in Slack the message beside
+yours belongs to somebody else's conversation, so an answer there has to be in the thread
+of the question, or name its ticket. And the *first* poll of a channel only establishes
+where "now" is — Telegram keeps a day of updates and Slack a channel's whole history, and
+none of that was addressed to a runner that was not listening yet.
+
+### Telegram — the two-minute channel
+
+No public URL, no webhook, no domain: the runner *polls*, which is what makes this the one
+channel that installs on a laptop behind a NAT.
+
+1. talk to [@BotFather](https://t.me/BotFather) → `/newbot` → put the token in
+   `[notify.telegram] token`;
+2. open the chat with your new bot and say anything to it;
+3. `ticket-runner notify --pair` — it reads that message and writes the chat id into your
+   configuration. (The usual advice is to paste your token into somebody else's bot, which
+   is the same as handing them the channel.)
+4. `ticket-runner notify` sends you a first message.
+
+Only that chat is ever read. A bot token is a public address — anyone who guesses the
+bot's name can write to it — so a message from any other chat is dropped before it can
+become a comment on your board.
+
+### Slack — where the team already is
+
+A question is posted to the channel and answered **in its thread**, which is how two
+tickets can be waiting at once without their answers being confused — and why a message
+typed in the channel itself answers nothing unless it names its ticket. A room has other
+conversations in it, and a colleague's "ok" is not an approval of anything.
+
+1. [api.slack.com/apps](https://api.slack.com/apps) → *Create New App* → *From scratch*;
+2. *OAuth & Permissions* → Bot Token Scopes: `chat:write`, and the history scope matching
+   where you put it — `channels:history` for a public channel, `groups:history` for a
+   private one, `im:history` for a direct message;
+3. *Install to Workspace*, copy the `xoxb-` token into `[notify.slack] token`;
+4. `/invite @your-bot` in the channel — the step everyone forgets — and put the channel ID
+   (`···` → *View channel details*, at the bottom) in `channel`.
+
+### What gets sent, and what does not
+
+```toml
+[notify]
+replies = true                             # read what you write back
+events = ["blocked", "failed", "done"]     # the moments worth a message
+```
+
+`blocked` is the one that expects something back; `done` is the pull request waiting for
+you; `failed` is a log to read. Drop what you do not want woken for — `events = ["blocked"]`
+is a defensible whole configuration. `replies = false` keeps the messages and stops the
+listening.
+
+Everything here fails quietly, like desktop notifications: a token that expired, a channel
+the bot was removed from, a network that is down. None of it is a reason for a ticket to
+fail, and the Notion comment stays the record either way. `ticket-runner doctor` says which
+channel is live, as whom, and where.
+
+**Why not WhatsApp.** Its API delivers inbound messages only to a public HTTPS webhook you
+host and have verified by Meta, on a business account — a server, in other words, which is
+the opposite of a runner living on your machine. Outbound alone would be a notification you
+cannot answer, which is the half that matters least. A channel is four methods
+(`src/ticket_runner/channels/`), so the day you have that endpoint it is one file.
+
+---
+
 ## The web console
 
 Notion is where tickets are written and read; it is a poor place to *steer* from. So there
@@ -666,6 +775,8 @@ ticket-runner update --check         # what is available, changing nothing
 ticket-runner enable       # apply interval_seconds and start the timer
 ticket-runner disable      # stop the timer
 ticket-runner serve        # the web console: board, command line and chat
+ticket-runner notify       # send yourself a test message on Telegram or Slack
+ticket-runner notify --pair          # find your Telegram chat id and save it
 ```
 
 The first attempt is best made by hand, on a ticket you choose:
@@ -727,6 +838,10 @@ often.
 | “nothing to work from” | the ticket has neither a title nor a description — a page left on the bare template counts as empty |
 | a ticket sat in *In progress* forever | it no longer can: the next run puts back any ticket this host claimed while no run was alive |
 | no desktop notification | `notify-send` is missing, or the service has no session bus. `runner.notify = false` silences the attempt |
+| nothing arrives in Telegram or Slack | `ticket-runner notify` says which end refused — a revoked token, a chat id that is not yours, a bot not invited to the channel |
+| an answer typed in Slack changes nothing | the bot cannot read the channel: add `channels:history` (or `groups:history`, `im:history`) and reinstall the app |
+| an answer lands on the wrong ticket | a bare “oui” answers the last question asked. Reply *to* the message, or paste the ticket's link, when two are waiting |
+| the runner talks but never listens | `notify.replies = false`, or the run is a `--dry-run`: answers are only read at the top of a real run |
 | the timer does not fire with no session open | `sudo loginctl enable-linger $USER` |
 | the version never moves | the install directory is a copy, not a clone: an installation older than self-updating, or one made with `TR_SRC`. `doctor` says which — run `install.sh` again |
 | branch pushed, no pull request | `gh` cannot reach its credentials from a systemd service — locked keyring. Use `gh auth login` with a token, or set `GH_TOKEN` in the unit |
@@ -774,8 +889,10 @@ session_host = "salva@vps.example.com"
 ```
 
 **Desktop notifications are pointless there.** They fail quietly, so nothing breaks, but
-set `notify = false` to stop trying. The Notion comment on each finished ticket is the
-notification that matters on a server.
+set `notify = false` to stop trying. This is where
+[Telegram or Slack](#being-told-and-answering-with-one-word) stops being a convenience and
+becomes the way you hear about anything at all: a server has no screen to draw on, and a
+question nobody is told about waits until you next open the board.
 
 And the thing to make sure of: **run one runner, not two.** Claiming a ticket is a read
 then a write, not an atomic operation, so two runners watching the same board will
@@ -822,7 +939,8 @@ python3 tests/run.py
 No framework and no dependency, for the same reason the runner has none: a suite that
 needs an install is a suite that stops being run. It covers the pure part — identifier
 collisions, status mapping, the markdown-to-Notion conversion, deep links, property
-encoding — which is to say what has already gone wrong once, or would go wrong silently.
+encoding, which message answers which ticket — which is to say what has already gone wrong
+once, or would go wrong silently.
 
 ---
 

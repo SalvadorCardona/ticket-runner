@@ -24,7 +24,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import agents, git, notion, notify, progress, prompt as prompt_module, session, state
+from . import agents, channels, git, notion, notify, progress, prompt as prompt_module
+from . import session, state
 from . import update as update_module
 from . import workspace as workspace_module
 from .config import PRIORITIES, Config, state_dir
@@ -165,8 +166,92 @@ class Runner:
             print(message, flush=True)
 
     def _notify(self, title: str, body: str, *, urgent: bool = False) -> None:
-        if self.config.runner.notify and not self.dry_run:
+        if self.config.notify.desktop and not self.dry_run:
             notify.send(title, body, urgent=urgent)
+
+    def _tell(
+        self,
+        event: str,
+        ticket: Ticket,
+        headline: str,
+        body: str,
+        *,
+        urgent: bool = False,
+        ask: bool = False,
+    ) -> None:
+        """One moment of a ticket, said everywhere it is worth saying.
+
+        The screen of the machine the runner sits on, and the messaging app you
+        actually have on you. Same sentence in both, one line longer in the
+        second because a message you can answer has to say so — and because a
+        notification without the ticket's link is a notification you then have
+        to go and find.
+        """
+        self._notify(headline, body, urgent=urgent)
+        settings = self.config.notify
+        if self.dry_run or not settings.remote or not settings.wants(event):
+            return
+        invitation = (
+            "\n\nAnswer here — yes, no, or a sentence — and it runs again on the next pass."
+            if ask
+            else ""
+        )
+        mark = {"blocked": "🙋", "failed": "⚠️", "done": "✅"}.get(event, "•")
+        channels.announce(
+            settings,
+            f"{mark} {headline}\n{body}{invitation}\n{ticket.url}",
+            ticket=ticket.page.id,
+            title=ticket.title,
+            ask=ask,
+        )
+
+    def answers(self) -> int:
+        """What you replied in Telegram or Slack, written onto its ticket.
+
+        The bridge is deliberately one line long: an answer becomes a Notion
+        comment, and a comment is *already* how a blocked ticket wakes up. A
+        "yes" typed on a phone therefore travels the exact path a "yes" typed
+        into Notion does — same waking rules, same prompt, nothing kept in sync
+        on the side.
+
+        First thing in a run, before the queue is read, so that a ticket
+        answered thirty seconds ago is picked up by this very run.
+        """
+        settings = self.config.notify
+        if self.dry_run or not settings.replies or not settings.remote:
+            return 0
+
+        answered = 0
+        for channel in channels.open(settings):
+            try:
+                replies = channel.collect()
+            except channels.ChannelError as error:
+                self.say(f"  ! {channel.name} not readable: {error}")
+                continue
+            for reply in replies:
+                if not reply.ticket:
+                    # Silence for ordinary talk in the room — a bot answering
+                    # every message is why nobody keeps one in a channel. A
+                    # plain "yes" that landed nowhere is the exception: that one
+                    # was meant for us and deserves to be told it missed.
+                    if channels.decide(reply.text):
+                        channel.acknowledge(
+                            reply,
+                            "Nothing here is waiting on an answer — reply under the "
+                            "question itself, or name the ticket.",
+                        )
+                    continue
+                try:
+                    self.client.comment(reply.ticket, channels.answer(reply))
+                except notion.NotionError as error:
+                    self.say(f"    ! the answer could not be written to Notion: {error}")
+                    channel.acknowledge(reply, f"Notion refused that answer: {error}")
+                    continue
+                answered += 1
+                label = reply.title or reply.ticket
+                self.say(f"  ↩ {label} — answered from {channel.name}, back in the queue")
+                channel.acknowledge(reply, f"✓ noted on “{label}” — it runs again in a moment.")
+        return answered
 
     # -- reading -------------------------------------------------------------
 
@@ -479,12 +564,26 @@ class Runner:
         return list(reversed(lines))
 
     def _fail(
-        self, ticket: Ticket, reason: str, detail: str = "", *, blocked: bool = False
+        self,
+        ticket: Ticket,
+        reason: str,
+        detail: str = "",
+        *,
+        blocked: bool = False,
+        question: str = "",
     ) -> dict:
         outcome = "blocked" if blocked else "failed"
         self.say(f"    ✗ {ticket.title} — {reason}")
-        self._notify(
-            f"{'Blocked' if blocked else 'Failed'} · {ticket.title}", reason, urgent=not blocked
+        # A blocked ticket is a question, and a question is the one thing worth
+        # waking somebody for — so it travels with what the agent actually
+        # asked, not with the runner's own summary of the situation.
+        self._tell(
+            outcome,
+            ticket,
+            f"{'Blocked' if blocked else 'Failed'} · {ticket.title}",
+            (question.strip() if blocked and question.strip() else reason),
+            urgent=not blocked,
+            ask=blocked,
         )
         self._set(ticket, **{self.config.notion.prop("status"): self.config.notion.state(outcome)})
         self._comment(
@@ -706,7 +805,11 @@ class Runner:
             else:
                 shutil.rmtree(job.workdir, ignore_errors=True)
             return self._fail(
-                ticket, reason, f"{detail}\n\n{trace}{kept}", blocked=outcome.blocked or not content
+                ticket,
+                reason,
+                f"{detail}\n\n{trace}{kept}",
+                blocked=outcome.blocked or not content,
+                question=detail,
             )
 
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -742,7 +845,12 @@ class Runner:
             f"{outcome.turns} turns · {outcome.seconds / 60:.1f} min{cost}",
         )
         self.say(f"    ✓ {ticket.title} — {blocks} block(s) written to the ticket")
-        self._notify(f"Ready to review · {ticket.title}", f"Written into the Notion ticket.")
+        self._tell(
+            "done",
+            ticket,
+            f"Ready to review · {ticket.title}",
+            "Written into the Notion ticket.",
+        )
         return {
             "ticket": ticket.title,
             "id": ticket.id,
@@ -786,7 +894,13 @@ class Runner:
                 kept = f"\nWorktree kept: `{job.workdir}` (branch `{job.branch}`)"
             else:
                 git.remove_worktree(project.path, job.workdir)
-            return self._fail(ticket, reason, f"{detail}\n\n{trace}{kept}", blocked=outcome.blocked)
+            return self._fail(
+                ticket,
+                reason,
+                f"{detail}\n\n{trace}{kept}",
+                blocked=outcome.blocked,
+                question=detail if outcome.blocked else "",
+            )
 
         commits = git.commits_ahead(job.workdir, job.base)
         if commits == 0:
@@ -797,6 +911,7 @@ class Runner:
                 "the session declared itself done without a single commit",
                 f"{outcome.summary}\n\n{trace}",
                 blocked=True,
+                question=outcome.summary,
             )
 
         pull_request = ""
@@ -852,7 +967,9 @@ class Runner:
             + f"\n{trace}\n{outcome.turns} turns · {outcome.seconds / 60:.1f} min{cost}",
         )
         self.say(f"    ✓ {ticket.title} — {pull_request or job.branch}")
-        self._notify(
+        self._tell(
+            "done",
+            ticket,
             f"Ready to review · {ticket.title}",
             pull_request or f"Branch {job.branch}, {commits} commit(s)",
         )
@@ -904,6 +1021,7 @@ class Runner:
 
     def tick(self, *, limit: int | None = None, reference: str = "") -> list[dict]:
         self.update()
+        self.answers()
         if reference:
             tickets = [self.fetch_one(reference)]
             self.say(f"Requested ticket: {tickets[0].title}")

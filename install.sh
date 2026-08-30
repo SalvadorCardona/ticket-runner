@@ -200,6 +200,7 @@ printf '  %sready tickets%s  ticket-runner list\n' "$DIM" "$RESET"
 printf '  %sone run%s        ticket-runner run\n' "$DIM" "$RESET"
 printf '  %sfollow along%s   ticket-runner logs -f\n' "$DIM" "$RESET"
 printf '  %sweb console%s    ticket-runner serve   %s(board, CLI and chat, on 127.0.0.1)%s\n' "$DIM" "$RESET" "$DIM" "$RESET"
+printf '  %stold on Telegram%s  ticket-runner notify --pair   %s(and answer with one word)%s\n' "$DIM" "$RESET" "$DIM" "$RESET"
 printf '  %sversion%s        kept up to date on its own — ticket-runner update\n\n' "$DIM" "$RESET"
 case ":$PATH:" in
     *":$BIN_DIR:"*) ;;

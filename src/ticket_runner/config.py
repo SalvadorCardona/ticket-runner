@@ -108,6 +108,39 @@ class Runner:
     document_prompt_file: str = ""
 
 
+# The three moments worth a message. `blocked` is the one that matters: it is
+# the only one that expects something back from you.
+EVENTS = ("blocked", "failed", "done")
+
+
+@dataclass
+class Notify:
+    """Where the runner reaches you, and whether it listens for an answer.
+
+    Desktop notifications are the old behaviour and stay the default; a channel
+    exists only if its two values are filled in. `replies` is the half that
+    makes a notification a question: without it the runner still writes to
+    Telegram or Slack, it just never reads what you write back.
+    """
+
+    desktop: bool = True
+    replies: bool = True
+    events: tuple[str, ...] = EVENTS
+    telegram: dict[str, str] = field(default_factory=dict)
+    slack: dict[str, str] = field(default_factory=dict)
+
+    def wants(self, event: str) -> bool:
+        return event in self.events
+
+    @property
+    def remote(self) -> bool:
+        """Is there anywhere to write to besides this machine's screen?"""
+        return bool(
+            (self.telegram.get("token") and self.telegram.get("chat"))
+            or (self.slack.get("token") and self.slack.get("channel"))
+        )
+
+
 @dataclass
 class Web:
     """The console: a board, a command line and a chat, in one page.
@@ -139,6 +172,7 @@ class Config:
     projects: dict[str, str]
     path: Path
     web: Web = field(default_factory=Web)
+    notify: Notify = field(default_factory=Notify)
 
     def require_usable(self) -> None:
         """Raise ConfigError if the file is not complete enough to run."""
@@ -250,18 +284,26 @@ def identifier(raw: str) -> str:
 
 
 def write_notion_value(path: Path, key: str, value: str) -> bool:
-    """Set one key of the [notion] table, in place, keeping the comments.
+    """Set one key of the [notion] table. See `write_value`."""
+    return write_value(path, "notion", key, value)
+
+
+def write_value(path: Path, table: str, key: str, value: str) -> bool:
+    """Set one key of one table, in place, keeping the comments.
 
     A TOML writer is not in the standard library and this file is one the user
     reads and edits by hand — rewriting it from a parsed tree would cost every
     comment in it, which is most of its value. So the line is edited, or added
     under the table header if it is not there.
+
+    `table` is written as it appears between the brackets, dots included:
+    "notify.telegram" finds `[notify.telegram]`.
     """
     text = path.read_text(encoding="utf-8")
     line = f'{key} = "{value}"'
-    section = re.search(r"^\[notion\]\s*$", text, flags=re.M)
+    section = re.search(rf"^\[{re.escape(table)}\]\s*$", text, flags=re.M)
     if not section:
-        path.write_text(f"{text.rstrip()}\n\n[notion]\n{line}\n", encoding="utf-8")
+        path.write_text(f"{text.rstrip()}\n\n[{table}]\n{line}\n", encoding="utf-8")
         return True
 
     start = section.end()
@@ -388,4 +430,42 @@ def load(path: Path | None = None) -> Config:
         ),
     )
 
-    return Config(notion=notion, runner=runner, projects=projects, path=target, web=web)
+    notify_raw = raw.get("notify", {})
+    # `runner.notify` came first and said "one desktop notification per ticket".
+    # It keeps saying exactly that: the new table only has to name what it
+    # changes, and a file written before any of this existed behaves as it did.
+    events = notify_raw.get("events", EVENTS)
+    notify = Notify(
+        desktop=bool(notify_raw.get("desktop", runner.notify)),
+        replies=bool(notify_raw.get("replies", True)),
+        # Filtered rather than trusted: a typo in this list would otherwise
+        # silence a moment without ever saying so.
+        events=tuple(
+            name
+            for name in (str(value).strip().lower() for value in events)
+            if name in EVENTS
+        ),
+        telegram=_channel(notify_raw.get("telegram")),
+        slack=_channel(notify_raw.get("slack")),
+    )
+
+    return Config(
+        notion=notion,
+        runner=runner,
+        projects=projects,
+        path=target,
+        web=web,
+        notify=notify,
+    )
+
+
+def _channel(raw: object) -> dict[str, str]:
+    """One [notify.<channel>] table, as strings — a chat id is not a number.
+
+    Telegram's chat ids are integers, negative for a group, and TOML will hand
+    them over as such. Everything downstream compares them to what the API
+    returns in JSON, where they are strings.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    return {str(key): str(value).strip() for key, value in raw.items()}
