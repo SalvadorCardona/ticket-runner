@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>ticket-runner</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🎫</text></svg>">
+</head>
+<body>
+
+<header class="bar">
+  <span class="brand">ticket<span class="dim">-runner</span></span>
+  <span class="pills" id="pills"></span>
+  <span class="grow"></span>
+  <span class="link" id="connection" title="event stream">connecting…</span>
+  <button class="ghost" id="refresh" title="reread the board now">refresh</button>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button data-pane="board" class="on">Board</button>
+  <button data-pane="console">Console</button>
+  <button data-pane="live">Live</button>
+</nav>
+
+<main>
+  <section class="pane board" id="pane-board">
+    <div class="compose">
+      <input id="new-title" placeholder="New ticket — what has to be done, in one line" autocomplete="off">
+      <div class="compose-more" id="compose-more" hidden>
+        <textarea id="new-body" rows="4" placeholder="The brief: what must change, where, and how you will know it is done."></textarea>
+        <div class="row">
+          <select id="new-project"><option value="">no project — a document</option></select>
+          <label class="check"><input type="checkbox" id="new-ready" checked> ready to run</label>
+          <button id="create" class="primary">Create</button>
+        </div>
+      </div>
+    </div>
+    <div class="columns" id="columns"></div>
+  </section>
+
+  <section class="pane console" id="pane-console">
+    <div class="transcript" id="transcript"></div>
+    <div class="composer">
+      <div class="hint" id="hint">a sentence talks to your workspace · <code>&gt;</code> runs a ticket-runner command</div>
+      <textarea id="input" rows="1" placeholder="Ask the workspace, or type &gt;status" autocomplete="off" spellcheck="false"></textarea>
+      <div class="row">
+        <button id="send" class="primary">Send</button>
+        <button id="reset" class="ghost" title="start a new conversation">new conversation</button>
+        <span class="grow"></span>
+        <span class="dim small" id="chat-state"></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="pane live" id="pane-live">
+    <div class="live-head">
+      <h2>Sessions</h2>
+      <p class="dim small">What the running tickets are doing, straight from their session logs — no Notion in the way.</p>
+    </div>
+    <div id="sessions" class="sessions"></div>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

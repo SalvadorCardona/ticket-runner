@@ -218,6 +218,36 @@ dry_run = false
 prompt_file = ""
 document_prompt_file = ""
 
+# ---------------------------------------------------------------------------
+# The web console — ticket-runner serve
+# ---------------------------------------------------------------------------
+# The board, this CLI and a chat with your whole workspace, in one page:
+#   ticket-runner serve                # it prints the URL, token included
+#   systemctl --user enable --now ticket-runner-web    # keep it running
+#
+# READ THIS BEFORE CHANGING host. Behind this port sits a runner that starts
+# Claude Code sessions with bypassPermissions — anything that can reach it can
+# run code on this machine, as you. The default is loopback, and `serve` refuses
+# any other host unless `token` below is set on purpose. To reach the console
+# from your phone or another machine, tunnel rather than widen:
+#   ssh -L 8787:127.0.0.1:8787 <this machine>
+[web]
+host = "127.0.0.1"
+port = 8787
+
+# Empty = one is drawn on first start and kept in
+# ~/.local/state/ticket-runner/web/token, so the bookmark keeps working.
+# Setting it here is also what unlocks a non-loopback host.
+token = ""
+
+# How often the console asks Notion what the board looks like — and only while a
+# browser is actually connected. Five seconds is the floor.
+poll_seconds = 15
+
+# A chat turn is a Claude session and wants the same kind of ceiling as a ticket.
+# Shorter, because somebody is sitting in front of it.
+chat_timeout_minutes = 20
+
 # Projects whose repository cannot be guessed: exact Notion name = local path.
 # Without an entry here, the runner matches the project's Repository property
 # against the remotes found under workspace_root.

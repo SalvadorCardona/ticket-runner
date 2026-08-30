@@ -12,6 +12,10 @@ The runner lives on your machine, in the background, across **all of your projec
 once**. It never touches your working copy: every ticket gets a disposable git worktree of
 its own.
 
+And when you would rather have your hands on it than wait for a board to refresh,
+`ticket-runner serve` opens a console on `127.0.0.1`: the same board live, this CLI in a
+browser, and a chat with your whole workspace. See [The web console](#the-web-console).
+
 ```
 Notion                    ticket-runner                       what you get
 ──────                    ─────────────                       ────────────
@@ -215,6 +219,7 @@ presence of each status — and names whichever of those was missed.
 | `[notion.properties]` | | if your columns have other names |
 | `[notion.status]` | | if your statuses have other names |
 | `[projects]` | | `"Notion name" = "/path"` for repositories that cannot be guessed |
+| `[web]` | | the console's host, port and token — see *The web console* |
 
 ---
 
@@ -547,6 +552,101 @@ Nothing is ever merged automatically. The merge is yours; only its consequence i
 
 ---
 
+## The web console
+
+Notion is where tickets are written and read; it is a poor place to *steer* from. So there
+is a second window on the same workspace, served from your own machine:
+
+```sh
+ticket-runner serve
+```
+
+It prints a URL with a token in it. Open it and you get one page, three things:
+
+```
+┌──────────────────────────────┬─────────────────────────────┐
+│  Ready                    2  │  you                        │
+│  ┌────────────────────────┐  │  Where is the SQLite ticket │
+│  │ Retirer le bandeau     │  │                             │
+│  │ Site vitrine · High    │  │  workspace                  │
+│  └────────────────────────┘  │  Six minutes in, on Trader  │
+│                              │  IA. It has rewritten       │
+│  In progress              1  │  src/storage.py and is on    │
+│  ┌────────────────────────┐  │  pytest. Nothing committed. │
+│  │ Migrer vers SQLite     │  │                             │
+│  │ Bash · pytest -q       │  │  > status                   │
+│  └────────────────────────┘  │  timer on · 30 min          │
+└──────────────────────────────┴─────────────────────────────┘
+       the board, live                the console
+```
+
+**The board** is the Notion board, read from Notion and written back to it. Nothing here
+is a second database: moving a card moves the ticket, and the new ticket you type at the
+top is a page in the same database, with its brief as real Notion blocks. What the console
+adds is the part Notion cannot do — the running session's steps, live, read straight from
+the session log on disk rather than from the `Progress` column.
+
+**The console** is one field and two gestures, and they are not made to look alike.
+
+- A line starting with `>` is a **`ticket-runner` subcommand** — `>status`, `>list`,
+  `>run`, `>doctor`, `>logs 1a2b3c4d`. The CLI is already the considered surface of this
+  tool, so the console does not invent a second one; the command runs as a subprocess with
+  no shell, and its output streams into the page. There is no shell in the browser, on
+  purpose: it would add every risk and no capability the chat does not already have.
+- Anything else is a **message to your workspace**. One long Claude Code session, started
+  in `workspace_root`, carried on from turn to turn — with your repositories under its
+  feet and `ticket-runner` on its PATH. *"Create a ticket for the SQLite migration on
+  Trader IA and make it ready"* is a thing it does, not a thing it explains how to do.
+
+That conversation is a real session, like every ticket's: `claude --resume <id>` in a
+terminal opens the very same one, and it survives the browser, the server and the machine.
+*New conversation* starts a fresh one; the old one stays resumable by its identifier.
+
+### Keeping it running
+
+```sh
+systemctl --user enable --now ticket-runner-web    # the unit install.sh laid down
+ticket-runner serve --print-token                  # the token, if you lost the URL
+```
+
+The unit is installed and left disabled: it opens a port, and that is a decision rather
+than a default.
+
+### What is behind that port
+
+**The console is arbitrary code execution on the machine that runs it.** The chat starts
+Claude Code sessions with the same `bypassPermissions` the runner uses — that is what
+makes it useful, and it is the whole of the risk. So:
+
+- it binds **`127.0.0.1`** and `serve` **refuses any other host** unless `web.token` is
+  set in the configuration on purpose: a token drawn automatically is not a decision you
+  took;
+- every request carries that token — the `?token=` in the URL is moved into a cookie on
+  the first load, so it stops sitting in your history;
+- writes demand a header a cross-origin form cannot set, and the `Host` header must name
+  the address the console was reached on. Between them, a hostile page you have open in
+  another tab can neither post to the console nor read from it.
+
+To reach it from your phone or another machine, **tunnel rather than widen**:
+
+```sh
+ssh -L 8787:127.0.0.1:8787 <the machine running it>
+```
+
+Then `http://127.0.0.1:8787` on the near side, over a channel that already authenticates
+you. A console bound to `0.0.0.0` with a token is possible — set `web.token` and say so —
+but the tunnel is the answer that does not depend on the token never leaking.
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `web.host` | `127.0.0.1` | what to bind. Anything else needs `web.token` set |
+| `web.port` | `8787` | |
+| `web.token` | `""` | empty: drawn once into `~/.local/state/ticket-runner/web/token` |
+| `web.poll_seconds` | `15` | how often the board is reread — only while a browser is connected |
+| `web.chat_timeout_minutes` | `20` | past this, a chat turn is killed |
+
+---
+
 ## Usage
 
 ```sh
@@ -565,6 +665,7 @@ ticket-runner update       # move the installation to the newest version
 ticket-runner update --check         # what is available, changing nothing
 ticket-runner enable       # apply interval_seconds and start the timer
 ticket-runner disable      # stop the timer
+ticket-runner serve        # the web console: board, command line and chat
 ```
 
 The first attempt is best made by hand, on a ticket you choose:
@@ -705,6 +806,10 @@ database someone else can edit — it is a different proposition. What makes it 
 Setting `permission_mode = "acceptEdits"` narrows it further, at the cost of sessions that
 stall the first time one needs to run the test suite. It is the right setting for a shared
 board and the wrong one for a private machine.
+
+The same sentence covers the web console, more directly: whoever can reach that port can
+run commands on that machine. On a server, leave it on loopback and reach it through the
+ssh tunnel above — never on `0.0.0.0` because it happened to be easier that evening.
 
 ---
 

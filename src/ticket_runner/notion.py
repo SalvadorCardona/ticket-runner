@@ -467,6 +467,12 @@ def _encode(kind: str | None, value: Any) -> dict | None:
         return {"number": value}
     if kind == "date":
         return {"date": {"start": str(value)}}
+    if kind == "relation":
+        # A relation is written as a list of page IDs, and accepts one on its
+        # own: a ticket created from the console names its project, and naming
+        # it is the whole difference between code work and document work.
+        ids = value if isinstance(value, (list, tuple)) else [value]
+        return {"relation": [{"id": str(one)} for one in ids if one]}
     return None
 
 

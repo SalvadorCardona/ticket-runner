@@ -7,10 +7,12 @@ set -eu
 say() { printf '==> %s\n' "$1"; }
 
 if command -v systemctl >/dev/null 2>&1; then
-    say "Stopping the timer"
+    say "Stopping the timer and the console"
     systemctl --user disable --now ticket-runner.timer >/dev/null 2>&1 || true
+    systemctl --user disable --now ticket-runner-web.service >/dev/null 2>&1 || true
     rm -f "$HOME/.config/systemd/user/ticket-runner.timer" \
-          "$HOME/.config/systemd/user/ticket-runner.service"
+          "$HOME/.config/systemd/user/ticket-runner.service" \
+          "$HOME/.config/systemd/user/ticket-runner-web.service"
     systemctl --user daemon-reload || true
 fi
 

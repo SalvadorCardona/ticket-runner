@@ -1,0 +1,22 @@
+[Unit]
+Description=ticket-runner — the web console
+Documentation=https://github.com/SalvadorCardona/ticket-runner
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=@BIN@ serve
+
+# The console outlives its sessions: a chat turn can take minutes and a restart
+# in the middle of one would lose nothing but the connection — the conversation
+# is a Claude Code session, resumable by its identifier either way.
+Restart=on-failure
+RestartSec=5
+
+# A service's PATH is not a login shell's: without this line the chat would find
+# neither claude, nor gh, nor node.
+Environment=PATH=@PATH@
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

@@ -71,6 +71,7 @@ def run(
     permission_mode: str = "bypassPermissions",
     timeout_minutes: int = 30,
     session_id: str = "",
+    resume: bool = False,
     on_event: Callable[[dict], None] | None = None,
 ) -> Outcome:
     binary = available()
@@ -88,7 +89,11 @@ def run(
         # needs the OAuth session of the CLI: an ANTHROPIC_API_KEY session gets
         # `user:inference` alone and the integration refuses to load.
         "--chrome",
-        "--session-id", session_id,
+        # `--resume` continues a conversation that already exists, and refuses
+        # to be given an identifier to create: the console's chat is one long
+        # session, drawn once and carried on turn after turn, which is what
+        # makes it a conversation rather than a series of strangers.
+        *(["--resume", session_id] if resume else ["--session-id", session_id]),
         "--output-format", "stream-json",
         "--verbose",
         "--permission-mode", permission_mode,

@@ -638,6 +638,17 @@ def command_open(args: argparse.Namespace) -> int:
         return 1
 
 
+def command_serve(args: argparse.Namespace) -> int:
+    """The web console: the board, this CLI and a chat, in one page."""
+    from . import web
+
+    configuration = load_config()
+    if args.print_token:
+        print(web.token(configuration))
+        return 0
+    return web.serve(configuration, host=args.host or "", port=args.port or 0)
+
+
 def command_timer(args: argparse.Namespace) -> int:
     if not shutil.which("systemctl"):
         print("systemd not available", file=sys.stderr)
@@ -723,6 +734,14 @@ def build_parser() -> argparse.ArgumentParser:
     opener.add_argument("uri", help="ticket-runner://session/<id>?cwd=<path>")
     opener.set_defaults(function=command_open)
 
+    serving = subparsers.add_parser("serve", help="the web console: board, command line and chat")
+    serving.add_argument("--host", help="what to bind (default: web.host, 127.0.0.1)")
+    serving.add_argument("--port", type=int, help="what port to listen on (default: web.port)")
+    serving.add_argument(
+        "--print-token", action="store_true", help="print the console's token and exit"
+    )
+    serving.set_defaults(function=command_serve)
+
     clean = subparsers.add_parser("clean", help="remove worktrees left by failures")
     clean.add_argument("--force", action="store_true")
     clean.add_argument("--days", type=int, default=14, help="also drop logs older than this")
@@ -736,6 +755,20 @@ def build_parser() -> argparse.ArgumentParser:
         timer.set_defaults(function=command_timer)
 
     return parser
+
+
+def subcommands() -> tuple[str, ...]:
+    """The verbs this parser offers — which is what the console is allowed to run.
+
+    Read from the parser rather than written down a second time: a command added
+    above is a command the web console offers, without anybody having to
+    remember to say so twice.
+    """
+    parser = build_parser()
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return tuple(sorted(action.choices))
+    return ()
 
 
 def main(argv: list[str] | None = None) -> int:

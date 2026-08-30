@@ -174,6 +174,11 @@ PY
         "$APP_DIR/systemd/ticket-runner.service.in" > "$UNIT_DIR/ticket-runner.service"
     sed -e "s|@INTERVAL@|$INTERVAL|g" -e "s|@ACCURACY@|$ACCURACY|g" \
         "$APP_DIR/systemd/ticket-runner.timer.in" > "$UNIT_DIR/ticket-runner.timer"
+    # The console's unit is installed and left alone. It listens on a port, and
+    # behind that port sits a runner that starts Claude Code sessions with
+    # bypassPermissions — opening it is a decision, not a default.
+    sed -e "s|@BIN@|$BIN|g" -e "s|@PATH@|$PATH|g" \
+        "$APP_DIR/systemd/ticket-runner-web.service.in" > "$UNIT_DIR/ticket-runner-web.service"
     systemctl --user daemon-reload
     systemctl --user enable --now ticket-runner.timer >/dev/null 2>&1 \
         && ok "ticket-runner.timer enabled" \
@@ -194,6 +199,7 @@ printf '  %sconfiguration%s  %s\n' "$DIM" "$RESET" "$CONFIG"
 printf '  %sready tickets%s  ticket-runner list\n' "$DIM" "$RESET"
 printf '  %sone run%s        ticket-runner run\n' "$DIM" "$RESET"
 printf '  %sfollow along%s   ticket-runner logs -f\n' "$DIM" "$RESET"
+printf '  %sweb console%s    ticket-runner serve   %s(board, CLI and chat, on 127.0.0.1)%s\n' "$DIM" "$RESET" "$DIM" "$RESET"
 printf '  %sversion%s        kept up to date on its own — ticket-runner update\n\n' "$DIM" "$RESET"
 case ":$PATH:" in
     *":$BIN_DIR:"*) ;;
