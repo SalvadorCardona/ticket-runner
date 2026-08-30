@@ -12,6 +12,12 @@ Two choices are made here, and they decide the quality of the whole system:
 What surrounds the ticket is composed from the widest frame to the narrowest —
 who you are, then the project, then the task — so that the specific is read last
 and wins when the two disagree.
+
+A third template answers a comment rather than doing a ticket, and its one rule
+is the mirror of the first: **it talks, it does not work.** A conversation that
+quietly edited a repository would be the least expected thing this tool could
+do, so the frame says so, and the runner runs it in a permission mode that
+cannot write.
 """
 
 from __future__ import annotations
@@ -99,6 +105,53 @@ RESULT: ok — <what you produced, in one sentence>
 RESULT: blocked — <what is missing to decide>
 """
 
+CONVERSATION = """\
+Someone has written to you in the comments of a Notion ticket {scope}. You are \
+answering them, here, in that thread.
+
+**You are talking, not working.** Nothing you say changes anything, and neither \
+do you: no file written, no command that modifies, no commit, no branch, no \
+pull request. If what is being asked needs work doing, say what it would take \
+and say that it belongs in a ticket — the person you are talking to is one \
+click away from making one.
+
+# The ticket you are talking about — {title}
+
+{body}
+
+{comments}{context}{brief}{agent}# Context
+
+- {where}
+- Notion ticket: {url}
+
+{thread}# The message to answer
+
+{message}
+
+# What is expected
+
+1. Answer that message, and nothing else. Read whatever you need in order to \
+answer honestly — the repository, the ticket, what was said before — and say \
+you do not know rather than inventing something plausible.
+2. Write in the language the message is written in.
+3. Write for a comment thread: a few sentences. No heading, no preamble, no \
+sign-off, no restating of the question. Long enough to be true, short enough to \
+read on a phone.
+4. Plain text. A short list is fine, a name in backticks is fine; nothing that \
+needs rendering to mean anything.
+5. No RESULT line and no report — everything you write is posted as the reply, \
+exactly as you write it.
+"""
+
+
+FOLLOW_UP = """\
+A new message in the same thread, on the same ticket. Same rules: you are \
+talking, not working — answer it, change nothing, stay in its language, keep it \
+to a comment.
+
+{message}
+"""
+
 
 def build(
     template: str,
@@ -116,6 +169,86 @@ def build(
     agent_brief: str = "",
     comments: list[str] | None = None,
 ) -> str:
+    scope, frame, heading, role, discussion = _frames(
+        project, context, brief, agent_name, agent_brief, comments
+    )
+    return template.format(
+        project=project or "no project",
+        scope=scope,
+        context=frame,
+        brief=heading,
+        agent=role,
+        comments=discussion,
+        title=title,
+        body=body.strip() or "(the ticket has no description: everything is in the title)",
+        repo=repo,
+        branch=branch,
+        base=base,
+        url=url,
+    )
+
+
+def conversation(
+    template: str,
+    *,
+    project: str,
+    title: str,
+    body: str,
+    where: str,
+    url: str,
+    message: str,
+    thread: list[str] | None = None,
+    brief: str = "",
+    context: str = "",
+    agent_name: str = "",
+    agent_brief: str = "",
+    comments: list[str] | None = None,
+) -> str:
+    """The prompt that answers one comment.
+
+    The same frames as a ticket, in the same order — who you are, the project,
+    the role — because the thing answering is the same thing that does the work
+    and should sound like it. What differs is what sits closest to the answer:
+    the thread it is being written into.
+    """
+    scope, frame, heading, role, discussion = _frames(
+        project, context, brief, agent_name, agent_brief, comments
+    )
+    # The thread is nearer than the page's discussion: it is the conversation
+    # being had, where the rest is the ticket's history.
+    said = ""
+    if thread:
+        said = (
+            "# This thread so far\n\n"
+            "Oldest first. “you” is what you said in it.\n\n"
+            + "\n".join(f"- {line}" for line in thread)
+            + "\n\n"
+        )
+    return template.format(
+        project=project or "no project",
+        scope=scope,
+        context=frame,
+        brief=heading,
+        agent=role,
+        comments=discussion,
+        thread=said,
+        title=title,
+        body=body.strip() or "(the ticket has no description: everything is in the title)",
+        where=where,
+        url=url,
+        message=message.strip(),
+    )
+
+
+def _frames(
+    project: str,
+    context: str,
+    brief: str,
+    agent_name: str,
+    agent_brief: str,
+    comments: list[str] | None,
+) -> tuple[str, str, str, str, str]:
+    """The blocks that surround a ticket, widest first. Shared by both prompts."""
     # A ticket may have no project at all: the sentence has to read either way.
     scope = f"for the {project} project" if project else "that belongs to no project"
     # Who the work is for: the workspace's context page, the same on every
@@ -142,20 +275,7 @@ def build(
             + "\n".join(f"- {line}" for line in comments)
             + "\n\n"
         )
-    return template.format(
-        project=project or "no project",
-        scope=scope,
-        context=frame,
-        brief=heading,
-        agent=role,
-        comments=discussion,
-        title=title,
-        body=body.strip() or "(the ticket has no description: everything is in the title)",
-        repo=repo,
-        branch=branch,
-        base=base,
-        url=url,
-    )
+    return scope, frame, heading, role, discussion
 
 
 def template(prompt_file: str, fallback: str = DEFAULT) -> str:

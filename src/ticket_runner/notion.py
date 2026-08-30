@@ -31,8 +31,20 @@ class NotionError(Exception):
 
 @dataclass
 class Comment:
+    """One comment, and what it takes to answer it where it was written.
+
+    `discussion_id` is the thread it belongs to: Notion groups comments into
+    discussions, and answering *into* one is the whole difference between a
+    conversation and a page covered in unrelated remarks. `created_by` is who
+    wrote it — which is how the runner tells its own words from yours without
+    having to recognise its own signature in a string.
+    """
+
     text: str
     created_time: str = ""
+    id: str = ""
+    discussion_id: str = ""
+    created_by: str = ""
 
 
 @dataclass
@@ -49,6 +61,7 @@ class Client:
         self._token = token
         self._timeout = timeout
         self._databases: dict[str, dict] = {}
+        self._me: dict | None = None
 
     # -- transport -----------------------------------------------------------
 
@@ -216,7 +229,15 @@ class Client:
             for item in payload.get("results", []):
                 text = "".join(part.get("plain_text", "") for part in item.get("rich_text", []))
                 if text.strip():
-                    found.append(Comment(text.strip(), item.get("created_time", "")))
+                    found.append(
+                        Comment(
+                            text.strip(),
+                            item.get("created_time", ""),
+                            id=item.get("id", ""),
+                            discussion_id=item.get("discussion_id", ""),
+                            created_by=(item.get("created_by") or {}).get("id", ""),
+                        )
+                    )
             if not payload.get("has_more"):
                 return found
             cursor = payload.get("next_cursor")
@@ -313,12 +334,49 @@ class Client:
         """
         self._request("PATCH", f"/blocks/{block_id}", payload)
 
-    def comment(self, page_id: str, text: str) -> None:
-        self._request(
-            "POST",
-            "/comments",
-            {"parent": {"page_id": page_id}, "rich_text": _rich_text(text)},
-        )
+    def comment(self, page_id: str, text: str, discussion_id: str = "") -> None:
+        """Say something on a page — or *into* one of its threads.
+
+        A report opens its own discussion, because it is the runner speaking
+        first. An answer to a question belongs under the question: given a
+        discussion, Notion threads it there, and the page keeps reading as a
+        conversation instead of as a stack of monologues.
+        """
+        body: dict[str, Any] = {"rich_text": _rich_text(text)}
+        if discussion_id:
+            body["discussion_id"] = discussion_id
+        else:
+            body["parent"] = {"page_id": page_id}
+        self._request("POST", "/comments", body)
+
+    def me(self) -> str:
+        """The integration's own user ID, fetched once.
+
+        Everything the runner says in the comments comes back to it on the next
+        pass. Recognising its own voice by the signature it writes would work
+        until the day it writes something else — so it asks Notion who it is,
+        and compares identifiers. Answering a comment is gated on this: without
+        it, the runner cannot prove a comment is not its own, and a conversation
+        with itself is the one failure mode that never stops.
+        """
+        return self._identity().get("id", "")
+
+    def my_name(self) -> str:
+        """The name the integration answers to, as Notion shows it.
+
+        Mentioning it in a comment is the natural way to address it, and a
+        mention reaches the API as the name in plain text — so knowing the name
+        is what makes “@Ticket Runner, pourquoi ?” a message rather than a
+        remark about the weather.
+        """
+        return str(self._identity().get("name", "")).strip()
+
+    def _identity(self) -> dict:
+        """Who Notion says we are. Cached on success only, so a network blip
+        that hid our identity for one run does not hide it for the next."""
+        if self._me is None:
+            self._me = self._request("GET", "/users/me")
+        return self._me
 
     # -- writing the shape, not the content ----------------------------------
 

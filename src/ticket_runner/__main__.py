@@ -17,12 +17,13 @@ from pathlib import Path
 
 from datetime import datetime
 
-from . import __version__, channels, config as config_module, git, notion, provision
+from . import __version__, channels, config as config_module, conversation, git, notion
+from . import provision
 from . import session, state
 from . import update as update_module
 from . import workspace as workspace_module
 from .projects import Resolver
-from .runner import Runner
+from .runner import Runner, short_id
 
 BOLD, DIM, GREEN, RED, YELLOW, RESET = "", "", "", "", "", ""
 if sys.stdout.isatty():
@@ -482,8 +483,7 @@ def command_doctor(args: argparse.Namespace) -> int:
     title("Notion")
     client = notion.Client(configuration.notion.token)
     try:
-        me = client._request("GET", "/users/me")  # noqa: SLF001 — diagnostics
-        ok(f"connected as “{me.get('name', 'integration')}”")
+        ok(f"connected as “{client.my_name() or 'integration'}”")
     except notion.NotionError as error:
         bad(f"token refused: {error}")
         return 1
@@ -577,6 +577,39 @@ def command_doctor(args: argparse.Namespace) -> int:
                 bad(f"{key:<8} → “{wanted}” is not offered by the database")
                 problems += 1
         print(f"  {DIM}available: {', '.join(options)}{RESET}")
+
+    title("Comments")
+    # The one capability that is off by default, and the one whose absence is
+    # silent: a ticket runs perfectly well while its discussion is invisible.
+    sample = client.query(database)[:1]
+    if not sample:
+        print(f"  {DIM}no ticket yet — nothing to read a discussion on{RESET}")
+    else:
+        try:
+            client.comments(sample[0].id)
+            ok("comments readable — answers wake a ticket, and can be answered back")
+        except notion.NotionError as error:
+            if "403" in str(error):
+                bad("comments not readable — an answer in a comment reaches nothing")
+                warn(
+                    "notion.so/my-integrations → your integration → "
+                    "Capabilities → Read comments (and Insert comments)"
+                )
+                problems += 1
+            else:
+                warn(f"comments could not be read: {str(error).splitlines()[0]}")
+    if configuration.runner.reply:
+        spellings = ", ".join(
+            conversation.names(configuration.notion.mention, client.my_name())
+        )
+        ok(f"it answers when you write to it — {spellings}")
+        print(
+            f"  {DIM}every {configuration.runner.reply_interval_seconds}s, "
+            f"{configuration.runner.reply_scan} page(s) a pass, "
+            f"permission_mode = {configuration.runner.reply_permission_mode}{RESET}"
+        )
+    else:
+        print(f"  {DIM}runner.reply = false — a comment can wake a ticket, not start a talk{RESET}")
 
     title("Model")
     ok(f"claude: {session.available() or 'missing'}")
@@ -722,6 +755,14 @@ def command_clean(args: argparse.Namespace) -> int:
     removed = state.prune_logs(args.days)
     if removed:
         print(f"  removed {removed} log file(s) older than {args.days} days")
+    # The scratch directory a conversation runs in, for a ticket with no
+    # repository. Kept while the runner still remembers the page — that is what
+    # makes the next question land in the same Claude session.
+    talks = conversation.clean_talks(
+        {short_id(page) for page in conversation.Ledger.load().known_pages()}
+    )
+    if talks:
+        print(f"  removed {talks} conversation directory(ies)")
     return 0
 
 

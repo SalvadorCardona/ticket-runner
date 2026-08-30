@@ -40,6 +40,10 @@ class Notion:
     token: str = ""
     workspace: str = ""
     tickets_database: str = ""
+    # How you call it when you want it to answer rather than to work. Its own
+    # name, as Notion writes it when you @-mention the integration, is always
+    # understood too — this is for the word you would actually type.
+    mention: str = ""
     pages: dict[str, str] = field(default_factory=dict)
     properties: dict[str, str] = field(default_factory=dict)
     status: dict[str, str] = field(default_factory=dict)
@@ -100,6 +104,17 @@ class Runner:
     # The steps of a running session, written into its ticket as they happen.
     progress: bool = True
     progress_interval_seconds: int = 10
+    # Answering in the comments: a ticket as somewhere to talk, not only
+    # somewhere to ask. See conversation.py for what wakes an answer.
+    reply: bool = True
+    # A person wrote the comment and a person is waiting for the answer, so a
+    # minute is soon enough — and the scan costs one request per page.
+    reply_interval_seconds: int = 60
+    reply_scan: int = 20
+    reply_timeout_minutes: int = 10
+    # `plan` is the guardrail, not the prompt: a conversation that quietly
+    # edited a repository is the one thing nobody would expect of it.
+    reply_permission_mode: str = "plan"
     auto_update: bool = True
     update_interval_seconds: int = 3600
     log_retention_days: int = 14
@@ -346,6 +361,7 @@ def load(path: Path | None = None) -> Config:
     notion = Notion(
         token=str(notion_raw.get("token", "")).strip(),
         workspace=_database_id(str(notion_raw.get("workspace", ""))),
+        mention=str(notion_raw.get("mention", "")).strip(),
         tickets_database=_database_id(str(notion_raw.get("tickets_database", ""))),
         # Not merged with the defaults, for the same reason as `status` below:
         # `page_aliases()` needs to know which titles the file actually names, to
@@ -393,6 +409,20 @@ def load(path: Path | None = None) -> Config:
             5,
             int(runner_raw.get("progress_interval_seconds", defaults.progress_interval_seconds)),
         ),
+        reply=bool(runner_raw.get("reply", defaults.reply)),
+        # The floor is ten seconds, which is the fastest a run itself goes: a
+        # zero here would turn every pass into a full scan of the board.
+        reply_interval_seconds=max(
+            10, int(runner_raw.get("reply_interval_seconds", defaults.reply_interval_seconds))
+        ),
+        reply_scan=max(1, int(runner_raw.get("reply_scan", defaults.reply_scan))),
+        reply_timeout_minutes=max(
+            1, int(runner_raw.get("reply_timeout_minutes", defaults.reply_timeout_minutes))
+        ),
+        reply_permission_mode=str(
+            runner_raw.get("reply_permission_mode", defaults.reply_permission_mode)
+        ).strip()
+        or defaults.reply_permission_mode,
         auto_update=bool(runner_raw.get("auto_update", defaults.auto_update)),
         # A run asks the remote at most once per this interval. The floor is a
         # minute: at a ten-second cadence, an unbounded value would turn into a
