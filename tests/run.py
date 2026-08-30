@@ -15,10 +15,13 @@ reaches Notion as a wall of text, a summary that keeps its verdict.
 
 from __future__ import annotations
 
+import io
+import json
 import os
 import sys
 import tempfile
 import traceback
+import contextlib
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -28,7 +31,9 @@ from ticket_runner import config as C  # noqa: E402
 from ticket_runner import agents, markdown, notion, progress, prompt, provision, session  # noqa: E402
 from ticket_runner import update, workspace  # noqa: E402
 from ticket_runner.runner import Runner  # noqa: E402
-from ticket_runner.__main__ import _names  # noqa: E402
+from ticket_runner.__main__ import _names, subcommands  # noqa: E402
+from ticket_runner.web import console as web_console  # noqa: E402
+from ticket_runner.web import live as web_live  # noqa: E402
 from ticket_runner.runner import short_id, slugify  # noqa: E402
 from ticket_runner.projects import _normalise  # noqa: E402
 
@@ -1336,6 +1341,191 @@ def a_reporter_never_writes_more_than_a_page_can_hold():
     assert len(client.blocks) == progress.MAX_STEPS + 1
     assert client.titles[-1].startswith("✓") and client.titles[-1].endswith("· done")
 
+
+
+# -- the web console ---------------------------------------------------------
+
+
+@case
+def a_typed_command_is_split_without_a_shell():
+    """No shell means no metacharacter: the words go to execve as they are."""
+    commands = web_console.Commands(lambda *a, **k: None, subcommands())
+    assert commands.parse(">status") == ["status"]
+    assert commands.parse("history -n 5") == ["history", "-n", "5"]
+    # A quoted argument stays one argument, accents and spaces included.
+    assert commands.parse('run --ticket "à faire"') == ["run", "--ticket", "à faire"]
+
+
+@case
+def a_command_the_cli_does_not_have_is_refused():
+    commands = web_console.Commands(lambda *a, **k: None, subcommands())
+    for line in ("rm -rf /", "run; rm -rf /", "sh -c whoami", "../../bin/sh"):
+        try:
+            commands.parse(line)
+        except ValueError:
+            continue
+        raise AssertionError(f"{line!r} should not have been accepted")
+
+
+@case
+def the_commands_that_would_hang_a_browser_are_not_offered():
+    """`config` opens an editor and `serve` is the console itself.
+
+    Both are refused *and* left out of the list the error message offers: naming
+    a verb and then refusing it is a small lie told to somebody already lost.
+    """
+    commands = web_console.Commands(lambda *a, **k: None, subcommands())
+    for verb in web_console.REFUSED:
+        assert verb not in commands.allowed
+        try:
+            commands.parse(verb)
+        except ValueError as error:
+            assert verb in str(error)
+        else:
+            raise AssertionError(f"{verb} should have been refused")
+    assert "run" in commands.allowed and "status" in commands.allowed
+
+
+@case
+def following_a_log_is_dropped_rather_than_left_to_hang():
+    """`logs -f` never returns, and the live panel already is that feed."""
+    commands = web_console.Commands(lambda *a, **k: None, subcommands())
+    assert commands.parse("logs -f") == ["logs"]
+    assert commands.parse("logs abc123 --follow") == ["logs", "abc123"]
+
+
+@case
+def a_browser_that_reconnects_is_given_only_what_it_missed():
+    """The backlog is replayed by event id, or a suspend would double the chat."""
+    hub = web_live.Hub()
+    hub.publish("chat", stage="sent", text="one")
+    hub.publish("chat", stage="answer", text="two")
+    hub.publish("board", tickets=[])
+
+    fresh = hub.subscribe()  # a first connection: the board, and no transcript
+    kinds = [fresh.get_nowait().kind for _ in range(fresh.qsize())]
+    assert kinds == ["board"], kinds
+
+    back = hub.subscribe(after=1)  # a reconnection, having seen event 1
+    seen = [back.get_nowait() for _ in range(back.qsize())]
+    assert [event.kind for event in seen] == ["chat", "board"]
+    assert seen[0].payload["text"] == "two"
+
+
+@case
+def an_event_carries_its_id_so_the_browser_can_ask_again():
+    hub = web_live.Hub()
+    hub.publish("step", label="Read", detail="src/x.py")
+    channel = hub.subscribe(after=0)
+    hub.publish("step", label="Bash", detail="npm test")
+    event = channel.get_nowait()
+    assert event.encode().startswith("id: 2\nevent: step\ndata: {")
+    assert '"label": "Bash"' in event.encode()
+
+
+@case
+def a_log_line_becomes_the_step_the_board_would_have_shown():
+    """The live panel and the Notion toggle read the same events, one way."""
+    line = json.dumps(
+        {
+            "type": "assistant",
+            "message": {"content": [{"type": "tool_use", "name": "Bash", "input": {"command": "npm test"}}]},
+        }
+    )
+    steps = web_live.steps(line)
+    assert [step.line for step in steps] == ["Bash · npm test"]
+    assert web_live.steps("not json at all") == []
+
+
+@case
+def a_session_log_is_tailed_forward_and_never_twice():
+    hub = web_live.Hub()
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        log = folder / "20260830-120000-1a2b3c4d.jsonl"
+        event = json.dumps(
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "reading"}]}}
+        )
+        log.write_text(event + "\n", encoding="utf-8")
+        tail = web_live.Tail(hub, folder)
+        assert tail.pass_once() == 1
+        assert tail.pass_once() == 0, "a pass that adds nothing must publish nothing"
+
+        # A half-written line is left for the next pass rather than dropped.
+        with log.open("a", encoding="utf-8") as handle:
+            handle.write(event[:20])
+        assert tail.pass_once() == 0
+        with log.open("a", encoding="utf-8") as handle:
+            handle.write(event[20:] + "\n")
+        assert tail.pass_once() == 1
+
+
+@case
+def the_board_is_published_only_when_it_has_moved():
+    """A poll that redrew an unchanged board would lose your scroll for nothing."""
+    hub = web_live.Hub()
+    boards = [{"tickets": [{"title": "one"}]}, {"tickets": [{"title": "one"}]},
+              {"tickets": [{"title": "two"}]}]
+    watch = web_live.Watch(hub, lambda: boards.pop(0), interval=5)
+    published = []
+    hub.publish = lambda kind, **payload: published.append(kind)  # type: ignore[method-assign]
+    watch.refresh()
+    watch.refresh()
+    watch.refresh()
+    assert published == ["board", "board"], published
+
+
+@case
+def a_notion_that_will_not_answer_reaches_the_console_as_a_notice():
+    """Named `notice`: EventSource already fires an `error` of its own."""
+    hub = web_live.Hub()
+    said = []
+    hub.publish = lambda kind, **payload: said.append((kind, payload))  # type: ignore[method-assign]
+
+    def broken() -> dict:
+        raise notion.NotionError("object not found\nsecond line nobody needs")
+
+    web_live.Watch(hub, broken).refresh()
+    assert said == [("notice", {"where": "board", "message": "object not found"})]
+
+
+@case
+def a_session_identifier_is_read_from_either_shape_of_the_column():
+    """A URL column holds a link, a text column holds the bare ID. Same session."""
+    from ticket_runner.web.api import _session_id
+
+    identifier = "6f1c2b70-1c39-4f0a-9a52-1f3c1a2b3c4d"
+    assert _session_id(identifier) == identifier
+    assert _session_id(session.deep_link(identifier, cwd="/home/me/work")) == identifier
+    assert _session_id(session.deep_link(identifier, host="server")) == identifier
+    assert _session_id("") == ""
+
+
+@case
+def the_console_only_listens_beyond_localhost_when_told_to():
+    """Behind the port sits bypassPermissions: a generated token is not consent."""
+    from ticket_runner.web import server as web_server
+
+    configuration = C.Config(
+        notion=C.Notion(token="ntn_x", tickets_database="a" * 32),
+        runner=C.Runner(),
+        projects={},
+        path=Path("/nowhere/config.toml"),
+        web=C.Web(host="0.0.0.0"),
+    )
+    explained = io.StringIO()
+    with contextlib.redirect_stdout(explained):
+        assert web_server.serve(configuration, announce=False) == 2, "must refuse, not serve"
+    assert "bypassPermissions" in explained.getvalue(), "and say why, not just refuse"
+
+
+@case
+def a_relation_is_written_as_notion_spells_it():
+    """A ticket created from the console names its project, or it is not one."""
+    page = "3ca451680af480ae9443de0b65d9abf8"
+    assert notion._encode("relation", page) == {"relation": [{"id": page}]}
+    assert notion._encode("relation", [page]) == {"relation": [{"id": page}]}
+    assert notion._encode("relation", []) == {"relation": []}
 
 
 def main() -> int:

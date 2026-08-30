@@ -1,0 +1,280 @@
+/* The console. Dark, because it sits beside a terminal and a Notion board, and
+   because the thing it shows most of the time is a log. */
+
+:root {
+  --bg: #0f1115;
+  --panel: #151820;
+  --panel-2: #1a1e28;
+  --line: #262b36;
+  --text: #e7e9ee;
+  --dim: #98a2b3;
+  --dimmer: #6b7280;
+  --blue: #3b82f6;
+  --green: #34d399;
+  --amber: #fbbf24;
+  --red: #f87171;
+  --violet: #a78bfa;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --radius: 12px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dim { color: var(--dim); }
+.small { font-size: .82rem; }
+.grow { flex: 1; }
+code { font-family: var(--mono); font-size: .88em; }
+
+/* -- header ---------------------------------------------------------------- */
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+  padding: .55rem .9rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  flex: 0 0 auto;
+}
+.brand { font-weight: 700; letter-spacing: -.02em; }
+.pills { display: flex; gap: .4rem; flex-wrap: wrap; }
+.pill {
+  font-size: .76rem;
+  padding: .16rem .5rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--dim);
+  white-space: nowrap;
+}
+.pill.on { color: var(--green); border-color: #1f6b52; }
+.pill.warn { color: var(--amber); border-color: #6b551f; }
+.pill.busy { color: var(--blue); border-color: #1f3f6b; }
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  padding: .4rem .8rem;
+}
+button:hover { border-color: #38404f; }
+button:disabled { opacity: .5; cursor: default; }
+button.primary { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 600; }
+button.primary:hover { background: #2f74e6; }
+button.ghost { background: transparent; color: var(--dim); }
+.link { color: var(--dim); font-size: .8rem; }
+.link.on { color: var(--green); }
+.link.off { color: var(--red); }
+
+/* -- panes ----------------------------------------------------------------- */
+
+/* Two columns on a screen, one at a time on a phone. The console is always the
+   right-hand one: it is what you came to type into, and a tab you have to
+   choose is a tab you forget is there. */
+.tabs {
+  display: flex;
+  gap: .3rem;
+  padding: .45rem .9rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  flex: 0 0 auto;
+}
+.tabs button { background: transparent; color: var(--dim); padding: .25rem .8rem; }
+.tabs button.on { background: var(--panel-2); color: var(--text); }
+.tabs button[data-pane="console"] { display: none; }
+
+main {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+}
+.pane { min-height: 0; overflow: auto; padding: .9rem; display: none; grid-column: 1; }
+.pane.showing { display: block; }
+.pane.console {
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+  padding: 0;
+  overflow: hidden;
+}
+
+/* -- the board ------------------------------------------------------------- */
+
+.compose { margin-bottom: .9rem; }
+.compose input, .compose textarea, .compose select {
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: inherit;
+  border-radius: var(--radius);
+  padding: .6rem .75rem;
+  font: inherit;
+}
+.compose textarea { margin-top: .5rem; resize: vertical; font-size: .92rem; }
+.compose .row { display: flex; gap: .5rem; align-items: center; margin-top: .5rem; }
+.compose select { flex: 1; }
+.check { display: flex; align-items: center; gap: .35rem; color: var(--dim); font-size: .85rem; white-space: nowrap; }
+
+.columns { display: flex; flex-direction: column; gap: 1.1rem; }
+.column > h2 {
+  font-size: .78rem;
+  text-transform: uppercase;
+  letter-spacing: .09em;
+  color: var(--dim);
+  margin: 0 0 .5rem;
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+}
+.column > h2 .count {
+  background: var(--panel-2);
+  border-radius: 999px;
+  padding: 0 .45rem;
+  font-size: .72rem;
+  color: var(--dim);
+}
+.cards { display: grid; gap: .5rem; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); }
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  border-radius: var(--radius);
+  padding: .6rem .7rem;
+}
+.card.ready { border-left-color: var(--green); }
+.card.running { border-left-color: var(--blue); }
+.card.review { border-left-color: var(--violet); }
+.card.blocked { border-left-color: var(--amber); }
+.card.failed { border-left-color: var(--red); }
+.card .title { font-weight: 600; font-size: .93rem; line-height: 1.35; }
+.card .meta { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .4rem; }
+.tag {
+  font-size: .72rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: .05rem .35rem;
+  color: var(--dim);
+}
+.tag.code { color: var(--blue); }
+.tag.document { color: var(--violet); }
+.tag.Urgent, .tag.High { color: var(--amber); }
+.card .progress {
+  margin-top: .45rem;
+  font-family: var(--mono);
+  font-size: .74rem;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card .actions { display: flex; gap: .5rem; margin-top: .5rem; flex-wrap: wrap; }
+.card .actions a, .card .actions button {
+  font-size: .76rem;
+  padding: .18rem .45rem;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--dim);
+  text-decoration: none;
+}
+.card .actions a:hover, .card .actions button:hover { color: var(--text); }
+
+.empty { color: var(--dimmer); font-size: .85rem; padding: .3rem 0; }
+
+/* -- the console ----------------------------------------------------------- */
+
+.transcript { flex: 1; overflow: auto; padding: .9rem; display: flex; flex-direction: column; gap: .7rem; }
+.turn { display: flex; flex-direction: column; gap: .25rem; }
+.turn .who { font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--dimmer); }
+.turn .text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.turn.you .text {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: .5rem .7rem;
+}
+.turn.you .who { color: var(--blue); }
+.turn.error .text { color: var(--red); }
+.turn.command .text {
+  font-family: var(--mono);
+  font-size: .8rem;
+  background: #0c0e13;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: .55rem .7rem;
+  overflow-x: auto;
+  white-space: pre;
+}
+.turn.command .who { color: var(--amber); }
+
+.steps {
+  font-family: var(--mono);
+  font-size: .76rem;
+  color: var(--dim);
+  border-left: 2px solid var(--line);
+  padding-left: .6rem;
+  display: flex;
+  flex-direction: column;
+  gap: .12rem;
+  max-height: 12rem;
+  overflow: auto;
+}
+.steps .label { color: var(--violet); }
+.steps.done { opacity: .55; max-height: 5rem; }
+
+.composer { border-top: 1px solid var(--line); padding: .6rem .9rem .8rem; background: var(--panel); }
+.composer .hint { font-size: .74rem; color: var(--dimmer); margin-bottom: .4rem; }
+.composer textarea {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: inherit;
+  border-radius: var(--radius);
+  padding: .6rem .75rem;
+  font: inherit;
+  resize: none;
+  max-height: 12rem;
+}
+.composer textarea.command { font-family: var(--mono); color: var(--amber); }
+.composer .row { display: flex; gap: .5rem; align-items: center; margin-top: .5rem; }
+
+/* -- live ------------------------------------------------------------------ */
+
+.live-head h2 { font-size: .95rem; margin: 0 0 .2rem; }
+.sessions { display: flex; flex-direction: column; gap: .8rem; margin-top: .8rem; }
+.session {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: .6rem .7rem;
+}
+.session h3 { margin: 0 0 .4rem; font-size: .8rem; font-family: var(--mono); color: var(--dim); }
+
+/* -- narrow ---------------------------------------------------------------- */
+
+@media (max-width: 860px) {
+  main { grid-template-columns: 1fr; }
+  .tabs button { flex: 1; }
+  .tabs button[data-pane="console"] { display: block; }
+  .pane, .pane.console { grid-column: 1; }
+  .pane.console { display: none; border-left: 0; }
+  .pane.console.showing { display: flex; }
+  .cards { grid-template-columns: 1fr; }
+}

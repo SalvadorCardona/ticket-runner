@@ -78,6 +78,25 @@ def remember(status: Status) -> None:
         pass
 
 
+def remembered() -> Status:
+    """What the last check found, without asking the remote again.
+
+    The console draws its header on every reconnection, and a `git fetch`
+    behind that would be one per laptop lid. The stamp a run already writes
+    answers the same question for free — and answers "nothing known yet" as an
+    empty Status, which reads as "up to date" rather than as a warning.
+    """
+    try:
+        payload = json.loads(_stamp().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return Status()
+    return Status(
+        current=str(payload.get("current") or ""),
+        latest=str(payload.get("latest") or ""),
+        reason=str(payload.get("reason") or ""),
+    )
+
+
 def last_check() -> float:
     try:
         return float(json.loads(_stamp().read_text(encoding="utf-8"))["checked_at"])
@@ -166,6 +185,16 @@ def write_units(interval_seconds: int, app: Path | None = None) -> Path:
     timer = timer.replace("@INTERVAL@", str(interval_seconds))
     timer = timer.replace("@ACCURACY@", "1s" if interval_seconds < 60 else "30s")
     (units / "ticket-runner.timer").write_text(timer)
+
+    # The console's unit is written whether or not it is enabled: writing it
+    # costs nothing, and an update that refreshed the timer but left the console
+    # on last month's ExecStart would be the kind of half-update this module
+    # exists to prevent. Enabling it stays a decision — it opens a port.
+    console = app / "systemd" / "ticket-runner-web.service.in"
+    if console.exists():
+        text = console.read_text()
+        text = text.replace("@BIN@", str(_binary())).replace("@PATH@", os.environ.get("PATH", ""))
+        (units / "ticket-runner-web.service").write_text(text)
     return units
 
 

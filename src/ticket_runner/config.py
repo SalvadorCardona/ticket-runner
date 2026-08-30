@@ -109,11 +109,36 @@ class Runner:
 
 
 @dataclass
+class Web:
+    """The console: a board, a command line and a chat, in one page.
+
+    Loopback by default, and that is not a placeholder. Behind this port sits a
+    runner that starts Claude Code sessions with `bypassPermissions` — so the
+    port is arbitrary code execution on this machine, and anything reachable
+    from elsewhere has to be a decision somebody took on purpose. `serve`
+    refuses a non-loopback host unless a token is configured; the way to reach
+    the console from another machine is an ssh tunnel, not a wider bind.
+    """
+
+    host: str = "127.0.0.1"
+    port: int = 8787
+    token: str = ""
+    # How often the console asks Notion what the board looks like — and only
+    # while a browser is actually watching. Nobody is watching most of the time,
+    # and a poll nobody reads spends the integration's rate limit for nothing.
+    poll_seconds: int = 15
+    # A chat turn is a Claude session like any other, and wants the same kind of
+    # ceiling. Shorter than a ticket's: somebody is sitting in front of it.
+    chat_timeout_minutes: int = 20
+
+
+@dataclass
 class Config:
     notion: Notion
     runner: Runner
     projects: dict[str, str]
     path: Path
+    web: Web = field(default_factory=Web)
 
     def require_usable(self) -> None:
         """Raise ConfigError if the file is not complete enough to run."""
@@ -348,4 +373,19 @@ def load(path: Path | None = None) -> Config:
         for name, value in raw.get("projects", {}).items()
     }
 
-    return Config(notion=notion, runner=runner, projects=projects, path=target)
+    web_raw = raw.get("web", {})
+    web_defaults = Web()
+    web = Web(
+        host=str(web_raw.get("host", web_defaults.host)).strip() or web_defaults.host,
+        port=int(web_raw.get("port", web_defaults.port)),
+        token=str(web_raw.get("token", web_defaults.token)).strip(),
+        # Five seconds is the floor for the same reason as the live report's:
+        # below that, a page left open in a tab becomes a second full-time
+        # reader of the board.
+        poll_seconds=max(5, int(web_raw.get("poll_seconds", web_defaults.poll_seconds))),
+        chat_timeout_minutes=max(
+            1, int(web_raw.get("chat_timeout_minutes", web_defaults.chat_timeout_minutes))
+        ),
+    )
+
+    return Config(notion=notion, runner=runner, projects=projects, path=target, web=web)
