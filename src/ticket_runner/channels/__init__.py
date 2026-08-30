@@ -39,6 +39,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .. import conversation
 from ..config import Notify, state_dir
 
 # How many questions a channel remembers, so that a reply arriving tomorrow
@@ -164,7 +165,14 @@ def answer(reply: Reply) -> str:
     """
     verdict = decide(reply.text)
     said = " ".join(reply.text.split())
-    lines = [f"Answered from {reply.channel.title()}" + (f" by {reply.who}" if reply.who else "") + "."]
+    # The opening words are `conversation.RELAYED`: they are what tells the next
+    # run that this comment is yours rather than the runner's own, and therefore
+    # that it wakes the ticket.
+    lines = [
+        f"{conversation.RELAYED}{reply.channel.title()}"
+        + (f" by {reply.who}" if reply.who else "")
+        + "."
+    ]
     if verdict == "yes":
         lines.append("Yes — go ahead with what you proposed.")
     elif verdict == "no":

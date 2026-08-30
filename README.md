@@ -12,6 +12,10 @@ The runner lives on your machine, in the background, across **all of your projec
 once**. It never touches your working copy: every ticket gets a disposable git worktree of
 its own.
 
+And you can talk to it where the work is. A comment under one of its reports is
+answered, in the thread, by something that has read the ticket, the project and the
+repository — see [Talking to it in the comments](#talking-to-it-in-the-comments).
+
 And when you would rather have your hands on it than wait for a board to refresh,
 `ticket-runner serve` opens a console on `127.0.0.1`: the same board live, this CLI in a
 browser, and a chat with your whole workspace. See [The web console](#the-web-console).
@@ -502,7 +506,86 @@ does not spend more of its prompt on its own history than on the work.
 This needs one capability the integration does not have by default:
 [notion.so/my-integrations](https://www.notion.so/my-integrations) → your integration →
 **Capabilities** → *Read comments*. Without it the runner says so once and carries on —
-and no ticket ever wakes up, since it cannot see the answer.
+and no ticket ever wakes up, since it cannot see the answer. `ticket-runner doctor` tries
+it on a real ticket and tells you.
+
+### Talking to it in the comments
+
+Running a ticket again is the right answer to *do it differently*. It is the wrong answer
+to *why did you do it like that?* — which is most of what one actually wants to say to
+something that has just written code on one's behalf.
+
+So a comment can also simply be **answered**. Reply under one of its reports and it
+replies, in the same thread, in the language you wrote in:
+
+> **ticket-runner@laptop — done.** Removed the header from the dashboard.
+> Branch `ticket/supprimer-l-entete-9d2cb790` · 2 commit(s) · <https://github.com/…/pull/12>
+>
+> > **you** — pourquoi une nouvelle branche plutôt que celle d'hier ?
+> >
+> > **Ticket Runner** — celle d'hier était déjà partie en revue sur la PR #11, et y
+> > pousser aurait mélangé deux changements sans rapport. La nouvelle part de `main`,
+> > qui contient déjà #11.
+
+Nothing is claimed, no status moves, nothing is built. It reads the ticket, the thread,
+the project's brief, the context page and — for a ticket that has a repository — the
+repository itself, and it answers. Then it stops.
+
+**It talks, it does not work.** That is not a promise made in a prompt: the session runs
+under `reply_permission_mode`, which is `plan` — a mode Claude Code cannot write from. Ask
+it for a change and it tells you what the change would take, which is the beginning of
+your next ticket.
+
+And it is careful about whose voice is whose. Its reports, and the answers it writes here,
+are the runner speaking; an answer relayed from
+[Telegram or Slack](#being-told-and-answering-with-one-word) wears the same token and is
+you, so that one still wakes the ticket. Only the first kind is ever treated as the last
+word.
+
+Three rules decide when it speaks, and all three are about knowing who is being spoken to:
+
+- **a thread it already speaks in belongs to it.** Reply under a report and it answers. A
+  new remark elsewhere on the page is a conversation of yours, and stays one;
+- **naming it works wherever it is looking.** `@claude`, or whatever `notion.mention`
+  says, or the integration's own name as Notion writes it when you @-mention it. That
+  covers every ticket it has ever reported on, whatever column that ticket is in now, and
+  every ticket that is not settled — `blocked`, `failed`, or with no status at all;
+- **work wins over talk.** A plain answer under the question a `blocked` run asked still
+  puts the ticket back in the queue: that loop is what `blocked` is for. Naming it is how
+  you ask for words instead — `@claude pourquoi tu demandes ?` gets an answer, and leaves
+  the ticket exactly where it is.
+
+And it never answers itself. Every comment it writes comes back to it on the next pass, so
+it asks Notion for its own user ID and compares identifiers rather than trying to recognise
+its own signature. When Notion will not say — a token without the reach, a network that is
+down — it says nothing at all that pass. A conversation with oneself is the one failure
+mode here that would never end.
+
+A thread is one long Claude Code session, resumed: ask a second question and it lands in
+the same conversation as the first, which is why the second answer knows what the first one
+said. `claude --resume` in a terminal opens that very session.
+
+The pass runs on a cadence of its own — `reply_interval_seconds`, sixty by default —
+because a comment does not change a page and Notion has no way of being asked *what has
+been commented on since*. So it looks where a conversation can plausibly be: the tickets a
+run reads anyway, and the pages it has spoken on, `reply_scan` of them per pass with the
+window moving each time. A ticket sitting in *Ready* that it has never touched is the one
+place it is not listening — and that one is about to be run, which is where your comment
+was going to be read regardless.
+
+| Where you write | What happens |
+| --- | --- |
+| under a report, on a `blocked` or `failed` ticket | the ticket runs again, with your answer in its prompt |
+| under a report, naming it | it answers; the ticket does not move |
+| under a report, on a ticket in review or done | it answers |
+| a new comment naming it, on a ticket it has run or one not yet settled | it answers |
+| a new comment naming it, on a ticket it has never touched | nothing — it is not looking there |
+| anywhere else | nothing — not every comment is addressed to it |
+| on a ticket about to run, queued, or scheduled for later | nothing: that comment is already going into its prompt |
+| from Telegram or Slack | that is an answer, not a question: it wakes the ticket, as it always did |
+
+Turn the whole thing off with `reply = false` under `[runner]`, and a comment goes back to
+being only what it was: the thing that wakes a blocked ticket.
 
 ### The statuses
 
@@ -584,6 +667,13 @@ Nothing new on the board, and no second mechanism: the reply becomes a **Notion 
 and a comment is already what wakes a blocked ticket (see
 [The discussion on a ticket](#the-discussion-on-a-ticket)). A *oui* typed on a phone
 travels the exact path a *oui* typed into Notion does — same waking rules, same prompt.
+
+That comment is posted with the runner's own token, and it is still **yours**: it opens
+with *Answered from Telegram by …*, which is what tells the next run that this is the
+ticket's author speaking and not the runner's own last word. Without that reading, a *oui*
+from a phone would close the very question it answers — see
+[Talking to it in the comments](#talking-to-it-in-the-comments), where the runner does
+write in the comments in its own name.
 
 *yes*, *oui*, *ok*, *go*, 👍 — and their opposites — are read as a verdict and spelled out
 for the session that will read them, because a bare "oui" means nothing to an agent that
@@ -790,7 +880,7 @@ ticket-runner run --ticket https://www.notion.so/...             # then go
 
 ## What protects your code
 
-An agent working with nobody there to stop it needs a frame. Five guardrails, all of them
+An agent working with nobody there to stop it needs a frame. Six guardrails, all of them
 on the program's normal path:
 
 - **The main repository is never touched.** Every ticket gets a disposable `git worktree`
@@ -806,6 +896,10 @@ on the program's normal path:
 - **A failing ticket takes only itself down.** The others in the same run carry on. Its
   worktree is kept for the post-mortem, and the session ID reopens the conversation
   exactly where it stopped: `claude --resume <id>`.
+- **Answering a comment cannot change anything.** A conversation runs in the repository
+  itself, but under `reply_permission_mode` — `plan` by default, which Claude Code cannot
+  write from. Asking it a question in a comment can cost you a minute of its time and
+  nothing else.
 - **Two runs never overlap.** A file lock means a run that outlasts the timer's interval
   is not lapped by the next one.
 - **A ticket is never stuck for good.** Because a run holds that lock, any ticket still
@@ -827,6 +921,7 @@ often.
 | Symptom | Most likely cause |
 | --- | --- |
 | `object not found` on the database | the page is not shared with the integration (`···` → Connections). Sharing the page that holds the workspace covers everything under it |
+| a comment gets no answer | the integration cannot read or write comments (`Capabilities` → *Read comments*, *Insert comments*), or the comment is not addressed to it — reply under one of its reports, or name it. `ticket-runner doctor` says which |
 | “no page named … in the workspace” | the row is called something else. `doctor` lists what it did find — rename the row, set `[notion.pages]`, or run `ticket-runner init` to create it |
 | the agent knows nothing about you | no `Context` row in the workspace, or the page is empty. `doctor` says which, and the run says so once |
 | “comments not readable” | the integration lacks *Read comments* (my-integrations → Capabilities). The ticket runs, without its discussion, and answering it in a comment no longer wakes it |
@@ -939,7 +1034,8 @@ python3 tests/run.py
 No framework and no dependency, for the same reason the runner has none: a suite that
 needs an install is a suite that stops being run. It covers the pure part — identifier
 collisions, status mapping, the markdown-to-Notion conversion, deep links, property
-encoding, which message answers which ticket — which is to say what has already gone wrong
+encoding, which message answers which ticket, who a comment is addressed to — which is to
+say what has already gone wrong
 once, or would go wrong silently.
 
 ---

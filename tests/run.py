@@ -20,6 +20,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import traceback
 import contextlib
 from contextlib import contextmanager
@@ -28,9 +29,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ticket_runner import config as C  # noqa: E402
-from ticket_runner import agents, channels, markdown, notion, progress, prompt, provision, session  # noqa: E402
+from ticket_runner import agents, channels, conversation, markdown, notion  # noqa: E402
+from ticket_runner import progress, prompt, provision, session  # noqa: E402
 from ticket_runner.channels import slack as slack_channel, telegram as telegram_channel  # noqa: E402
 from ticket_runner import update, workspace  # noqa: E402
+from ticket_runner import runner as runner_module  # noqa: E402
 from ticket_runner.runner import Runner  # noqa: E402
 from ticket_runner.__main__ import _names, subcommands  # noqa: E402
 from ticket_runner.web import console as web_console  # noqa: E402
@@ -622,12 +625,21 @@ class _CommentClient:
         return [notion.Comment(text) for text in self._texts]
 
 
-def _runner_reading(texts: list[str], error: str = "") -> tuple[Runner, list[str]]:
+def _bare_runner(client) -> Runner:
     """A Runner with its Notion replaced, and nothing else touched."""
     runner = Runner.__new__(Runner)
-    runner.client = _CommentClient(texts, error)
+    runner.client = client
     runner.agent_label = "ticket-runner@laptop"
     runner.quiet = True
+    runner._comments = {}
+    runner._spellings = conversation.names()
+    runner._me = ""          # Notion never said; the signature is all there is
+    runner._identity_error = ""
+    return runner
+
+
+def _runner_reading(texts: list[str], error: str = "") -> tuple[Runner, list[str]]:
+    runner = _bare_runner(_CommentClient(texts, error))
     ticket = type("T", (), {"page": notion.Page(id="p-ticket", url="", title="t")})()
     return runner, runner.discussion(ticket)
 
@@ -663,10 +675,7 @@ def comments_the_integration_cannot_read_are_not_a_failure():
 
 def _answered(texts: list[str], error: str = "") -> bool:
     """Would a reply on that ticket put it back in the queue?"""
-    runner = Runner.__new__(Runner)
-    runner.client = _CommentClient(texts, error)
-    runner.agent_label = "ticket-runner@laptop"
-    runner.quiet = True
+    runner = _bare_runner(_CommentClient(texts, error))
     ticket = type("T", (), {"page": notion.Page(id="p-ticket", url="", title="t")})()
     return runner._answered(ticket)
 
@@ -716,6 +725,515 @@ def waking_looks_everywhere_but_where_a_status_already_speaks():
     # Four names spoken, and everything else — failed, blocked, whatever the
     # board adds later — left in, because that is where an answer is expected.
     assert len(runner._woken_filter()["and"]) == 4
+
+
+# -- talking in the comments -------------------------------------------------
+
+ME = "bot-user-id"
+
+
+def _said(text: str, *, by: str = "human", thread: str = "d1", ident: str = "") -> notion.Comment:
+    return notion.Comment(
+        text, id=ident or f"c-{abs(hash((text, thread))) % 10**6}", discussion_id=thread,
+        created_by=by,
+    )
+
+
+def _pending(comments: list[notion.Comment], mention: str = "") -> list[conversation.Thread]:
+    return conversation.waiting(
+        comments, me=ME, spellings=conversation.names(mention, "Ticket Runner")
+    )
+
+
+@case
+def comments_are_grouped_into_the_threads_they_belong_to():
+    grouped = conversation.threads([
+        _said("le rapport", by=ME, thread="d1"),
+        _said("une remarque sans rapport", thread="d2"),
+        _said("et pourquoi ?", thread="d1"),
+    ])
+    assert [thread.discussion for thread in grouped] == ["d1", "d2"], "in the order they appear"
+    assert len(grouped[0].comments) == 2
+    assert grouped[0].last.text == "et pourquoi ?"
+    assert grouped[0].spoken_by(ME) and not grouped[1].spoken_by(ME)
+
+
+@case
+def a_comment_with_no_thread_of_its_own_is_not_lumped_with_the_others():
+    """Notion answered without a discussion: two remarks are still two remarks."""
+    grouped = conversation.threads([
+        notion.Comment("une chose", id="c1"),
+        notion.Comment("une autre", id="c2"),
+    ])
+    assert len(grouped) == 2
+
+
+@case
+def replying_under_its_report_is_how_you_talk_to_it():
+    pending = _pending([
+        _said("ticket-runner@laptop — done.\nFait.", by=ME),
+        _said("pourquoi ce nom de branche ?"),
+    ])
+    assert [thread.last.text for thread in pending] == ["pourquoi ce nom de branche ?"]
+
+
+@case
+def naming_it_reaches_it_in_a_thread_it_never_spoke_in():
+    """A remark of yours is a remark of yours — until you name it."""
+    remark = [_said("il faudra penser à prévenir Marie", thread="d9")]
+    assert _pending(remark) == []
+    assert len(_pending([_said("@claude tu en penses quoi ?", thread="d9")])) == 1
+    # The word is yours to choose, and its own name always works.
+    assert len(_pending([_said("@ia une idée ?", thread="d9")], mention="@ia")) == 1
+    assert len(_pending([_said("Ticket Runner, une idée ?", thread="d9")])) == 1
+
+
+@case
+def it_never_answers_itself():
+    """The one failure mode here that would never stop on its own."""
+    conversed = [
+        _said("ticket-runner@laptop — done.\nFait.", by=ME),
+        _said("pourquoi ?"),
+        _said("parce que la branche existait déjà.", by=ME),
+    ]
+    assert _pending(conversed) == [], "we had the last word"
+    # And without knowing who we are, nothing is answered at all: our own
+    # replies would read as somebody else's questions.
+    assert conversation.waiting(conversed, me="", spellings=conversation.names()) == []
+
+
+@case
+def a_question_it_has_already_answered_is_not_answered_twice():
+    """Notion hands back a thread whose reply is still in flight."""
+    ledger = conversation.Ledger(path=Path(tempfile.mkdtemp()) / "conversations.json")
+    ledger.remember_thread("d1", session="s-1", comment="c-42")
+    assert ledger.answered("d1") == "c-42"
+    assert ledger.session_of("d1") == "s-1", "the next question resumes the same session"
+    ledger.forget_session("d1")
+    assert ledger.session_of("d1") == "" and ledger.answered("d1") == "c-42"
+
+
+@case
+def naming_it_asks_for_words_where_a_bare_answer_asks_for_work():
+    """The `blocked` loop is untouched; the mention is what opts out of it."""
+    report = "ticket-runner@laptop — blocked.\nQuel en-tête ?"
+    assert _answered([report, "celui du dashboard."]), "a plain answer still runs the ticket"
+    assert not _answered([report, "@claude pourquoi tu demandes ?"])
+    assert not _answered([report, "Ticket Runner, pourquoi tu demandes ?"])
+
+
+@case
+def the_name_is_stripped_from_the_message_but_only_where_it_is_a_salutation():
+    spellings = conversation.names("", "Ticket Runner")
+    assert conversation.strip_mention("@claude pourquoi ?", spellings) == "pourquoi ?"
+    assert conversation.strip_mention("@claude — pourquoi ?", spellings) == "pourquoi ?"
+    kept = "demande à claude ce qu'il en pense"
+    assert conversation.strip_mention(kept, spellings) == kept
+
+
+class _KnownCommentClient:
+    """Comments that say who wrote them, as Notion's do."""
+
+    def __init__(self, comments: list[notion.Comment]):
+        self._comments = comments
+
+    def comments(self, page_id: str) -> list[notion.Comment]:
+        return self._comments
+
+    def me(self) -> str:
+        return ME
+
+    def my_name(self) -> str:
+        return "Ticket Runner"
+
+
+def _knowing(comments: list[notion.Comment]) -> Runner:
+    runner = _bare_runner(_KnownCommentClient(comments))
+    runner.config = _config("")
+    runner._me = None  # asked of Notion, as in a real run
+    runner._spellings = None
+    return runner
+
+
+def _ticket():
+    return type("T", (), {"page": notion.Page(id="p", url="", title="t")})()
+
+
+REPORT_BY_US = _said("ticket-runner@laptop — blocked.\nQuel en-tête ?", by=ME)
+
+
+@case
+def talking_on_a_ticket_does_not_put_it_back_in_the_queue():
+    """Its own answer is not an instruction it was given — or every conversation
+    would end in a run nobody asked for."""
+    talked = [
+        REPORT_BY_US,
+        _said("@claude pourquoi tu demandes ?"),
+        _said("parce que la page en a deux.", by=ME),
+    ]
+    assert not _knowing(talked)._answered(_ticket())
+    # And the moment you actually answer the question, it runs again.
+    assert _knowing([*talked, _said("celui du dashboard.")])._answered(_ticket())
+
+
+@case
+def an_answer_given_on_your_phone_is_still_your_answer():
+    """It carries the runner's token — the runner is what posts it — and it is
+    the ticket's author speaking. So it wakes the ticket exactly as the same
+    word typed into Notion would, rather than reading as the runner's own last
+    word and closing the very question it answers."""
+    relayed = channels.answer(
+        channels.Reply(channel="telegram", text="oui", ticket="p", title="t", who="Salvador")
+    )
+    assert conversation.is_relayed(relayed), "channels and conversation share one sentence"
+    assert not conversation.ours(_said(relayed, by=ME), ME)
+    assert _knowing([REPORT_BY_US, _said(relayed, by=ME)])._answered(_ticket())
+    # And what the runner says in its own voice still is not an answer to itself.
+    assert not _knowing([REPORT_BY_US, _said("parce que la page en a deux.", by=ME)])._answered(
+        _ticket()
+    )
+
+
+@case
+def its_own_answers_are_not_read_back_as_yours():
+    runner = _knowing([
+        REPORT_BY_US,
+        _said("pourquoi ?"),
+        _said("parce que la page en a deux.", by=ME),
+        _said("celui du dashboard."),
+    ])
+    lines = runner.discussion(_ticket())
+    assert lines == [
+        "a previous run: blocked. Quel en-tête ?",
+        "the ticket's author: pourquoi ?",
+        "answered in the comments, by us: parce que la page en a deux.",
+        "the ticket's author: celui du dashboard.",
+    ], lines
+
+
+@case
+def a_thread_transcript_tells_its_two_voices_apart():
+    thread = conversation.threads([
+        _said("ticket-runner@laptop — done.", by=ME),
+        _said("pourquoi ?"),
+        _said("parce que.", by=ME),
+        _said("et sinon ?"),
+    ])[0]
+    lines = conversation.transcript(thread, ME)
+    assert lines == [
+        "you: ticket-runner@laptop — done.",
+        "them: pourquoi ?",
+        "you: parce que.",
+    ], lines
+    assert all("et sinon" not in line for line in lines), "the message being answered is not history"
+
+
+@case
+def the_scan_moves_across_the_board_a_window_at_a_time():
+    """One request per page, and a run that can come round every ten seconds."""
+    ledger = conversation.Ledger(path=Path(tempfile.mkdtemp()) / "conversations.json")
+    pages = [f"p{index}" for index in range(5)]
+    assert ledger.rotate(pages, 2) == ["p0", "p1"]
+    assert ledger.rotate(pages, 2) == ["p2", "p3"]
+    assert ledger.rotate(pages, 2) == ["p4", "p0"], "it wraps rather than starting over"
+    assert ledger.rotate(pages, 10) == pages, "a window wider than the board is the board"
+    assert ledger.rotate([], 2) == []
+
+
+@case
+def the_pass_holds_off_until_its_own_interval_has_passed():
+    ledger = conversation.Ledger(path=Path(tempfile.mkdtemp()) / "conversations.json")
+    assert ledger.due(60), "a runner that has never looked is due at once"
+    ledger.stamp()
+    assert not ledger.due(60)
+    assert ledger.due(0)
+
+
+@case
+def what_the_runner_remembers_survives_a_restart():
+    path = Path(tempfile.mkdtemp()) / "conversations.json"
+    ledger = conversation.Ledger(path=path)
+    ledger.remember_page("3ca45168-0af4-80ae-9443-de0b65d9abf8")
+    ledger.remember_thread("d1", session="s-1", comment="c-1")
+    ledger.cursor = 3
+    ledger.save()
+
+    again = conversation.Ledger.load(path)
+    assert again.known_pages() == ["3ca451680af480ae9443de0b65d9abf8"], "dashes and all"
+    assert again.session_of("d1") == "s-1"
+    assert again.cursor == 3
+    assert conversation.Ledger.load(Path(tempfile.mkdtemp()) / "none.json").known_pages() == []
+
+
+class _ThreadClient:
+    """Pages with comments on them, and nothing else."""
+
+    def __init__(self, pages: dict[str, list[notion.Comment]]):
+        self.pages = pages
+        self.asked: list[str] = []
+
+    def comments(self, page_id: str) -> list[notion.Comment]:
+        self.asked.append(page_id)
+        if page_id not in self.pages:
+            raise notion.NotionError("404 could not find block")
+        return self.pages[page_id]
+
+    def my_name(self) -> str:
+        return "Ticket Runner"
+
+
+def _talking(pages: dict[str, list[notion.Comment]], *, claimed: set[str] = frozenset(), scan=20):
+    runner = _bare_runner(_ThreadClient(pages))
+    runner.config = _config("")
+    runner.config.runner.reply_scan = scan
+    runner._spellings = None  # resolved from the client, as in a real run
+    runner._me = ME
+    runner._claimed = set(claimed)
+    runner._ledger_lock = threading.Lock()
+    runner._ledger = conversation.Ledger(path=Path(tempfile.mkdtemp()) / "conversations.json")
+    for page in pages:
+        runner._ledger.remember_page(page)
+    return runner
+
+
+REPLIED_TO = [
+    _said("ticket-runner@laptop — done.\nFait.", by=ME),
+    _said("pourquoi ce nom de branche ?"),
+]
+
+
+@case
+def a_ticket_about_to_run_is_left_to_the_run_that_will_read_it():
+    """The comment is already going into its prompt; two answers would be one
+    too many, and one of them would be the runner talking over itself."""
+    runner = _talking({"pone": REPLIED_TO, "ptwo": REPLIED_TO}, claimed={"ptwo"})
+    assert [page for page, _ in runner._pending(ME)] == ["pone"]
+
+
+@case
+def a_pass_answers_one_thread_per_page_and_stops_at_five():
+    two = [
+        _said("ticket-runner@laptop — done.", by=ME, thread="d1"),
+        _said("pourquoi ?", thread="d1"),
+        _said("@claude et ici ?", thread="d2"),
+    ]
+    runner = _talking({"pone": two})
+    pending = runner._pending(ME)
+    assert len(pending) == 1 and pending[0][1].discussion == "d1", "the next pass takes the other"
+
+    crowd = {f"page{index}": REPLIED_TO for index in range(9)}
+    assert len(_talking(crowd)._pending(ME)) == conversation.ANSWERS
+
+
+@case
+def a_page_that_cannot_be_read_costs_that_page_and_nothing_else():
+    runner = _talking({"ptwo": REPLIED_TO})
+    runner._ledger.remember_page("pgone")
+    assert [page for page, _ in runner._pending(ME)] == ["ptwo"]
+
+
+@case
+def the_pages_this_run_has_already_read_cost_no_second_request():
+    runner = _talking({"pone": REPLIED_TO})
+    runner._comments["pone"] = REPLIED_TO  # as `woken` leaves it
+    assert len(runner._pending(ME)) == 1
+    assert runner.client.asked == [], "nothing was asked of Notion twice"
+
+
+class _TalkingClient(_ThreadClient):
+    """A page, its discussion, and what got written back into it."""
+
+    def __init__(self, pages, body: str = "Supprimer l'entête."):
+        super().__init__(pages)
+        self._body = body
+        self.posted: list[tuple[str, str, str]] = []
+
+    def me(self) -> str:
+        return ME
+
+    def page(self, page_id: str) -> notion.Page:
+        return notion.Page(id=page_id, url=f"https://notion.so/{page_id}", title="Un ticket")
+
+    def blocks_text(self, block_id: str, depth: int = 0) -> str:
+        return self._body
+
+    def comment(self, page_id: str, text: str, discussion_id: str = "") -> None:
+        self.posted.append((page_id, text, discussion_id))
+
+    def update(self, database_id: str, page_id: str, values: dict) -> None:
+        raise AssertionError("a conversation moves nothing on the board")
+
+
+@contextmanager
+def _no_session(answer: str = "Parce que la branche d'hier était déjà en revue.", ok=True):
+    """Claude, replaced by its answer. Records how it was asked.
+
+    `ok` may be a list, read one entry per call: that is how a session that
+    cannot be resumed is told from one that has nothing to say.
+    """
+    calls: list[dict] = []
+    verdicts = list(ok) if isinstance(ok, (list, tuple)) else None
+
+    def fake_run(prompt_text, **kwargs):
+        calls.append({"prompt": prompt_text, **kwargs})
+        good = verdicts.pop(0) if verdicts else (ok if verdicts is None else True)
+        return session.Outcome(
+            ok=good, blocked=False, session_id=kwargs.get("session_id", "s-1"),
+            summary="", log=Path("/tmp/none.jsonl"), answer=answer if good else "",
+            error="" if good else "claude exited with code 1", seconds=12.0, cost_usd=0.01,
+        )
+
+    original = session.run
+    session.run = fake_run
+    try:
+        yield calls
+    finally:
+        session.run = original
+
+
+@case
+def answering_a_comment_writes_in_its_thread_and_nowhere_else():
+    with _state_home(), _no_session() as calls:
+        runner = _talking({"pone": REPLIED_TO})
+        runner.client = _TalkingClient({"pone": REPLIED_TO})
+        runner.dry_run = False
+        runner._workspace = workspace.Workspace(tickets="db", context="Je suis Salvador.")
+        answered = runner.converse()
+
+    assert len(answered) == 1 and answered[0]["status"] == "answered"
+    page, text, discussion = runner.client.posted[0]
+    assert (page, discussion) == ("pone", "d1"), "under the question, not at the bottom"
+    assert text == "Parce que la branche d'hier était déjà en revue."
+
+    asked = calls[0]
+    assert asked["permission_mode"] == "plan", "it talks; it does not work"
+    assert asked["resume"] is False and asked["timeout_minutes"] == 10
+    assert "pourquoi ce nom de branche ?" in asked["prompt"]
+    assert "Supprimer l'entête." in asked["prompt"], "it knows the ticket it is under"
+    assert "Je suis Salvador." in asked["prompt"], "and who it is answering"
+
+
+@case
+def a_second_question_lands_in_the_same_conversation():
+    with _state_home(), _no_session() as calls:
+        runner = _talking({"pone": REPLIED_TO})
+        runner.client = _TalkingClient({"pone": REPLIED_TO})
+        runner.dry_run = False
+        runner._workspace = workspace.Workspace(tickets="db")
+        runner.converse()
+
+        again = [*REPLIED_TO, _said("et le footer ?", ident="c-later")]
+        runner.client.pages["pone"] = again
+        runner._comments.clear()
+        runner._ledger.at = 0.0  # the interval, not the point of this test
+        runner.converse()
+
+    assert len(calls) == 2
+    assert calls[1]["resume"] is True and calls[1]["session_id"] == calls[0]["session_id"]
+    assert calls[1]["prompt"].strip().endswith("et le footer ?")
+    assert "Supprimer l" not in calls[1]["prompt"], "a resumed session has the frame already"
+
+
+@case
+def a_session_that_says_nothing_is_still_answered_for():
+    """Silence in a thread reads as being ignored, which is worse than a failure."""
+    with _state_home(), _no_session(ok=False) as calls:
+        runner = _talking({"pone": REPLIED_TO})
+        runner.client = _TalkingClient({"pone": REPLIED_TO})
+        runner.dry_run = False
+        runner._workspace = workspace.Workspace(tickets="db")
+        runner.converse()
+
+    assert len(calls) == 1, "nothing to resume, so nothing to retry"
+    assert "could not answer" in runner.client.posted[0][1]
+    assert "Log:" in runner.client.posted[0][1], "and where to go and look"
+
+
+@case
+def a_conversation_whose_session_is_gone_starts_a_new_one():
+    """The transcript was pruned, or the machine changed. Notion still has the
+    thread, which is enough to carry on from."""
+    with _state_home(), _no_session(ok=[True, False, True]) as calls:
+        runner = _talking({"pone": REPLIED_TO})
+        runner.client = _TalkingClient({"pone": REPLIED_TO})
+        runner.dry_run = False
+        runner._workspace = workspace.Workspace(tickets="db")
+        runner.converse()
+
+        runner.client.pages["pone"] = [*REPLIED_TO, _said("et le footer ?", ident="c-later")]
+        runner._comments.clear()
+        runner._ledger.at = 0.0
+        runner.converse()
+
+    assert [call["resume"] for call in calls] == [False, True, False]
+    assert calls[2]["session_id"] != calls[1]["session_id"]
+    assert "Supprimer l" in calls[2]["prompt"], "a fresh session is told everything again"
+    assert len(runner.client.posted) == 2 and "could not answer" not in runner.client.posted[1][1]
+
+
+@case
+def a_pass_that_is_turned_off_or_too_soon_asks_notion_nothing():
+    with _state_home(), _no_session() as calls:
+        runner = _talking({"pone": REPLIED_TO})
+        runner.client = _TalkingClient({"pone": REPLIED_TO})
+        runner.dry_run = False
+        runner.config.runner.reply = False
+        assert runner.converse() == []
+
+        runner.config.runner.reply = True
+        runner._ledger.stamp()
+        assert runner.converse() == [], "the interval has not passed"
+        assert runner.client.asked == [] and calls == []
+
+
+@case
+def a_conversation_prompt_says_what_it_is_not_allowed_to_do():
+    text = prompt.conversation(
+        prompt.CONVERSATION,
+        project="Animalink", title="t", body="b", where="Repository: /r", url="u",
+        message="pourquoi ce nom ?",
+        thread=["them: pourquoi ?"],
+        context="Je suis Salvador.",
+        brief="Ton: direct.",
+        agent_name="Rédacteur",
+        agent_brief="Deux angles.",
+        comments=["a previous run: done. fait"],
+    )
+    assert "talking, not working" in text
+    order = [text.index(mark) for mark in (
+        "b",                        # the ticket itself
+        "already been said",        # then what was said about it
+        "Je suis Salvador.",        # then the widest frame
+        "Ton: direct.",             # then the project
+        "Deux angles.",             # then the role
+        "# Context",                # then the mechanics
+        "This thread so far",       # then the conversation being had
+        "pourquoi ce nom ?",        # and last, the message to answer
+    )]
+    assert order == sorted(order), order
+    # A resumed session is sent the message and not the whole frame again.
+    assert runner_module._message_of(text) == "pourquoi ce nom ?"
+
+
+@case
+def a_ticket_without_a_project_still_reads_as_a_sentence():
+    text = prompt.conversation(
+        prompt.CONVERSATION,
+        project="", title="t", body="", where="Working directory: /tmp/x", url="u",
+        message="et alors ?",
+    )
+    assert "that belongs to no project" in text
+    assert "This thread so far" not in text and "# Your role" not in text
+    assert "everything is in the title" in text
+
+
+@case
+def an_answer_too_long_for_a_comment_is_cut_where_it_breathes():
+    assert conversation.trim("court") == "court"
+    long = ("Une phrase. " * 200).strip()
+    cut = conversation.trim(long, limit=200)
+    assert len(cut) < 400 and cut.endswith("ask for it in pieces.")
+    assert cut.split("[…]")[0].rstrip().endswith("."), "cut on a sentence, not mid-word"
 
 
 @case
@@ -1081,7 +1599,7 @@ class _BoardClient:
     def update(self, database_id: str, page_id: str, values: dict) -> None:
         self.written.append((page_id, values))
 
-    def comment(self, page_id: str, text: str) -> None:
+    def comment(self, page_id: str, text: str, discussion_id: str = "") -> None:
         self.comments_written.append(text)
 
 
@@ -1108,6 +1626,14 @@ def _closing(pages: list[notion.Page], states: dict[str, str], status: dict[str,
     runner.agent_label = "ticket-runner@laptop"
     runner.quiet = True
     runner.dry_run = False
+    runner._comments = {}
+    runner._spellings = conversation.names()
+    runner._me = ""
+    runner._identity_error = ""
+    runner._ledger_lock = threading.Lock()
+    runner._ledger = conversation.Ledger(
+        path=Path(tempfile.mkdtemp()) / "conversations.json"
+    )
     original = git_module.pull_request_state
     git_module.pull_request_state = lambda url: states.get(url, "")
     try:

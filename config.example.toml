@@ -29,6 +29,17 @@ workspace = ""
 # holding it works too.
 tickets_database = ""
 
+# How you call it in a comment when you want an answer rather than a run.
+#
+# A comment under one of its reports is already a conversation: reply and it
+# replies. Naming it is for everywhere else on the tickets it looks at — the
+# ones it has reported on, whatever column they are in now, and the ones that
+# are not settled. It is also how you say "talk to me" instead of "do it again"
+# on a ticket it is waiting on. Its own name, as Notion writes it when you
+# @-mention the integration, always works too, as do @ticket-runner and @runner.
+# This is for the word you would actually type.
+mention = "@claude"
+
 # Which row of the workspace is what, matched on its title, case ignored.
 #   tickets   REQUIRED: the page holding your tickets database
 #   projects  optional: the page holding your projects database. The runner
@@ -192,6 +203,30 @@ notify = true
 #   ticket-runner logs -f
 progress = true
 progress_interval_seconds = 10
+
+# Answering in the comments. A ticket then has two ways of being spoken to, and
+# they are not the same gesture:
+#
+#   - answer the question a `blocked` run asked, and the ticket runs again. That
+#     loop is what `blocked` is for, and it is untouched;
+#   - reply under any of its reports, or name it (see notion.mention above), and
+#     it *answers* — in the same thread, in the language you wrote in. Nothing
+#     is claimed, no status moves, nothing is built.
+#
+# It answers about the ticket it is under: it reads the page, the discussion,
+# the project's brief, the context page and the repository. It cannot change
+# any of it — reply_permission_mode is the guardrail, and `plan` is a mode
+# Claude Code will not write from. If what you are asking for is work, it says
+# so, and that is a ticket.
+#
+# The scan costs one request per page and a run can come round every ten
+# seconds, so a pass happens on its own cadence and looks at a window of the
+# pages the runner has spoken on, moving the window each time.
+reply = true
+reply_interval_seconds = 60      # ten seconds is the floor
+reply_scan = 20                  # pages looked at per pass
+reply_timeout_minutes = 10       # somebody is waiting for this one
+reply_permission_mode = "plan"   # it talks; it does not work
 
 # Keep the installation on the latest version, on its own. A run looks at the
 # clock before it looks at the tickets: once every update_interval_seconds it
