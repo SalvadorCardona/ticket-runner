@@ -420,6 +420,7 @@ def command_doctor(args: argparse.Namespace) -> int:
         )
 
     title("Version")
+    print(f"  {DIM}ticket-runner {__version__} — releases: CHANGELOG.md{RESET}")
     status = update_module.check()
     if status.reason:
         warn(status.reason)
