@@ -698,22 +698,36 @@ CLI, an API key in its environment) and, where it has none for the job, it says 
 stops rather than improvising — the ticket lands in *Blocked* with what is missing. Then
 *Done*, with a comment saying where the thing went.
 
+That second road is for tickets that have no repository. A ticket **on a repository** with
+no pull request has nothing to merge and nothing on its page to publish, so it is not
+guessed at either: it goes to *Blocked* asking where its pull request went.
+
 So the board reads end to end: *Ready* is you asking for the work, *Validated* is you
 accepting it, and *Done* means it is actually out in the world rather than merely
 finished. Between the two, the runner does the typing.
 
-Three things are worth knowing:
+Four things are worth knowing:
 
 - **the column is opt-in.** A board whose `Status` does not offer *Validated* is never
   even queried, and everything behaves exactly as it did — you merge by hand, and
   *In review* → *Done* stays yours. `ticket-runner init` adds the option to an existing
   board (a real Notion *status* property cannot be widened through the API: `init` says
-  so and you add it in one click);
+  so and you add it in one click). A configuration that names `review` or `done` under
+  `[notion.status]` without naming `validated` describes a board that ends at the pull
+  request, and gets no gesture either;
 - **it is claimed like any other work.** A ticket being published moves to *In progress*
   while its session runs, so a second machine watching the same board cannot post the same
-  thing twice;
+  thing twice. And a run that dies mid-publication does **not** put that ticket back in the
+  queue: it may have posted seconds before dying, so it comes back as *Blocked* asking
+  whether it went out, and one click on *Validated* tries again;
+- **it comes before the queue, and never one at a time.** Merges and publications are
+  settled at the top of a pass, before any new ticket is claimed — a ticket you have
+  accepted comes before one nobody has read. Publications run side by side under
+  `max_concurrent`, so four of them cost one session's wait rather than four;
 - **it is never guessed at.** The runner acts on that column and on nothing else: no
-  ticket is merged or published because a session felt sure of itself.
+  ticket is merged or published because a session felt sure of itself. And
+  `ticket-runner run --dry-run` says what it *would* merge or publish without touching
+  anything — this is the one gesture worth rehearsing.
 
 ---
 
@@ -959,8 +973,8 @@ ticket-runner run --ticket https://www.notion.so/...             # then go
 
 ## What protects your code
 
-An agent working with nobody there to stop it needs a frame. Six guardrails, all of them
-on the program's normal path:
+An agent working with nobody there to stop it needs a frame. Seven guardrails, all of
+them on the program's normal path:
 
 - **The main repository is never touched.** Every ticket gets a disposable `git worktree`
   on its own branch. Your working copy, your uncommitted files and your current branch
@@ -984,7 +998,14 @@ on the program's normal path:
 - **A ticket is never stuck for good.** Because a run holds that lock, any ticket still
   marked *in progress* at the start of a run was abandoned — by a reboot, a
   `systemctl stop`, a crash. It goes back in the queue with a comment saying so, instead
-  of sitting claimed forever. Tickets claimed by another machine are left alone.
+  of sitting claimed forever. Tickets claimed by another machine are left alone. One
+  exception, and it is the point of the next guardrail: a ticket abandoned *mid
+  publication* is never silently redone — it goes to *Blocked* asking whether the thing
+  went out.
+- **Nothing reaches the outside world without your column.** A merge, a post, an email:
+  the runner does none of them until a human has moved that ticket to *Validated*. A
+  session cannot put itself there, and no configuration key merges a pull request the way
+  `open_pull_request` opens one.
 
 One thing to know: by default the runner starts the session with
 `permission_mode = "bypassPermissions"`, because a session with nobody to ask cannot ask,
@@ -992,6 +1013,17 @@ and would stall on the first test it needs to run. The isolation comes from the 
 not from the permission model. If you would rather have it the other way round,
 `"acceptEdits"` forbids unapproved shell commands — at the cost of sessions that stop
 often.
+
+And one thing to weigh, if you use *Validated*. A publishing session runs under that same
+permission mode, and its work is by definition **outward-facing**: it uses the credentials
+that machine holds — an MCP server, a CLI already logged in, a key in the environment — to
+post, send or deploy. The worktree protects your code; nothing protects an account the
+machine can already write to. Which is why that session is started by one gesture and one
+only, why it is told to publish what the page holds rather than to decide anything, and why
+it is asked to stop rather than improvise when the tool it needs is missing. Read the
+ticket before you validate it: validating is the trust boundary of this whole tool. If the
+board is shared with people you would not hand those credentials to, leave the column out
+— without it nothing in the runner reaches outside your repositories.
 
 ---
 

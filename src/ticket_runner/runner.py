@@ -466,6 +466,15 @@ class Runner:
         host's name was therefore abandoned, by a reboot, a `systemctl stop`, or
         a crash. It goes back to ready rather than staying stuck for good.
 
+        Back to ready, but **not** when it was claimed for a publication. A
+        ticket taken from the validated column was work somebody had already
+        accepted; re-doing it is not recovery, and re-publishing it is the one
+        mistake this must not make — the post may well have gone out just before
+        the machine died. So it goes to blocked with the question spelled out,
+        and moving it back to validated is a click if it never went out.
+        Where it was taken from is remembered locally, which is enough: only
+        this host's own claims are ever recovered here.
+
         A two-minute grace covers clock skew, and a ticket claimed by another
         machine is left alone: only this host can know its own runs are over.
         """
@@ -487,15 +496,43 @@ class Runner:
             if age < timedelta(minutes=2):
                 continue
             ticket = Ticket(page)
+            origin = state.claims().get(ticket.id, "")
+            stopped = (
+                f"This ticket was still claimed while no run was in flight, "
+                f"{age.total_seconds() / 60:.0f} min after it was last touched: "
+                "its runner was stopped or died mid-session."
+            )
+            if origin and origin != self.config.notion.state("ready"):
+                self.say(
+                    f"  ↺ {ticket.title} — publication interrupted, asking rather than redoing"
+                )
+                self._set(ticket, **{status_property: self.config.notion.state("blocked")})
+                self._comment(
+                    ticket,
+                    f"{self.agent_label} — blocked.\n{stopped}\n\n"
+                    f"It was being published, having been validated, so it is not being "
+                    f"tried again on its own: it may have gone out just before the run "
+                    f"died. Check, and move it back to “{origin}” if it did not.",
+                )
+                self._tell(
+                    "blocked",
+                    ticket,
+                    f"Blocked · {ticket.title}",
+                    "Its publication was interrupted. Did it go out? "
+                    f"If not, move it back to “{origin}”.",
+                    ask=True,
+                )
+                state.release(ticket.id)
+                recovered += 1
+                continue
             self.say(f"  ↺ {ticket.title} — claimed but no run alive, put back")
             self._set(ticket, **{status_property: self.config.notion.state("ready")})
             self._comment(
                 ticket,
                 f"{self.agent_label} — put back in the queue.\n"
-                f"This ticket was still claimed while no run was in flight, "
-                f"{age.total_seconds() / 60:.0f} min after it was last touched: "
-                "its runner was stopped or died mid-session. It will be picked up again.",
+                f"{stopped} It will be picked up again.",
             )
+            state.release(ticket.id)
             recovered += 1
         return recovered
 
@@ -557,6 +594,13 @@ class Runner:
         not offer the validated option has no such gesture and is never even
         queried — `ticket-runner init` adds the option to a board that predates
         it, and until then you merge by hand as before.
+
+        Merges are two `gh` calls and are done one after another. A publication
+        is a Claude session, so publications are run the way tickets are run:
+        side by side, never more than `max_concurrent` at once. They still
+        finish before the queue is looked at — a ticket you have accepted comes
+        before a ticket nobody has read yet — but a board with four of them
+        costs one session's wait rather than four.
         """
         settings = self.config.notion
         validated = settings.state("validated")
@@ -569,14 +613,54 @@ class Runner:
         pages = self.client.query(
             self.database, {"property": status_property, kind: {"equals": validated}}
         )
-        results = []
+        results: list[dict] = []
+        publishing: list[tuple[Ticket, Project]] = []
         for page in pages:
             ticket = Ticket(page)
             url = str(notion.read(page, settings.prop("pull_request")) or "")
-            done = self._merge(ticket, url) if url.startswith("http") else self._publish(ticket)
-            if done:
-                results.append(done)
-        return results
+            if self.dry_run:
+                # A dry run says what it would do here as everywhere else. It
+                # matters more here than anywhere: this is the only column whose
+                # gesture cannot be taken back.
+                what = f"merge {url}" if url.startswith("http") else "publish what it holds"
+                self.say(f"  (dry run) {ticket.title} — validated: would {what}")
+                results.append({"ticket": ticket.title, "id": ticket.id, "status": "dry-run"})
+                continue
+            if url.startswith("http"):
+                done = self._merge(ticket, url)
+                if done:
+                    results.append(done)
+                continue
+            project = self._project_of(ticket)
+            if project.is_code:
+                # A ticket on a repository carries a pull request or it carries
+                # nothing: there is no text on the page to publish, and starting
+                # a session to look for one would be guessing.
+                results.append(
+                    self._fail(
+                        ticket,
+                        "validated, but there is no pull request to merge",
+                        f"Its project — {project.name} — is a repository, so there is "
+                        "nothing to publish either. Was the pull request opened?",
+                        blocked=True,
+                        question="This ticket was validated but carries no pull request.",
+                    )
+                )
+                continue
+            publishing.append((ticket, project))
+        return results + self._publish_all(publishing)
+
+    def _publish_all(self, publishing: list[tuple[Ticket, Project]]) -> list[dict]:
+        """Every validated publication of this pass, up to `max_concurrent` at once."""
+        if not publishing:
+            return []
+        if len(publishing) == 1:
+            done = self._publish(*publishing[0])
+            return [done] if done else []
+        workers = min(len(publishing), max(1, self.config.runner.max_concurrent))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(lambda pair: self._publish(*pair), publishing))
+        return [done for done in results if done]
 
     def _merge(self, ticket: Ticket, url: str) -> dict | None:
         """A validated pull request: merge it, and take the ticket to done."""
@@ -620,7 +704,7 @@ class Runner:
         )
         return {"ticket": ticket.title, "id": ticket.id, "status": "done", "merged": url}
 
-    def _publish(self, ticket: Ticket) -> dict | None:
+    def _publish(self, ticket: Ticket, project: Project) -> dict | None:
         """A validated ticket with no pull request: publish what it holds.
 
         The Instagram post drafted last week, the email written into the page,
@@ -631,10 +715,12 @@ class Runner:
 
         Claimed like any other work, by moving the ticket to "in progress":
         publishing twice is the one mistake this must not make, and two runners
-        looking at the same board would otherwise both take it.
+        looking at the same board would otherwise both take it. The column it
+        was claimed from is written down first — see `state.claim` — so that a
+        run dying mid-publication comes back as a question rather than as a
+        second post.
         """
         short = short_id(ticket.id)
-        project = self._project_of(ticket)
         # The role, if the ticket names one: the account to post to and the
         # voice to post in are exactly the sort of thing an agent page carries.
         role = notion.read(ticket.page, self.config.notion.prop("role")) or []
@@ -658,6 +744,10 @@ class Runner:
         self.say(f"  ▸ {ticket.title}\n    validated · publishing what the ticket holds")
         if self.dry_run:
             return None
+        # A comment on a ticket being published is a conversation about the
+        # work, not an instruction: the same rule as a ticket about to be run.
+        self._claimed.add(ticket.id)
+        state.claim(ticket.id, self.config.notion.state("validated"))
         self._set(
             ticket,
             **{
@@ -674,7 +764,11 @@ class Runner:
                 self.config.runner.delivery_prompt_file, prompt_module.DELIVERY
             ))
         except (OSError, FileNotFoundError) as error:
+            state.release(ticket.id)
             return self._fail(ticket, "Claude session could not be started", str(error))
+        # Every road from here writes a status that is not "in progress", so the
+        # note about where it came from has done its work.
+        state.release(ticket.id)
         trace = self._trace(job, outcome)
 
         if not outcome.ok:
@@ -1586,10 +1680,14 @@ class Runner:
             if not self.dry_run:
                 self.sweep()
                 self.close_merged()
-                delivered = self.deliver()
-                # Merged, published, or refused: as much a run of this ticket as
-                # a session is, and `ticket-runner history` should say so.
-                for done in delivered:
+            # `deliver` runs in a dry run too, where it only says what it would
+            # do: the one gesture that cannot be taken back is the one worth
+            # rehearsing.
+            delivered = self.deliver()
+            # Merged, published, or refused: as much a run of this ticket as a
+            # session is, and `ticket-runner history` should say so.
+            for done in delivered:
+                if done.get("status") != "dry-run":
                     state.record(done)
             tickets, waiting = self.queue()
             # Every ticket the queue wants, and not only the ones that will fit
@@ -1597,7 +1695,7 @@ class Runner:
             # Thursday — is still work, and the comment that queued it is going
             # into its prompt. Talking to it as well would be the runner
             # answering a question it is also about to act on.
-            self._claimed = {ticket.id for ticket in tickets} | {
+            self._claimed |= {ticket.id for ticket in tickets} | {
                 ticket.id for ticket, _ in waiting
             }
             if not tickets:

@@ -81,14 +81,17 @@ class Notion:
         # request being open and it being merged are not the same day.
         if key == "review" and "review" not in self.status and "done" in self.status:
             return self.state("done")
-        # "validated" reads the same way, against a file that names any column
-        # at all: it is a gesture rather than a report, and a file that lists
-        # its board without it was written by somebody who did not ask for one —
-        # most often before it existed. It falls back on `review`, which is
+        # "validated" reads the same way, against a named `review` or `done`: a
+        # file that says where a ticket waits to be looked at, or where it goes
+        # once it is, and nothing about where you accept it, described a board
+        # that ends at the pull request. It falls back on `review`, which is
         # where the ticket already sits, and the runner reads a `validated` that
-        # is `review` as "this board has no such gesture".
-        if key == "validated" and "validated" not in self.status and self.status:
-            return self.state("review")
+        # is `review` as "this board has no such gesture". Renaming some other
+        # column is not a statement about this one: a file that names only
+        # `ready` still gets the default, and the board decides from there.
+        if key == "validated" and "validated" not in self.status:
+            if "review" in self.status or "done" in self.status:
+                return self.state("review")
         return self.status.get(key, _DEFAULT_STATUS[key])
 
 

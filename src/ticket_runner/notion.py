@@ -111,6 +111,15 @@ class Client:
             self._databases[database_id] = self._request("GET", f"/databases/{database_id}")
         return self._databases[database_id]
 
+    def forget_database(self, database_id: str) -> None:
+        """Drop the cached database, so the next read asks Notion again.
+
+        A run is short and reads the board's shape once. The console is not: it
+        outlives any number of runs, and a column added in Notion this morning
+        has to reach it before tomorrow.
+        """
+        self._databases.pop(database_id, None)
+
     def schema(self, database_id: str) -> dict[str, str]:
         """{property name: type}, cached for the lifetime of the run."""
         return {

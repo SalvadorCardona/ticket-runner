@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ticket_runner import config as C  # noqa: E402
 from ticket_runner import agents, channels, conversation, markdown, notion  # noqa: E402
-from ticket_runner import progress, prompt, provision, session  # noqa: E402
+from ticket_runner import progress, projects, prompt, provision, session, state  # noqa: E402
 from ticket_runner.channels import slack as slack_channel, telegram as telegram_channel  # noqa: E402
 from ticket_runner import update, workspace  # noqa: E402
 from ticket_runner import runner as runner_module  # noqa: E402
@@ -531,11 +531,14 @@ def two_states_on_one_column_produce_one_option():
     settings.status = {"failed": "Needs you", "blocked": "Needs you"}
     names = [option["name"] for option in provision.status_options(settings)]
     assert names.count("Needs you") == 1
-    assert len(names) == 5
+    # Six: the two that were merged count once, and renaming a failure column
+    # says nothing about the validated one, which keeps its default.
+    assert len(names) == 6 and "Validated" in names
 
     settings.status = {"review": "Done", "done": "Done"}
     names = [option["name"] for option in provision.status_options(settings)]
     assert names.count("Done") == 1
+    assert "Validated" not in names, "a board that ends at the pull request has no gesture"
 
 
 @case
@@ -1659,6 +1662,7 @@ def _board_runner(pages: list[notion.Page], status: dict[str, str], options=None
     runner.agent_label = "ticket-runner@laptop"
     runner.quiet = True
     runner.dry_run = False
+    runner._claimed = set()
     runner._comments = {}
     runner._spellings = conversation.names()
     runner._me = ""
@@ -1763,7 +1767,7 @@ def _validating(
     # Publishing runs a Claude session, which is the one thing these tests do
     # not do: what is checked here is that a ticket with no pull request goes
     # down that road at all.
-    runner._publish = lambda ticket: published.append(ticket.id)
+    runner._publish = lambda ticket, project: published.append(ticket.id)
     with _github(states, merge=merge):
         return runner.client, merges, published, runner.deliver()
 
@@ -1864,6 +1868,12 @@ def a_file_that_names_its_columns_without_validated_asked_for_no_gesture():
     settings = C.Notion(status={"review": "In review", "done": "Done"})
     assert settings.state("validated") == settings.state("review") == "In review"
 
+    # But renaming some other column says nothing about this one: a file that
+    # only translates "Ready" has not asked for the gesture to go away.
+    settings = C.Notion(status={"ready": "À faire"})
+    assert settings.state("validated") == "Validated"
+    assert settings.state("ready") == "À faire"
+
     client, merges, published, results = _validating(
         [_reviewed("p-review", "In review", "https://github.com/x/y/pull/1")],
         {"https://github.com/x/y/pull/1": "OPEN"},
@@ -1874,6 +1884,86 @@ def a_file_that_names_its_columns_without_validated_asked_for_no_gesture():
 
     # And a file that names nothing at all gets the whole board, gesture included.
     assert C.Notion().state("validated") == "Validated"
+
+
+@case
+def a_validated_ticket_on_a_repository_with_no_pull_request_asks_rather_than_publishes():
+    """Nothing to merge, and nothing on the page to publish: a question."""
+    runner = _board_runner([_reviewed("p-code", "Validated", None)], {})
+    runner.resolver = None
+    runner._project_of = lambda ticket: projects.Project(name="Site", path=Path("/repo"))
+    results = runner.deliver()
+    assert runner.client.written == [("p-code", {"Status": "Blocked"})]
+    assert "no pull request to merge" in runner.client.comments_written[0]
+    assert results and results[0]["status"] == "blocked"
+
+
+@case
+def a_dry_run_says_what_it_would_merge_and_merges_nothing():
+    runner = _board_runner(
+        [
+            _reviewed("p-pr", "Validated", "https://github.com/x/y/pull/1"),
+            _reviewed("p-post", "Validated", None),
+        ],
+        {},
+    )
+    runner.dry_run = True
+    said: list[str] = []
+    runner.quiet = False
+    runner.say = said.append
+    with _github({"https://github.com/x/y/pull/1": "OPEN"}, merge=_never_merged):
+        results = runner.deliver()
+    assert runner.client.written == [], "a dry run writes nothing"
+    assert [done["status"] for done in results] == ["dry-run", "dry-run"]
+    assert any("would merge https://github.com/x/y/pull/1" in line for line in said)
+    assert any("would publish what it holds" in line for line in said)
+
+
+def _never_merged(url: str, method: str = "squash") -> str:
+    raise AssertionError("a dry run never merges anything")
+
+
+@case
+def a_publication_a_crash_interrupted_comes_back_as_a_question():
+    """Put back in ready it would be redone; the post may already be out."""
+    claimed = notion.Page(
+        id="ppost",  # `Ticket.id` drops the dashes, and a claim is filed under it
+        url="",
+        title="Le post",
+        properties={
+            "Status": {"type": "status", "status": {"name": "In progress"}},
+            "Runner": {"type": "rich_text", "rich_text": [{"plain_text": "ticket-runner@laptop"}]},
+        },
+        raw={"last_edited_time": "2020-01-01T00:00:00.000+00:00"},
+    )
+    runner = _board_runner([claimed], {})
+    with _state_home():
+        state.claim("ppost", "Validated")
+        recovered = runner.sweep()
+        assert state.claims() == {}, "the note is dropped once it has been read"
+    assert recovered == 1
+    assert runner.client.written == [("ppost", {"Status": "Blocked"})]
+    said = runner.client.comments_written[0]
+    assert "may have gone out" in said and "“Validated”" in said
+
+
+@case
+def a_ticket_claimed_from_ready_is_still_put_back_in_the_queue():
+    claimed = notion.Page(
+        id="p-work",
+        url="",
+        title="Le header",
+        properties={
+            "Status": {"type": "status", "status": {"name": "In progress"}},
+            "Runner": {"type": "rich_text", "rich_text": [{"plain_text": "ticket-runner@laptop"}]},
+        },
+        raw={"last_edited_time": "2020-01-01T00:00:00.000+00:00"},
+    )
+    runner = _board_runner([claimed], {})
+    with _state_home():
+        assert runner.sweep() == 1
+    assert runner.client.written == [("p-work", {"Status": "Ready"})]
+    assert "picked up again" in runner.client.comments_written[0]
 
 
 @case

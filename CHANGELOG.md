@@ -39,7 +39,10 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
   request (`runner.merge_method`, `squash` by default), or, when there is none,
   runs a session that publishes what the ticket already holds: the post, the
   mail, the announcement. Then *Done*, which now means out in the world rather
-  than merely finished. Optional: a board without the column behaves exactly as
-  before, and `ticket-runner init` adds it.
+  than merely finished. A run that dies mid-publication comes back as a question
+  rather than redoing the work, publications of one pass run side by side, and
+  `--dry-run` says what it would merge or publish without touching anything.
+  Optional: a board without the column behaves exactly as before, and
+  `ticket-runner init` adds it.
 - A release and versioning system: this changelog, `scripts/release.py`, the
   `release` workflow, and the `/release` command Claude uses to cut one.
