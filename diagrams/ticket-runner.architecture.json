@@ -1,0 +1,439 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "ticket-runner",
+    "subtitle": "Your Notion tickets, played by Claude Code",
+    "locale": "en",
+    "output": "../diagrams/architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/SalvadorCardona/ticket-runner",
+      "revision": "6e118c6fb03db6ec52b005c1b7a188bf736d3b14"
+    },
+    "views": [
+      {
+        "id": "pass",
+        "label": "One pass",
+        "focus": [
+          "timer",
+          "notion",
+          "runner",
+          "state"
+        ],
+        "note": "A timer wakes the runner, it reads the board, and one file lock keeps two passes from overlapping."
+      },
+      {
+        "id": "code",
+        "label": "A ticket with code",
+        "focus": [
+          "runner",
+          "prompt",
+          "session",
+          "worktree",
+          "github"
+        ],
+        "note": "A worktree of its own, a session that commits, and a runner that pushes and opens the pull request."
+      },
+      {
+        "id": "document",
+        "label": "A ticket without",
+        "focus": [
+          "runner",
+          "prompt",
+          "session",
+          "notion"
+        ],
+        "note": "No repository: the session writes ANSWER.md and the runner publishes it into the page itself."
+      },
+      {
+        "id": "validated",
+        "label": "Validated",
+        "focus": [
+          "notion",
+          "runner",
+          "github",
+          "session"
+        ],
+        "note": "You accept the work and the runner does the last step: it merges, or it publishes what the ticket holds."
+      },
+      {
+        "id": "reach",
+        "label": "Where it reaches you",
+        "focus": [
+          "runner",
+          "channels",
+          "console",
+          "notion"
+        ],
+        "note": "A question on your phone, a console on loopback, and both answer back onto the ticket."
+      }
+    ]
+  },
+  "layout": {
+    "mode": "grid",
+    "origin": [
+      60,
+      96
+    ],
+    "cols": 5,
+    "cellW": 160,
+    "cellH": 74,
+    "gapX": 120,
+    "gapY": 104
+  },
+  "components": [
+    {
+      "id": "timer",
+      "type": "backend",
+      "label": "systemd timer",
+      "sublabel": "every interval_seconds",
+      "row": 0,
+      "col": 1,
+      "size": [
+        162,
+        66
+      ],
+      "sources": [
+        {
+          "path": "systemd/ticket-runner.timer.in",
+          "label": "the unit install.sh lays down"
+        }
+      ]
+    },
+    {
+      "id": "prompt",
+      "type": "backend",
+      "label": "prompt.py",
+      "sublabel": "one prompt, four frames",
+      "tag": "widest frame first",
+      "row": 0,
+      "col": 2,
+      "size": [
+        162,
+        66
+      ],
+      "sources": [
+        {
+          "path": "src/ticket_runner/prompt.py",
+          "label": "four templates"
+        }
+      ]
+    },
+    {
+      "id": "repos",
+      "type": "database",
+      "label": "Your repositories",
+      "sublabel": "under workspace_root",
+      "row": 0,
+      "col": 3,
+      "size": [
+        162,
+        66
+      ],
+      "sources": [
+        {
+          "path": "src/ticket_runner/projects.py",
+          "label": "matching a project to a repo"
+        }
+      ]
+    },
+    {
+      "id": "notion",
+      "type": "external",
+      "label": "Notion board",
+      "sublabel": "the whole board",
+      "brand": "notion",
+      "row": 1,
+      "col": 0,
+      "size": [
+        162,
+        66
+      ],
+      "sources": [
+        {
+          "path": "src/ticket_runner/notion.py",
+          "label": "the API client"
+        }
+      ]
+    },
+    {
+      "id": "runner",
+      "type": "backend",
+      "label": "runner.py",
+      "sublabel": "sweep · deliver · queue",
+      "tag": "one pass",
+      "row": 1,
+      "col": 1,
+      "size": [
+        162,
+        66
+      ],
+      "sources": [
+        {
+          "path": "src/ticket_runner/runner.py",
+          "line": 1664,
+          "label": "tick()"
+        }
+      ]
+    },
+    {
+      "id": "session",
+      "type": "external",
+      "label": "Claude Code session",
+      "sublabel": "no one to ask",
+      "brand": "claude",
+      "row": 1,
+      "col": 2,
+      "size": [
+        162,
+        66
+      ],
+      "sources": [
+        {
+          "path": "src/ticket_runner/session.py",
+          "label": "starting and reading it"
+        }
+      ]
+    },
+    {
+      "id": "worktree",
+      "type": "backend",
+      "label": "git worktree",
+      "sublabel": "one branch per ticket",
+      "row": 1,
+      "col": 3,
+      "size": [
+        162,
+        66
+      ],
+      "sources": [
+        {
+          "path": "src/ticket_runner/git.py",
+          "label": "worktree, push, pull request"
+        }
+      ]
+    },
+    {
+      "id": "github",
+      "type": "cloud",
+      "label": "GitHub",
+      "sublabel": "pull request, then merge",
+      "brand": "github",
+      "row": 1,
+      "col": 4,
+      "size": [
+        162,
+        66
+      ]
+    },
+    {
+      "id": "console",
+      "type": "frontend",
+      "label": "Web console",
+      "sublabel": "board, CLI and chat",
+      "tag": "ticket-runner serve",
+      "row": 2,
+      "col": 1,
+      "size": [
+        162,
+        66
+      ],
+      "sources": [
+        {
+          "path": "src/ticket_runner/web/server.py",
+          "label": "the loopback server"
+        }
+      ]
+    },
+    {
+      "id": "channels",
+      "type": "messagebus",
+      "label": "Telegram / Slack",
+      "sublabel": "asks, and reads back",
+      "row": 2,
+      "col": 0,
+      "size": [
+        162,
+        66
+      ],
+      "sources": [
+        {
+          "path": "src/ticket_runner/channels/__init__.py",
+          "label": "two channels, four methods"
+        }
+      ]
+    },
+    {
+      "id": "state",
+      "type": "database",
+      "label": "~/.local/state",
+      "sublabel": "lock, claims, logs",
+      "row": 2,
+      "col": 2,
+      "size": [
+        162,
+        66
+      ],
+      "sources": [
+        {
+          "path": "src/ticket_runner/state.py",
+          "label": "what survives a run"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "your machine",
+      "wraps": [
+        "timer",
+        "prompt",
+        "repos",
+        "runner",
+        "session",
+        "worktree",
+        "console",
+        "state"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "timer-wakes-runner",
+      "from": "timer",
+      "to": "runner",
+      "label": "wakes a pass",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "board-to-runner",
+      "from": "notion",
+      "to": "runner",
+      "label": "Ready tickets",
+      "variant": "emphasis"
+    },
+    {
+      "id": "runner-to-board",
+      "from": "runner",
+      "to": "notion",
+      "label": "claims, narrates, reports back",
+      "fromSide": "top",
+      "toSide": "top",
+      "labelDy": -34
+    },
+    {
+      "id": "runner-to-prompt",
+      "from": "runner",
+      "to": "prompt",
+      "label": "one ticket, framed",
+      "fromSide": "top",
+      "toSide": "left"
+    },
+    {
+      "id": "prompt-to-session",
+      "from": "prompt",
+      "to": "session",
+      "label": "the prompt",
+      "variant": "emphasis",
+      "labelDy": 24
+    },
+    {
+      "id": "session-in-worktree",
+      "from": "session",
+      "to": "worktree",
+      "label": "commits, never pushes",
+      "variant": "emphasis"
+    },
+    {
+      "id": "repos-to-worktree",
+      "from": "repos",
+      "to": "worktree",
+      "label": "git worktree add",
+      "variant": "dashed",
+      "labelDy": 24
+    },
+    {
+      "id": "worktree-to-github",
+      "from": "worktree",
+      "to": "github",
+      "label": "push · gh pr create",
+      "variant": "emphasis"
+    },
+    {
+      "id": "validated-merge",
+      "from": "runner",
+      "to": "github",
+      "label": "validated · gh pr merge",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "bottom"
+    },
+    {
+      "id": "runner-tells",
+      "from": "runner",
+      "to": "channels",
+      "label": "blocked · failed · done",
+      "variant": "dashed",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "answer-back",
+      "from": "channels",
+      "to": "notion",
+      "label": "your one word, as a comment",
+      "variant": "emphasis"
+    },
+    {
+      "id": "console-steers",
+      "from": "console",
+      "to": "runner",
+      "label": "the same board, live",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "runner-keeps",
+      "from": "runner",
+      "to": "state",
+      "label": "lock, claims, logs",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The one rule",
+      "items": [
+        "A ticket is never worked on in the main repository",
+        "One disposable worktree per ticket, on its own branch",
+        "The agent commits; the runner pushes and opens the pull request"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "The board decides",
+      "items": [
+        "Ready is the gesture that starts work",
+        "Validated is the gesture that finishes it: merge, or publish",
+        "A project with a repository produces code; one without produces a document"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "What never leaves the machine",
+      "items": [
+        "Sessions, logs and the run lock live under ~/.local/state",
+        "The console binds to loopback unless a token says otherwise",
+        "Only Notion, GitHub and your chosen channel are reached outward"
+      ]
+    }
+  ]
+}
