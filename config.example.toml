@@ -50,9 +50,8 @@ mention = "@claude"
 #             before the project's brief and before the ticket — which is what
 #             makes a document ticket come back sounding like you rather than
 #             like nobody. Keep it to one screen: you pay it on every ticket.
-#   agents    optional: the page holding a database of agents. A ticket points
-#             at one through its `Agent` column, and that agent's page is the
-#             role the session plays — its craft, its rules, its model
+#   agents    optional: the page holding a database of agents. Provisioned
+#             for your own use — a ticket has no column pointing at a role
 #
 # Rows created under the older names — "Master Tickets", "Soul" — are still
 # found, as long as this table does not name them otherwise. Nothing to rename.
@@ -69,20 +68,17 @@ status = "Status"
 project = "Project"          # relation → your projects database
 pull_request = "Pull Request"
 
-# Which machine took the ticket, written as ticket-runner@host. Not the same
-# thing as `role` below, which is the craft the session plays.
+# Which machine took the ticket, written as ticket-runner@host.
 agent = "Runner"
 
 # Written when the ticket is claimed. As a URL column it becomes a link that
 # opens the session; as a text column it holds the bare identifier.
 session = "Session"
 
-# All five are optional — a database without them behaves exactly as before.
+# All three are optional — a database without them behaves exactly as before.
 model = "Model"          # select: pick the model per ticket, over runner.model
 priority = "Priority"    # select: Urgent, High, Normal, Low — which one runs first
 cost = "Cost"            # number: what the run cost, written back
-duration = "Duration"    # number: how long it took, in minutes
-role = "Agent"           # relation → your agents database: who handles the ticket
 
 # text: what the session is doing right now, rewritten every ten seconds while
 # it runs and cleared when it ends — see runner.progress below.

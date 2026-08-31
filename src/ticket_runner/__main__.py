@@ -550,10 +550,8 @@ def command_doctor(args: argparse.Namespace) -> int:
         ("model", "select", "pick the model per ticket, overriding runner.model"),
         ("priority", "select", "which ready ticket runs first"),
         ("cost", "number", "what the run cost, written back"),
-        ("duration", "number", "how long it took, in minutes"),
         ("progress", "rich_text", "what the session is doing, while it does it"),
         ("due", "date", "hold the ticket until that date, then run it"),
-        ("role", "relation", "which agent handles the ticket; its page is the role"),
     )
     for key, preferred, why in optional:
         name = configuration.notion.prop(key)

@@ -25,7 +25,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import agents, channels, conversation, git, notion, notify, progress
+from . import channels, conversation, git, notion, notify, progress
 from . import prompt as prompt_module, session, state
 from . import update as update_module
 from . import workspace as workspace_module
@@ -62,7 +62,6 @@ class Job:
     log: Path | None = None
     session_home: Path | None = None
     model: str = ""
-    agent: agents.Agent = field(default_factory=agents.Agent)
     comments: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
@@ -565,15 +564,15 @@ class Runner:
             self.client.update(self.database, ticket.page.id, {status: values[status]})
 
     def _measures(self, outcome: session.Outcome) -> dict[str, object]:
-        """What the run cost, for the columns that want to know.
+        """What the run cost, for the column that wants to know.
 
-        Skipped silently when the database has no such columns — and `cost` is
+        Skipped silently when the database has no such column — and `cost` is
         zero on a subscription, where the CLI reports none, so it is only
-        written when there is something to write.
+        written when there is something to write. How long it took is not
+        written at all: it lives in the local history, which `ticket-runner
+        history` reads.
         """
-        values: dict[str, object] = {
-            self.config.notion.prop("duration"): round(outcome.seconds / 60, 1)
-        }
+        values: dict[str, object] = {}
         if outcome.cost_usd:
             values[self.config.notion.prop("cost")] = round(outcome.cost_usd, 3)
         return values
@@ -766,15 +765,6 @@ class Runner:
                 )
                 return None
 
-        # Both are optional and neither can fail a ticket: a database with no
-        # Agent column reads as no agent, and unreadable comments as none.
-        role = notion.read(ticket.page, self.config.notion.prop("role")) or []
-        agent = (
-            agents.resolve(self.client, role[0], self.config.notion.prop("model"))
-            if role
-            else agents.Agent()
-        )
-
         job = Job(
             ticket,
             project,
@@ -785,13 +775,11 @@ class Runner:
             session_id=session.new_id(),
             log=state.log_file(short),
             model=str(notion.read(ticket.page, self.config.notion.prop("model")) or ""),
-            agent=agent,
             comments=self.discussion(ticket),
         )
         where = f"{project.path} · {branch}" if project.is_code else "document → Notion"
         said = f" · {len(job.comments)} comment(s)" if job.comments else ""
-        role = f" · as {agent.name}" if agent else ""
-        self.say(f"  → {ticket.title}\n    {project.name or 'no project'} · {where}{role}{said}")
+        self.say(f"  → {ticket.title}\n    {project.name or 'no project'} · {where}{said}")
         if not self.dry_run:
             # The session identifier is written now, not at the end: a ticket
             # still in progress is exactly the one you want to look into, and
@@ -829,14 +817,12 @@ class Runner:
             url=job.ticket.url,
             brief=job.project.brief,
             context=self.workspace.context,
-            agent_name=job.agent.name,
-            agent_brief=job.agent.brief,
             comments=job.comments,
         )
         log = job.log or state.log_file(short_id(job.ticket.id))
-        # The ticket first, then its agent, then the runner: the narrower the
-        # choice, the more deliberate it was.
-        chosen = job.model or job.agent.model or self.config.runner.model
+        # The ticket first, then the runner: the narrower the choice, the more
+        # deliberate it was.
+        chosen = job.model or self.config.runner.model
         self.say(f"    Claude session {job.session_id}{' · ' + chosen if chosen else ''} → {log}")
         live = self._live(job)
         try:
@@ -1228,12 +1214,6 @@ class Runner:
             workdir = conversation.talk_dir(short)
             where = f"Working directory: {workdir} — this ticket has no repository."
 
-        role = notion.read(ticket.page, self.config.notion.prop("role")) or []
-        agent = (
-            agents.resolve(self.client, role[0], self.config.notion.prop("model"))
-            if role
-            else agents.Agent()
-        )
         text = prompt_module.conversation(
             prompt_module.CONVERSATION,
             project=project.name,
@@ -1245,15 +1225,13 @@ class Runner:
             thread=conversation.transcript(thread, me),
             brief=project.brief,
             context=self.workspace.context,
-            agent_name=agent.name,
-            agent_brief=agent.brief,
             comments=self.discussion(ticket),
         )
 
         discussion = thread.last.discussion_id
         resumed = self.ledger.session_of(discussion) if discussion else ""
         outcome = self._reply_session(
-            text, workdir, short, agent, ticket, session_id=resumed or session.new_id(),
+            text, workdir, short, ticket, session_id=resumed or session.new_id(),
             resume=bool(resumed),
         )
         if not outcome.ok and resumed:
@@ -1264,7 +1242,7 @@ class Runner:
             with self._ledger_lock:
                 self.ledger.forget_session(discussion)
             outcome = self._reply_session(
-                text, workdir, short, agent, ticket, session_id=session.new_id(), resume=False
+                text, workdir, short, ticket, session_id=session.new_id(), resume=False
             )
 
         answer = conversation.trim(outcome.answer if outcome.ok else "")
@@ -1298,7 +1276,6 @@ class Runner:
         text: str,
         workdir: Path,
         short: str,
-        agent: agents.Agent,
         ticket: Ticket,
         *,
         session_id: str,
@@ -1318,7 +1295,6 @@ class Runner:
         )
         chosen = (
             str(notion.read(ticket.page, self.config.notion.prop("model")) or "")
-            or agent.model
             or self.config.runner.model
         )
         return session.run(

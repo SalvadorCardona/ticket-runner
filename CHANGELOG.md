@@ -21,8 +21,8 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 - A ticket moved to *Ready* becomes a Claude Code session: a disposable git
   worktree, a branch, commits, and a pull request — or, for a project with no
   repository, a document written back into the Notion page itself.
-- A projects database, a context page and an agents database, so a ticket knows
-  which repository it belongs to, who the work is for, and who handles it.
+- A projects database and a context page, so a ticket knows which repository it
+  belongs to and who the work is for.
 - A discussion on a ticket: a comment under one of the runner's reports is
   answered in the thread by something that has read the ticket and the code.
 - Telegram and Slack: a ticket the agent will not guess at asks its question

@@ -130,9 +130,9 @@ It creates everything under that page and writes the result into your configurat
 ```
 your page                 ← the one you shared
 └── ticket-runner         ← the workspace: its rows are the master pages
-    ├── Tickets           ← the tickets database, 12 columns, 2 relations
+    ├── Tickets           ← the tickets database, 11 columns, 1 relation
     ├── Projects          ← Name, Repository, Path
-    ├── Agents            ← the roles a ticket can be handled by
+    ├── Agents            ← a database of roles, yours to use
     └── Context           ← a plain page: who you are
 ```
 
@@ -241,14 +241,12 @@ presence of each status — and names whichever of those was missed.
 | `Name` | title | what the agent must do, in one line |
 | `Status` | status *or* select | **what drives the whole system** — see below |
 | `Project` | relation | *optional* — to the projects database: decides the repository |
-| `Agent` | relation | *optional* — to the agents database: decides who handles it |
 | `Runner` | text | filled by the runner: which machine took the ticket |
 | `Pull Request` | URL | filled by the runner at the end |
 | `Session` | **URL** or text | written as soon as the ticket is claimed. Make it a URL and it becomes a link that opens the session; leave it text and it holds the bare ID |
 | `Priority` | select | *optional* — `Urgent`, `High`, `Normal`, `Low`. Decides which ready ticket runs first |
-| `Model` | select | *optional* — `opus`, `sonnet`, `haiku`. This ticket's model, over its agent's and over `runner.model` |
+| `Model` | select | *optional* — `opus`, `sonnet`, `haiku`. This ticket's model, over `runner.model` |
 | `Cost` | number | *optional* — written back, in dollars |
-| `Duration` | number | *optional* — written back, in minutes |
 | `Progress` | text | *optional* — **what the session is doing right now**, rewritten every ten seconds |
 | `Scheduled` | date | *optional* — **hold the ticket until that moment**, then run it |
 
@@ -448,32 +446,15 @@ change the answer on a ticket of *any* project.
 The page is optional. Without it the runner behaves exactly as before, and says so once
 per run rather than leaving you to wonder.
 
-### The agents database — who handles the ticket
+### The agents database
 
-A project says *where* the work happens. It says nothing about **who** does it, and
-“fix this regression” and “write this announcement” are not the same craft on the same
-repository.
-
-Add an `Agent` relation column on your tickets, pointing at a database of agents. One row
-per role, and **the body of its page is the role**, exactly as a project page is its brief:
-
-> **Dev front**
-> Tu touches au CSS avant le JS. Aucune dépendance nouvelle sans raison écrite.
-> Un test qui reproduit le bug avant le correctif.
-
-An agent row may also carry a `Model`, which is how a rewriting ticket runs on a cheaper
-model than a refactor. The narrowest choice wins:
+`init` still creates an `Agents` row in the workspace, one page per role, and nothing more:
+**a ticket does not point at an agent**. The tickets database carries no `Agent` column,
+and the runner reads no role from a ticket. What decides the model is the ticket itself:
 
 ```
-the ticket's Model  →  its agent's Model  →  runner.model
+the ticket's Model  →  runner.model
 ```
-
-The role is read after your context page and after the project's brief, and **it can never
-loosen the frame**: committing without pushing, and answering `RESULT: blocked` rather than
-guessing, live in the template, above anything a page can say.
-
-All of it is optional twice over: a tickets database with no `Agent` column behaves exactly
-as it always has, and a ticket that names no agent runs on the runner's own prompt.
 
 ### The discussion on a ticket
 
@@ -927,7 +908,6 @@ often.
 | “comments not readable” | the integration lacks *Read comments* (my-integrations → Capabilities). The ticket runs, without its discussion, and answering it in a comment no longer wakes it |
 | a comment on a ticket changes nothing | the ticket is *done*, or no run of this host ever reported on it — those two never wake |
 | a ticket keeps running again and again | its report never gets posted, so your answer stays the last word: the integration lost *Insert comments* |
-| a ticket ignores its agent | the `Agent` column is missing or is not a relation — `doctor` names it |
 | “project not found on disk” | the project names a repository that is not there: fix its `Path` or `Repository` property, or add `"Notion name" = "/path"` under `[projects]` |
 | a ticket became a document when you wanted code | its project names no repository. Give the project page a `Path` or a `Repository` |
 | “nothing to work from” | the ticket has neither a title nor a description — a page left on the bare template counts as empty |

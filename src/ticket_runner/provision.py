@@ -141,7 +141,7 @@ def agents_schema(settings: Notion) -> dict:
     }
 
 
-def tickets_schema(settings: Notion, projects: str = "", agents: str = "") -> dict:
+def tickets_schema(settings: Notion, projects: str = "") -> dict:
     schema: dict = {
         "Name": {"title": {}},
         settings.prop("status"): {"select": {"options": status_options(settings)}},
@@ -154,7 +154,6 @@ def tickets_schema(settings: Notion, projects: str = "", agents: str = "") -> di
         settings.prop("model"): _select(MODELS),
         settings.prop("priority"): _select(PRIORITIES, _PRIORITY_COLOURS),
         settings.prop("cost"): {"number": {"format": "dollar"}},
-        settings.prop("duration"): {"number": {"format": "number"}},
         settings.prop("due"): {"date": {}},
     }
     # Single-property relations: the ticket points at its project, and the
@@ -162,10 +161,6 @@ def tickets_schema(settings: Notion, projects: str = "", agents: str = "") -> di
     if projects:
         schema[settings.prop("project")] = {
             "relation": {"database_id": projects, "type": "single_property"}
-        }
-    if agents:
-        schema[settings.prop("role")] = {
-            "relation": {"database_id": agents, "type": "single_property"}
         }
     return schema
 
@@ -276,18 +271,20 @@ def provision(
     report.workspace = workspace
 
     # Order matters exactly once: a relation cannot name a database that does
-    # not exist yet, so the two targets are built before the tickets.
+    # not exist yet, so the projects database is built before the tickets.
     projects = _database_in(
         client, _row(client, workspace, settings, "projects", report),
         settings.page("projects"), projects_schema(), report,
     )
-    agents = _database_in(
+    # The agents database is built for its own sake: nothing relates to it, a
+    # ticket having no column that points at a role.
+    _database_in(
         client, _row(client, workspace, settings, "agents", report),
         settings.page("agents"), agents_schema(settings), report,
     )
     tickets = _database_in(
         client, _row(client, workspace, settings, "tickets", report),
-        settings.page("tickets"), tickets_schema(settings, projects, agents), report,
+        settings.page("tickets"), tickets_schema(settings, projects), report,
     )
     report.tickets = tickets
 

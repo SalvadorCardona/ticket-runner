@@ -124,7 +124,6 @@ class Api:
                     if _session_id(session_id)
                     else "",
                     "cost": notion.read(page, settings.prop("cost")),
-                    "duration": notion.read(page, settings.prop("duration")),
                     "scheduled": moment.isoformat(timespec="minutes") if moment else "",
                     "created": page.raw.get("created_time", ""),
                 }

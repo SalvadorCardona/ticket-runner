@@ -209,8 +209,7 @@ class Config:
 _DEFAULT_PROPERTIES = {
     "status": "Status",
     "project": "Project",
-    # Which machine took the ticket, as ticket-runner@host. Not to be confused
-    # with `role` below: this one is a runner, that one is a craft.
+    # Which machine took the ticket, as ticket-runner@host.
     "agent": "Runner",
     "pull_request": "Pull Request",
     "session": "Session",
@@ -219,16 +218,12 @@ _DEFAULT_PROPERTIES = {
     "model": "Model",          # per-ticket model, overrides runner.model
     "priority": "Priority",    # which ready ticket goes first
     "cost": "Cost",            # written back, in dollars
-    "duration": "Duration",    # written back, in minutes
     # What the session is doing right now, rewritten every few seconds while it
     # runs and cleared when it ends. The board's live column.
     "progress": "Progress",
     # A date here holds the ticket until that moment. It is a start gate, not a
     # deadline — "Due Date" said the opposite of what the runner does with it.
     "due": "Scheduled",
-    # Relation to the Agents database. It carries the same word as the database
-    # it points at, because it is the same thing.
-    "role": "Agent",
 }
 
 # The rows the runner looks for in the workspace database, by their title.

@@ -183,7 +183,7 @@ def the_update_check_never_runs_more_than_once_a_minute():
 def optional_properties_have_names_even_when_absent():
     config = _config("")
     for key in ("status", "project", "agent", "pull_request", "session", "model",
-                "priority", "cost", "duration"):
+                "priority", "cost"):
         assert config.notion.prop(key), key
 
 
@@ -421,12 +421,13 @@ def a_bare_page_becomes_the_whole_board():
     assert set(rows) == {"Tickets", "Projects", "Agents", "Context"}
 
     schema = board._schemas["db-tickets"]
-    for expected in ("Status", "Project", "Agent", "Runner", "Session", "Scheduled"):
+    for expected in ("Status", "Project", "Runner", "Session", "Scheduled"):
         assert expected in schema, expected
+    # The role a ticket is handled by is not one of its columns.
+    assert "Agent" not in schema and "Duration" not in schema
 
-    # The relations point at databases that existed before the tickets did.
+    # The relation points at a database that existed before the tickets did.
     assert schema["Project"]["relation"]["database_id"] == "db-projects"
-    assert schema["Agent"]["relation"]["database_id"] == "db-agents"
 
     # A status property cannot be created through the API; a select can, and the
     # runner reads both. The six columns must all be there.
