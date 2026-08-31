@@ -31,9 +31,15 @@ from . import console, live
 # created. Ten minutes is short enough that a new project appears on its own.
 PROJECT_TTL = 600
 
-# The five columns, in the order they are meant to be read. Anything the board
+# And the board's own shape on the same cadence, for the same reason: the Notion
+# client caches a database for its lifetime, which for the console is days. A
+# column added in Notion — the validated one, most of all — has to appear
+# without anyone restarting anything.
+SCHEMA_TTL = 600
+
+# The columns, in the order they are meant to be read. Anything the board
 # carries that is none of them lands in "other" rather than being hidden.
-COLUMNS = ("ready", "running", "review", "blocked", "failed", "done")
+COLUMNS = ("ready", "running", "review", "validated", "blocked", "failed", "done")
 
 
 class Api:
@@ -43,6 +49,7 @@ class Api:
         self._runner: Runner | None = None
         self._projects: dict[str, dict] = {}
         self._projects_at = 0.0
+        self._schema_at = 0.0
         self.hub = live.Hub()
         self.commands = console.Commands(self.hub.publish, _subcommands())
         self.chat = console.Chat(config, self.hub.publish, self.brief)
@@ -82,6 +89,7 @@ class Api:
         self._runner = None
         self._projects = {}
         self._projects_at = 0.0
+        self._schema_at = 0.0
 
     # -- reading --------------------------------------------------------------
 
@@ -89,6 +97,9 @@ class Api:
         """Every ticket, grouped the way the board groups them."""
         settings = self.config.notion
         try:
+            if time.time() - self._schema_at > SCHEMA_TTL:
+                self.runner.client.forget_database(self.runner.database)
+                self._schema_at = time.time()
             pages = self.runner.client.query(self.runner.database)
         except notion.NotionError:
             self.forget()
@@ -130,10 +141,25 @@ class Api:
                 }
             )
 
+        # Whether this board has a validated column at all. The console offers
+        # the gesture only where the runner would honour it: a button that
+        # writes a status Notion does not know is a button that fails.
+        validated = settings.state("validated")
+        try:
+            offers = validated not in (
+                settings.state("review"),
+                settings.state("done"),
+            ) and validated in self.runner.client.options(
+                self.runner.database, settings.prop("status")
+            )
+        except notion.NotionError:
+            offers = False
+
         order = {key: index for index, key in enumerate(COLUMNS)}
         tickets.sort(key=lambda item: (order.get(item["column"], len(COLUMNS)), item["title"].lower()))
         return {
             "tickets": tickets,
+            "validate": offers,
             "columns": [
                 {"key": key, "name": settings.state(key)}
                 for key in COLUMNS

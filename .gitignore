@@ -2,3 +2,8 @@ __pycache__/
 *.pyc
 .venv/
 dist/
+
+# Screenshots archify writes beside an artefact; only the kept still is committed.
+diagrams/*.visual-check.*
+# The diagram renderer is installed, not vendored — see "The architecture diagram".
+.claude/skills/archify/

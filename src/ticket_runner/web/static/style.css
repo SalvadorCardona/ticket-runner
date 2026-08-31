@@ -14,6 +14,7 @@
   --amber: #fbbf24;
   --red: #f87171;
   --violet: #a78bfa;
+  --pink: #f472b6;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --radius: 12px;
 }
@@ -161,6 +162,7 @@ main {
 .card.ready { border-left-color: var(--green); }
 .card.running { border-left-color: var(--blue); }
 .card.review { border-left-color: var(--violet); }
+.card.validated { border-left-color: var(--pink); }
 .card.blocked { border-left-color: var(--amber); }
 .card.failed { border-left-color: var(--red); }
 .card .title { font-weight: 600; font-size: .93rem; line-height: 1.35; }

@@ -18,6 +18,11 @@ is the mirror of the first: **it talks, it does not work.** A conversation that
 quietly edited a repository would be the least expected thing this tool could
 do, so the frame says so, and the runner runs it in a permission mode that
 cannot write.
+
+A fourth one publishes what a ticket already holds, once a human has validated
+it, and its rule is the third of the family: **it publishes, it does not
+produce.** What goes out is what was read and accepted, unimproved — a session
+that rewrote it on the way would be publishing something nobody validated.
 """
 
 from __future__ import annotations
@@ -104,6 +109,46 @@ End with a final line, exactly one of these two:
 RESULT: ok — <what you produced, in one sentence>
 RESULT: blocked — <what is missing to decide>
 """
+
+DELIVERY = """\
+A ticket {scope} has been validated: a human read what came back and said yes. \
+What is left is to carry it out — to put it where it was meant to go.
+
+**You are publishing, not producing.** What the ticket asked for already \
+exists: it is in the page below, written by an earlier session and accepted \
+since. Do not rewrite it, do not tighten it, do not decide it reads better \
+slightly differently. What was validated is what goes out, word for word.
+
+# Ticket — {title}
+
+{body}
+
+{comments}{context}{brief}{agent}# Context
+
+- Working directory: {repo} — empty and disposable, it is yours to use.
+- Notion ticket: {url}
+
+# What is expected
+
+1. Work out from the ticket what publishing it means here — posting it to an \
+account, sending it, filing it, deploying it — and where. The ticket says; do \
+not invent a destination it does not name.
+2. Do it with the tools you actually have. If the account, the credential or \
+the tool is not one of them, that is not something to work around: say what is \
+missing and stop. Publishing something to the wrong place is worse than not \
+publishing it.
+3. Do it once. Check first whether it is already out there — a run that was \
+interrupted may have got there — and if it is, say where rather than doing it \
+again.
+4. Nothing else. No file to fix, no adjacent improvement, no follow-up you \
+thought of: those are other tickets.
+
+End with a final line, exactly one of these two:
+
+RESULT: ok — <what you published and where, with the link if there is one>
+RESULT: blocked — <what stopped you, or what is missing to do it>
+"""
+
 
 CONVERSATION = """\
 Someone has written to you in the comments of a Notion ticket {scope}. You are \
