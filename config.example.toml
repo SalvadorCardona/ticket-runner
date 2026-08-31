@@ -109,6 +109,14 @@ due = "Scheduled"
 #            where a ticket waits, and not "Done", because nothing is done: a
 #            human has still to look at it. Each run asks GitHub about those
 #            pull requests and moves on the tickets whose own has been merged
+#   validated
+#            you read what came back and said yes. This is the one column that
+#            makes the runner act rather than report: it merges the pull
+#            request the ticket carries — `merge_method` below — or, when there
+#            is none, runs a session that publishes what the ticket holds (the
+#            post, the email, the announcement), and then moves it to done.
+#            Optional: a board that does not offer the column simply has no
+#            such gesture, and you merge by hand as before
 #   done     the pull request has been merged — merging is the only gesture,
 #            nothing else to close by hand. A ticket that produced a document
 #            rather than a pull request lands here directly, having nothing to
@@ -122,6 +130,7 @@ due = "Scheduled"
 ready = "Ready"
 running = "In progress"
 review = "In review"
+validated = "Validated"
 done = "Done"
 failed = "Failed"
 blocked = "Blocked"
@@ -165,7 +174,12 @@ base_branch = ""
 
 fetch = true              # git fetch before creating the branch
 push = true               # push the branch once commits are in
-open_pull_request = true  # gh pr create — never an automatic merge
+open_pull_request = true  # gh pr create — opening one merges nothing
+
+# How a *validated* pull request is merged — see `validated` above. Nothing
+# is ever merged without that gesture; this only says what the gesture does.
+#   squash | merge | rebase
+merge_method = "squash"
 
 # A failure leaves its worktree in place for the post-mortem.
 #   ticket-runner clean --force  to tidy up
@@ -252,8 +266,11 @@ dry_run = false
 #   prompt_file           tickets on a project that has a repository
 #   document_prompt_file  tickets on a project that has none: the agent writes
 #                         ANSWER.md and the runner publishes it into the ticket
+#   delivery_prompt_file  validated tickets with no pull request: the session
+#                         that publishes what the ticket already holds
 prompt_file = ""
 document_prompt_file = ""
+delivery_prompt_file = ""
 
 # ---------------------------------------------------------------------------
 # Being told where you are, and answering with one word

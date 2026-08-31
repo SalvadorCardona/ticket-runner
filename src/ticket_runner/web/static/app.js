@@ -65,7 +65,8 @@ function connect() {
 
 const LABEL = {
   ready: "Ready", running: "In progress", review: "In review",
-  blocked: "Blocked", failed: "Failed", done: "Done", other: "Elsewhere",
+  validated: "Validated", blocked: "Blocked", failed: "Failed",
+  done: "Done", other: "Elsewhere",
 };
 
 function renderBoard(board) {
@@ -79,7 +80,7 @@ function renderBoard(board) {
   }
   // Done is real but it is not news: it would be most of the board within a
   // week, and push everything worth looking at below the fold.
-  const order = ["ready", "running", "review", "blocked", "failed", "other"];
+  const order = ["ready", "running", "review", "validated", "blocked", "failed", "other"];
   for (const key of order) {
     const tickets = groups.get(key) || [];
     if (!tickets.length && key !== "ready") continue;
@@ -123,6 +124,11 @@ function card(ticket) {
   if (ticket.session_link) actions.append(link("session", ticket.session_link));
   if (ticket.column !== "ready" && ticket.column !== "running")
     actions.append(action(ticket.column === "review" ? "run again" : "make ready", () => move(ticket, "ready")));
+  // Validating is the gesture the runner acts on — it merges the pull request,
+  // or publishes what the ticket holds — where "done" only files the ticket
+  // away yourself. Offered only on a board that has the column.
+  if (ticket.column === "review" && state.board.validate)
+    actions.append(action("validate", () => move(ticket, "validated")));
   if (ticket.column === "review") actions.append(action("done", () => move(ticket, "done")));
   if (ticket.column === "ready") actions.append(action("hold", () => move(ticket, "blocked")));
   node.append(actions);

@@ -31,9 +31,9 @@ from . import console, live
 # created. Ten minutes is short enough that a new project appears on its own.
 PROJECT_TTL = 600
 
-# The five columns, in the order they are meant to be read. Anything the board
+# The columns, in the order they are meant to be read. Anything the board
 # carries that is none of them lands in "other" rather than being hidden.
-COLUMNS = ("ready", "running", "review", "blocked", "failed", "done")
+COLUMNS = ("ready", "running", "review", "validated", "blocked", "failed", "done")
 
 
 class Api:
@@ -130,10 +130,25 @@ class Api:
                 }
             )
 
+        # Whether this board has a validated column at all. The console offers
+        # the gesture only where the runner would honour it: a button that
+        # writes a status Notion does not know is a button that fails.
+        validated = settings.state("validated")
+        try:
+            offers = validated not in (
+                settings.state("review"),
+                settings.state("done"),
+            ) and validated in self.runner.client.options(
+                self.runner.database, settings.prop("status")
+            )
+        except notion.NotionError:
+            offers = False
+
         order = {key: index for index, key in enumerate(COLUMNS)}
         tickets.sort(key=lambda item: (order.get(item["column"], len(COLUMNS)), item["title"].lower()))
         return {
             "tickets": tickets,
+            "validate": offers,
             "columns": [
                 {"key": key, "name": settings.state(key)}
                 for key in COLUMNS

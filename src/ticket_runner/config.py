@@ -81,6 +81,14 @@ class Notion:
         # request being open and it being merged are not the same day.
         if key == "review" and "review" not in self.status and "done" in self.status:
             return self.state("done")
+        # "validated" reads the same way, against a file that names any column
+        # at all: it is a gesture rather than a report, and a file that lists
+        # its board without it was written by somebody who did not ask for one —
+        # most often before it existed. It falls back on `review`, which is
+        # where the ticket already sits, and the runner reads a `validated` that
+        # is `review` as "this board has no such gesture".
+        if key == "validated" and "validated" not in self.status and self.status:
+            return self.state("review")
         return self.status.get(key, _DEFAULT_STATUS[key])
 
 
@@ -97,6 +105,10 @@ class Runner:
     fetch: bool = True
     push: bool = True
     open_pull_request: bool = True
+    # How a validated pull request is merged. `gh` has to be told which of the
+    # three it is, and the runner will not pick for you at the last moment: a
+    # board that squashes wants every ticket squashed.
+    merge_method: str = "squash"
     keep_worktree_on_failure: bool = True
     attach_sessions: bool = True
     session_host: str = ""
@@ -121,6 +133,13 @@ class Runner:
     dry_run: bool = False
     prompt_file: str = ""
     document_prompt_file: str = ""
+    delivery_prompt_file: str = ""
+
+
+# What `gh pr merge` accepts, and the whole of it: anything else is a typo, and
+# a typo here would only be discovered by GitHub refusing the one merge you were
+# watching.
+MERGE_METHODS = ("squash", "merge", "rebase")
 
 
 # The three moments worth a message. `blocked` is the one that matters: it is
@@ -253,7 +272,7 @@ _LEGACY_PAGES = {
 # Highest first. Anything else — including an empty cell — sorts as normal.
 PRIORITIES = ("Urgent", "High", "Normal", "Low")
 
-# The five columns of the board, and they are meant to be read in that order.
+# The columns of the board, and they are meant to be read in that order.
 #
 # "In review" rather than "Done": nothing is done when the runner lets go of a
 # ticket — a pull request is waiting for a human, and calling that Done is how a
@@ -261,10 +280,19 @@ PRIORITIES = ("Urgent", "High", "Normal", "Low")
 # one: the agent asking a question is waiting for *you*, a session that crashed
 # is waiting for someone to read a log. The runner tells them apart; the board
 # used to put both in "Draft" and throw that away.
+#
+# "Validated" is the answer to the question "In review" asks. Reviewing ends in
+# a gesture — merge this, publish this — and that gesture is the one thing a
+# board cannot do for you and the runner should not decide alone. So you move
+# the ticket one column to the right, and the runner does the gesture: it
+# merges the pull request, or it publishes what the ticket holds, and only then
+# is anything Done. A board that does not offer the column has no such moment,
+# and nothing changes: you merge by hand, as before.
 _DEFAULT_STATUS = {
     "ready": "Ready",
     "running": "In progress",
     "review": "In review",
+    "validated": "Validated",
     "done": "Done",
     "failed": "Failed",
     "blocked": "Blocked",
@@ -395,6 +423,11 @@ def load(path: Path | None = None) -> Config:
         open_pull_request=bool(
             runner_raw.get("open_pull_request", defaults.open_pull_request)
         ),
+        merge_method=(
+            str(runner_raw.get("merge_method", "")).strip().lower()
+            if str(runner_raw.get("merge_method", "")).strip().lower() in MERGE_METHODS
+            else defaults.merge_method
+        ),
         keep_worktree_on_failure=bool(
             runner_raw.get("keep_worktree_on_failure", defaults.keep_worktree_on_failure)
         ),
@@ -437,6 +470,9 @@ def load(path: Path | None = None) -> Config:
         prompt_file=str(runner_raw.get("prompt_file", defaults.prompt_file)).strip(),
         document_prompt_file=str(
             runner_raw.get("document_prompt_file", defaults.document_prompt_file)
+        ).strip(),
+        delivery_prompt_file=str(
+            runner_raw.get("delivery_prompt_file", defaults.delivery_prompt_file)
         ).strip(),
     )
 

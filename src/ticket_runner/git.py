@@ -106,7 +106,7 @@ def push(worktree: Path, branch: str) -> Result:
 
 
 def open_pull_request(worktree: Path, title: str, body: str, base: str) -> str:
-    """Open the PR through gh and return its URL. It is never merged."""
+    """Open the PR through gh and return its URL. Opening it merges nothing."""
     if not shutil.which("gh"):
         raise GitError("gh not found — cannot open the pull request")
     result = run(
@@ -123,6 +123,29 @@ def open_pull_request(worktree: Path, title: str, body: str, base: str) -> str:
     if existing.ok and existing.out.startswith("http"):
         return existing.out
     raise GitError(f"gh pr create: {result.err or result.out}")
+
+
+MERGE_FLAGS = {"squash": "--squash", "merge": "--merge", "rebase": "--rebase"}
+
+
+def merge_pull_request(url: str, method: str = "squash") -> str:
+    """Merge that pull request through `gh`. Returns what `gh` said of it.
+
+    The one outward-facing gesture the runner makes on its own — and it makes it
+    only because it was asked twice: once by the ticket having a pull request at
+    all, once by somebody moving that ticket into the validated column. Anything
+    GitHub refuses — a conflict, a check still red, a review still required — is
+    raised as it came, because the wording is the answer.
+
+    `--auto` is deliberately not used: a merge that lands quietly twenty minutes
+    later, when a check goes green, is a merge nobody watched.
+    """
+    if not shutil.which("gh"):
+        raise GitError("gh not found — cannot merge the pull request")
+    result = run(["gh", "pr", "merge", url, MERGE_FLAGS.get(method, "--squash")], timeout=300)
+    if result.ok:
+        return (result.out or f"merged ({method})").strip()
+    raise GitError(f"gh pr merge: {result.err or result.out}")
 
 
 def pull_request_state(url: str) -> str:

@@ -34,5 +34,12 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
   newest, and updates itself between two runs.
 - `ticket-runner history` shows what each ticket cost and how long it took.
 - A dated ticket waits for its date.
+- A *Validated* column: the answer to the question *In review* asks. Move a
+  ticket there and the runner does the last thing it needs — it merges its pull
+  request (`runner.merge_method`, `squash` by default), or, when there is none,
+  runs a session that publishes what the ticket already holds: the post, the
+  mail, the announcement. Then *Done*, which now means out in the world rather
+  than merely finished. Optional: a board without the column behaves exactly as
+  before, and `ticket-runner init` adds it.
 - A release and versioning system: this changelog, `scripts/release.py`, the
   `release` workflow, and the `/release` command Claude uses to cut one.

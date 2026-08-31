@@ -345,15 +345,17 @@ class Runner:
         """Every status but the ones that already speak for a ticket.
 
         Ready is on its way, running is in flight, in review is waiting on a
-        merge, and done is done: a comment on a ticket that came back with its
-        pull request is a conversation about the work, not a request to do it
-        again. What is left is where a run leaves a ticket it could not finish
-        — which is precisely where an answer is expected.
+        merge, validated is about to be carried out, and done is done: a comment
+        on a ticket that came back with its pull request is a conversation about
+        the work, not a request to do it again. What is left is where a run
+        leaves a ticket it could not finish — which is precisely where an answer
+        is expected.
         """
         status_property = self.config.notion.prop("status")
         kind = self.client.schema(self.database).get(status_property, "status")
         settled = {
-            self.config.notion.state(key) for key in ("done", "review", "ready", "running")
+            self.config.notion.state(key)
+            for key in ("done", "review", "validated", "ready", "running")
         }
         return {
             "and": [
@@ -535,6 +537,189 @@ class Runner:
             )
             closed += 1
         return closed
+
+    def deliver(self) -> list[dict]:
+        """Carry out the tickets you have validated.
+
+        The last column, and with *Ready* one of the only two where moving a
+        ticket sets something off. *In review* asks a question — is this what you
+        wanted? — and moving the ticket to *Validated* answers it: yes, and now
+        do the last thing. What that last thing is, the ticket already says. One
+        that came back as a pull request has a merge waiting; one that came back
+        as a text has a publication waiting — a post, an email, a page. The
+        runner does it, and only then is the ticket done.
+
+        Which leaves the decision exactly where it was: nothing is merged or
+        published because a session felt sure of itself, only because you moved
+        a ticket one column to the right.
+
+        Optional, like the columns before it. A board whose status property does
+        not offer the validated option has no such gesture and is never even
+        queried — `ticket-runner init` adds the option to a board that predates
+        it, and until then you merge by hand as before.
+        """
+        settings = self.config.notion
+        validated = settings.state("validated")
+        if validated in (settings.state("review"), settings.state("done")):
+            return []
+        status_property = settings.prop("status")
+        if validated not in self.client.options(self.database, status_property):
+            return []
+        kind = self.client.schema(self.database).get(status_property, "status")
+        pages = self.client.query(
+            self.database, {"property": status_property, kind: {"equals": validated}}
+        )
+        results = []
+        for page in pages:
+            ticket = Ticket(page)
+            url = str(notion.read(page, settings.prop("pull_request")) or "")
+            done = self._merge(ticket, url) if url.startswith("http") else self._publish(ticket)
+            if done:
+                results.append(done)
+        return results
+
+    def _merge(self, ticket: Ticket, url: str) -> dict | None:
+        """A validated pull request: merge it, and take the ticket to done."""
+        state_of = git.pull_request_state(url)
+        if not state_of:
+            # The same rule as `close_merged`: a ticket is never moved on an
+            # answer GitHub did not give. The next run asks again.
+            self.say(f"  · {ticket.title} — GitHub did not answer about {url}, left validated")
+            return None
+        if state_of == "CLOSED":
+            return self._fail(
+                ticket,
+                "validated, but its pull request was closed without being merged",
+                f"{url}\n\nReopen it, or take the ticket back to the ready column.",
+                blocked=True,
+                question=f"Its pull request was closed rather than merged: {url}",
+            )
+        method = self.config.runner.merge_method
+        note = "It had already been merged."
+        if state_of != "MERGED":
+            try:
+                said = git.merge_pull_request(url, method)
+            except git.GitError as error:
+                return self._fail(
+                    ticket,
+                    "the pull request could not be merged",
+                    f"{url}\n\n{error}",
+                    blocked=True,
+                    question=f"GitHub refused the merge: {_line(error)}",
+                )
+            note = f"Merged by the runner ({method}).\n{said}"
+        self.say(f"  ✓ {ticket.title} — pull request merged, moved to done")
+        self._set(
+            ticket,
+            **{self.config.notion.prop("status"): self.config.notion.state("done")},
+        )
+        self._comment(
+            ticket,
+            f"{self.agent_label} — done.\nYou validated this ticket, so its "
+            f"pull request went in: {url}\n{note}",
+        )
+        return {"ticket": ticket.title, "id": ticket.id, "status": "done", "merged": url}
+
+    def _publish(self, ticket: Ticket) -> dict | None:
+        """A validated ticket with no pull request: publish what it holds.
+
+        The Instagram post drafted last week, the email written into the page,
+        the announcement waiting on somebody to press send: work whose last step
+        is not a commit. A session is given the page as it stands — the ask, and
+        the answer a previous run wrote under it — and told to put it where the
+        ticket says, changing nothing on the way.
+
+        Claimed like any other work, by moving the ticket to "in progress":
+        publishing twice is the one mistake this must not make, and two runners
+        looking at the same board would otherwise both take it.
+        """
+        short = short_id(ticket.id)
+        project = self._project_of(ticket)
+        # The role, if the ticket names one: the account to post to and the
+        # voice to post in are exactly the sort of thing an agent page carries.
+        role = notion.read(ticket.page, self.config.notion.prop("role")) or []
+        job = Job(
+            ticket,
+            project,
+            branch="",
+            base="",
+            workdir=state_dir() / "scratch" / f"deliver-{short}",
+            body=self._body(ticket),
+            session_id=session.new_id(),
+            log=state.log_file(short),
+            model=str(notion.read(ticket.page, self.config.notion.prop("model")) or ""),
+            agent=(
+                agents.resolve(self.client, role[0], self.config.notion.prop("model"))
+                if role
+                else agents.Agent()
+            ),
+            comments=self.discussion(ticket),
+        )
+        self.say(f"  ▸ {ticket.title}\n    validated · publishing what the ticket holds")
+        if self.dry_run:
+            return None
+        self._set(
+            ticket,
+            **{
+                self.config.notion.prop("status"): self.config.notion.state("running"),
+                self.config.notion.prop("agent"): self.agent_label,
+                self.config.notion.prop("session"): self._session_value(
+                    job.session_id, project.path
+                ),
+            },
+        )
+        job.workdir.mkdir(parents=True, exist_ok=True)
+        try:
+            outcome = self._run_session(job, prompt_module.template(
+                self.config.runner.delivery_prompt_file, prompt_module.DELIVERY
+            ))
+        except (OSError, FileNotFoundError) as error:
+            return self._fail(ticket, "Claude session could not be started", str(error))
+        trace = self._trace(job, outcome)
+
+        if not outcome.ok:
+            # Kept, always: a publication that half happened is exactly the log
+            # somebody is going to want to read before trying again.
+            return self._fail(
+                ticket,
+                "the ticket was validated but could not be published",
+                f"{outcome.summary or outcome.error}\n\n{trace}\n"
+                f"Working directory kept: `{job.workdir}`",
+                blocked=outcome.blocked,
+                question=outcome.summary,
+            )
+
+        shutil.rmtree(job.workdir, ignore_errors=True)
+        self._set(
+            ticket,
+            **{
+                self.config.notion.prop("status"): self.config.notion.state("done"),
+                self.config.notion.prop("agent"): self.agent_label,
+                self.config.notion.prop("session"): self._session_value(
+                    outcome.session_id, job.session_home
+                ),
+                **self._measures(outcome),
+            },
+        )
+        cost = f" · ${outcome.cost_usd:.3f}" if outcome.cost_usd else ""
+        self._comment(
+            ticket,
+            f"{self.agent_label} — done.\nValidated, so it was published: "
+            f"{outcome.summary}\n\n{trace}\n"
+            f"{outcome.turns} turns · {outcome.seconds / 60:.1f} min{cost}",
+        )
+        self.say(f"    ✓ {ticket.title} — published")
+        self._tell("done", ticket, f"Published · {ticket.title}", outcome.summary)
+        return {
+            "ticket": ticket.title,
+            "id": ticket.id,
+            "status": "done",
+            "project": project.name,
+            "kind": "delivery",
+            "session": outcome.session_id,
+            "seconds": round(outcome.seconds, 1),
+            "cost_usd": outcome.cost_usd,
+        }
 
     def fetch_one(self, reference: str) -> Ticket:
         page_id = reference.strip()
@@ -1391,6 +1576,9 @@ class Runner:
         self._comments.clear()
         self._claimed = set()
         self.answers()
+        # What the board asked for before any new work: the tickets you
+        # validated, merged or published on their way to done.
+        delivered: list[dict] = []
         if reference:
             tickets = [self.fetch_one(reference)]
             self.say(f"Requested ticket: {tickets[0].title}")
@@ -1398,6 +1586,11 @@ class Runner:
             if not self.dry_run:
                 self.sweep()
                 self.close_merged()
+                delivered = self.deliver()
+                # Merged, published, or refused: as much a run of this ticket as
+                # a session is, and `ticket-runner history` should say so.
+                for done in delivered:
+                    state.record(done)
             tickets, waiting = self.queue()
             # Every ticket the queue wants, and not only the ones that will fit
             # in this pass: a ticket queued for the next run — or held until
@@ -1409,10 +1602,10 @@ class Runner:
             }
             if not tickets:
                 replies = self.converse()
-                if self.announce_idle and not replies:
+                if self.announce_idle and not replies and not delivered:
                     later = f", {len(waiting)} waiting for their date" if waiting else ""
                     self.say(f"No ticket ready{later}.")
-                return replies
+                return delivered + replies
             later = f", {len(waiting)} scheduled for later" if waiting else ""
             self.say(f"{len(tickets)} ticket(s) ready{later}.")
 
@@ -1426,7 +1619,7 @@ class Runner:
 
         jobs = [job for job in (self.prepare(ticket) for ticket in tickets[:ceiling]) if job]
         if not jobs:
-            return replies
+            return delivered + replies
 
         if len(jobs) == 1:
             results = [self.execute(jobs[0])]
@@ -1437,4 +1630,4 @@ class Runner:
         for result in results:
             state.record(result)
         state.prune_logs(self.config.runner.log_retention_days)
-        return replies + results
+        return delivered + replies + results

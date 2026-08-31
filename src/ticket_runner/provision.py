@@ -35,6 +35,7 @@ _STATUS_COLOURS = {
     "ready": "blue",
     "running": "yellow",
     "review": "purple",
+    "validated": "pink",
     "done": "green",
     "failed": "red",
     "blocked": "orange",
@@ -110,10 +111,12 @@ def status_options(settings: Notion) -> list[dict]:
 
     A configuration is free to point two states at one column — `failed` and
     `blocked` on a single "Needs you", `review` and `done` on a single "Done" —
-    and Notion refuses a select that lists the same option twice.
+    and Notion refuses a select that lists the same option twice. A file that
+    names its columns without naming `validated` is one of those: it points at
+    `review`, and the board simply has no validated column.
     """
     seen: dict[str, str] = {}
-    for key in ("ready", "running", "review", "done", "failed", "blocked"):
+    for key in ("ready", "running", "review", "validated", "done", "failed", "blocked"):
         name = settings.state(key).strip()
         if name and name not in seen:
             seen[name] = _STATUS_COLOURS[key]

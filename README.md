@@ -8,6 +8,11 @@ its own branch; *"draft me a post about the new release"* comes back written int
 ticket page itself. Both live on the same board, and it is the ticket that decides which
 one you get — not a setting.
 
+And when you have read what came back, one column does the last step for you: move the
+ticket to *Validated* and the runner merges that pull request, or publishes what it wrote
+— the post, the mail, the announcement — and only then calls it *Done*. See
+[Validated, and what it sets off](#validated-and-what-it-sets-off).
+
 The runner lives on your machine, in the background, across **all of your projects at
 once**. It never touches your working copy: every ticket gets a disposable git worktree of
 its own.
@@ -39,7 +44,9 @@ In progress   ◀───────────┤
                           └─ has none ──────────▶  scratch dir, ANSWER.md
                                                    published as Notion blocks ──▶  the page itself
 In review     ◀───────────  a pull request is waiting for you
-Done          ◀───────────  once you merge it — or straight away, for a document
+Validated     ──────▶     merges that pull request — or publishes what the
+                          ticket holds: the post, the mail, the announcement
+Done          ◀───────────  once it is in
 ```
 
 Which of the two you get is decided by the project, not by a setting: a project that names
@@ -214,6 +221,7 @@ presence of each status — and names whichever of those was missed.
 | `runner.base_branch` | `""` | empty = each repository's default branch |
 | `runner.push` | `true` | `false`: commits stay local |
 | `runner.open_pull_request` | `true` | `false`: the branch is pushed, without a PR |
+| `runner.merge_method` | `"squash"` | how a **validated** pull request is merged — `squash`, `merge`, `rebase` |
 | `runner.keep_worktree_on_failure` | `true` | keep enough around to understand a failure |
 | `runner.notify` | `true` | one desktop notification per finished ticket — `[notify]` carries it to your phone |
 | `runner.auto_update` | `true` | a run keeps the installation on the latest version |
@@ -222,6 +230,7 @@ presence of each status — and names whichever of those was missed.
 | `runner.attach_sessions` | `true` | file each session under its project, so `claude --resume` there lists it |
 | `runner.prompt_file` | `""` | your own prompt template, for repository tickets |
 | `runner.document_prompt_file` | `""` | the same, for tickets with no repository |
+| `runner.delivery_prompt_file` | `""` | the same, for publishing a validated ticket |
 | `notion.workspace` | `""` | the database whose rows are your master pages |
 | `notion.tickets_database` | `""` | one database instead of a workspace; wins when both are set |
 | `[notion.pages]` | | which row of the workspace is the tickets database, the projects database, the agents database, the context page |
@@ -491,9 +500,10 @@ instruction:
   is that machine's to pick up — a report is signed `ticket-runner@<host>`;
 - only when **someone else has had the last word** since that report. The report the next
   run posts is also what closes the ticket again;
-- and never a ticket that came back with its pull request. *In review* and *Done* are
-  both answers already: comment on one and nothing happens — the discussion belongs to
-  the pull request. A ticket already ready, or one in flight, is left where it is too.
+- and never a ticket that came back with its pull request. *In review*, *Validated* and
+  *Done* are all answers already: comment on one and nothing happens — the discussion
+  belongs to the pull request, and a validated ticket is about to be carried out. A ticket
+  already ready, or one in flight, is left where it is too.
 
 So it is `blocked` and `failed` that come back to life, which is where a run leaves a
 ticket it could not finish, and precisely where an answer is expected.
@@ -594,28 +604,36 @@ This is where your control over the system lives. The names are yours — map th
 board, because a status the database does not offer would only fail at the very end of a
 ticket.
 
-`ticket-runner init` creates these six:
+`ticket-runner init` creates these seven:
 
 | Key | Default | What it means |
 | --- | --- | --- |
 | `ready` | **Ready** | the description is precise enough for an agent to handle it alone. **The gesture that triggers work** — the other being a comment answering a ticket already handled once. |
 | `running` | **In progress** | claimed by the runner. Stops the next run from taking it again. |
 | `review` | **In review** | branch pushed, pull request opened. Yours to review. |
+| `validated` | **Validated** | you read it and said yes. **The second gesture that makes the runner act** — it merges the pull request, or publishes what the ticket holds, and then closes it. |
 | `done` | **Done** | that pull request has been merged — or the ticket produced a document, which has nothing to wait for. |
 | `failed` | **Failed** | something broke: the session, the push, the worktree. |
 | `blocked` | **Blocked** | the agent would not guess and asked a question instead — or its project could not be located. Answer in a comment and the ticket runs again. |
 
-Three of those names are deliberate. *In review* rather than *Done*, because nothing is
+Four of those names are deliberate. *In review* rather than *Done*, because nothing is
 done when the runner lets go of a ticket: a pull request is waiting for a human, and a
 board that calls that *Done* stops being believed by the second week. *Done* is then kept
-for what it says — merged. And *Blocked* is its own column rather than a shade of
-*Failed*, because the runner works hard to tell them apart — a ticket waiting for **you**
-and a session that crashed are different days, and pouring both into one column throws
-that away.
+for what it says — merged, published, out. And *Blocked* is its own column rather than a
+shade of *Failed*, because the runner works hard to tell them apart — a ticket waiting for
+**you** and a session that crashed are different days, and pouring both into one column
+throws that away.
+
+*Validated* is the fourth, and the odd one: every other column **reports**, this one
+**asks**. It is the answer to the question *In review* puts — is this what you wanted? —
+and moving a ticket there is you saying yes, go on. See
+[Validated, and what it sets off](#validated-and-what-it-sets-off).
 
 One column for two states is still a fine board, if yours is small. Name `failed` and
 leave `blocked` out, and questions land wherever failures do; name `done` and leave
-`review` out, and a ticket stops at its open pull request:
+`review` out, and a ticket stops at its open pull request. A file that names its columns
+and does not name `validated` has no validation gesture either — nothing is merged or
+published for you, exactly as before:
 
 ```toml
 [notion.status]
@@ -636,7 +654,66 @@ because `gh` is not authenticated simply stays in review — the next run asks a
 board whose `review` and `done` are one column has nowhere for a ticket to wait, so
 nothing is watched.
 
-Nothing is ever merged automatically. The merge is yours; only its consequence is not.
+Nothing is ever merged behind your back. The decision is yours; only its consequence is
+not — and if you would rather not make the merge itself either, the next column takes it
+off your hands.
+
+### Validated, and what it sets off
+
+Reviewing ends in a gesture. You read the pull request and it is good: someone still has
+to press *Merge*. You read the post the agent drafted and it is right: someone still has
+to publish it. That last step is the one the board has always left to a human — and it is
+the one part of a ticket that is pure mechanics.
+
+*Validated* is where you hand it over. You move the ticket one column to the right, and on
+its next pass the runner does the last thing the ticket needs:
+
+```
+Notion                    ticket-runner                       what happens
+
+In review     ──────▶     you read it. Good?
+    │
+    └─ yes ──▶ Validated  ─┬─ the ticket has a pull request
+                           │      gh pr merge --squash              ──▶  it is in
+                           │
+                           └─ it has none: a post, a mail, an announcement
+                                  a session, told to publish what the
+                                  ticket already holds                ──▶  it is out
+Done          ◀───────────  and only then
+```
+
+**A pull request** is merged with `gh`, the way `merge_method` says — `squash` by default,
+`merge` or `rebase` if that is your repository's habit. One that GitHub refuses — a
+conflict, a check still red, a review still required — puts the ticket in *Blocked* with
+GitHub's own wording in a comment, because that wording is the answer. One already merged
+by hand between two passes just moves to *Done*. One closed without merging is a question,
+not a merge: *Blocked*, and the ticket says so.
+
+**A ticket with no pull request** is the other half, and the interesting one. The work
+already exists — an earlier run wrote it into the page, and you have just read it — so a
+session is started with one instruction: *publish this, do not rewrite it*. What
+publishing means comes from the ticket itself: post it to that account, send it to that
+list, put it on that page. It uses the tools the machine actually has (an MCP server, a
+CLI, an API key in its environment) and, where it has none for the job, it says so and
+stops rather than improvising — the ticket lands in *Blocked* with what is missing. Then
+*Done*, with a comment saying where the thing went.
+
+So the board reads end to end: *Ready* is you asking for the work, *Validated* is you
+accepting it, and *Done* means it is actually out in the world rather than merely
+finished. Between the two, the runner does the typing.
+
+Three things are worth knowing:
+
+- **the column is opt-in.** A board whose `Status` does not offer *Validated* is never
+  even queried, and everything behaves exactly as it did — you merge by hand, and
+  *In review* → *Done* stays yours. `ticket-runner init` adds the option to an existing
+  board (a real Notion *status* property cannot be widened through the API: `init` says
+  so and you add it in one click);
+- **it is claimed like any other work.** A ticket being published moves to *In progress*
+  while its session runs, so a second machine watching the same board cannot post the same
+  thing twice;
+- **it is never guessed at.** The runner acts on that column and on nothing else: no
+  ticket is merged or published because a session felt sure of itself.
 
 ---
 
@@ -783,7 +860,9 @@ It prints a URL with a token in it. Open it and you get one page, three things:
 is a second database: moving a card moves the ticket, and the new ticket you type at the
 top is a page in the same database, with its brief as real Notion blocks. What the console
 adds is the part Notion cannot do — the running session's steps, live, read straight from
-the session log on disk rather than from the `Progress` column.
+the session log on disk rather than from the `Progress` column. A card in review carries a
+**validate** button, where the board has that column: one click and the next pass merges
+its pull request, or publishes what it holds.
 
 **The console** is one field and two gestures, and they are not made to look alike.
 

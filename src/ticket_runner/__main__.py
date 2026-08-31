@@ -570,12 +570,20 @@ def command_doctor(args: argparse.Namespace) -> int:
     if not options:
         warn("the status property offers no options — nothing to check against")
     else:
-        for key in ("ready", "running", "review", "done", "failed", "blocked"):
+        for key in ("ready", "running", "review", "validated", "done", "failed", "blocked"):
             wanted = configuration.notion.state(key)
             if wanted in options:
-                ok(f"{key:<8} → “{wanted}”")
+                ok(f"{key:<9} → “{wanted}”")
+            elif key == "validated":
+                # The one status a board is allowed not to have: without it
+                # there is no validation gesture, and nothing breaks — you merge
+                # the pull request yourself, as every board did before it.
+                warn(
+                    f"{key:<9} → “{wanted}” not offered — no column to validate from, "
+                    "so nothing is merged or published for you. `init` adds it"
+                )
             else:
-                bad(f"{key:<8} → “{wanted}” is not offered by the database")
+                bad(f"{key:<9} → “{wanted}” is not offered by the database")
                 problems += 1
         print(f"  {DIM}available: {', '.join(options)}{RESET}")
 
