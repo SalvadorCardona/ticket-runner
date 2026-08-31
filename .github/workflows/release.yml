@@ -1,0 +1,39 @@
+# A tag is the only trigger, and the tag is the whole request.
+#
+# Pushing `v0.2.0` is what publishes 0.2.0: this workflow re-runs the suite at
+# that exact commit, then turns the tag into a GitHub release whose body is the
+# `## [0.2.0]` section of CHANGELOG.md. Nothing here decides a version or writes
+# a note — `scripts/release.py` reads both out of the tree the tag points at, and
+# refuses if the tag and `__version__` disagree, which is what a tag placed on the
+# wrong commit looks like.
+#
+# `publish` is idempotent, so a re-run of a failed job is safe, and so is doing
+# it by hand: `python3 scripts/release.py publish` from a checkout of the tag.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: The suite, at the tagged commit
+        run: python3 tests/run.py
+
+      - name: The GitHub release, from the changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release.py publish

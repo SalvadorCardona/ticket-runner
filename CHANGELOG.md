@@ -1,0 +1,38 @@
+# Changelog
+
+What changed, release by release, in words a user of the runner would use — not
+in commit subjects. Every entry answers "what can I do today that I could not do
+yesterday", and the ones that matter most are the ones that change a habit.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
+the versions follow [semantic versioning](https://semver.org/): the **minor**
+number moves when the runner gains something, the **patch** number when it stops
+getting something wrong, and the **major** number when an installation needs a
+hand to keep working — a configuration key that changed name, a Notion property
+that has to exist, a command that went away.
+
+`Unreleased` is where work lands as it is merged. It becomes a version when
+somebody cuts a release; see `.claude/skills/release/SKILL.md`.
+
+## [Unreleased]
+
+### Added
+
+- A ticket moved to *Ready* becomes a Claude Code session: a disposable git
+  worktree, a branch, commits, and a pull request — or, for a project with no
+  repository, a document written back into the Notion page itself.
+- A projects database, a context page and an agents database, so a ticket knows
+  which repository it belongs to, who the work is for, and who handles it.
+- A discussion on a ticket: a comment under one of the runner's reports is
+  answered in the thread by something that has read the ticket and the code.
+- Telegram and Slack: a ticket the agent will not guess at asks its question
+  where you already are, and one word answers it.
+- `ticket-runner serve` — the web console: the board live, the CLI in a browser,
+  and a chat with the whole workspace.
+- Progress written as the session runs, at a ten-second cadence.
+- Self-update: a run asks once an hour whether the installed code is still the
+  newest, and updates itself between two runs.
+- `ticket-runner history` shows what each ticket cost and how long it took.
+- A dated ticket waits for its date.
+- A release and versioning system: this changelog, `scripts/release.py`, the
+  `release` workflow, and the `/release` command Claude uses to cut one.

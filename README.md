@@ -1040,6 +1040,53 @@ once, or would go wrong silently.
 
 ---
 
+## Releases and versions
+
+`ticket-runner --version` — and the console's header — print a real number now, and
+[`CHANGELOG.md`](CHANGELOG.md) says what each one changed, in the words a user would use
+rather than in commit subjects. The numbers are [semantic](https://semver.org/), read from
+an installed runner's point of view: **major** when your installation needs a hand to keep
+working, **minor** when the runner gained something, **patch** when it stopped getting
+something wrong.
+
+**A release does not change how the runner updates itself.** It follows the branch it was
+installed from, commit by commit — an installation on `main` picks up work as it is
+merged, and never waits for a version. Tags are for people: the changelog you read before
+merging an update, and
+
+```sh
+TR_REF=v0.1.0 sh install.sh
+```
+
+for an installation that would rather sit still. The runner says so itself — a fixed
+revision reports *"pinned to a fixed revision — nothing to follow"* and stops updating,
+because a version you chose is a choice, not a state to be corrected.
+
+### Cutting one
+
+The whole thing is four files and one rule: the version lives in `__version__`, the notes
+live under `## [Unreleased]`, and nothing writes either of them by hand.
+
+```sh
+python3 scripts/release.py bump minor    # promotes the notes and writes the version
+python3 tests/run.py
+python3 scripts/release.py check         # everything that must be true before a tag
+git commit -am "release: 0.2.0"
+git tag -a v0.2.0 -m "ticket-runner 0.2.0" && git push origin v0.2.0
+```
+
+The tag push is the whole request. `.github/workflows/release.yml` re-runs the suite at
+that commit and creates the GitHub release with the `## [0.2.0]` section as its body — so
+the release notes cannot say something the repository does not.
+
+And because this is a project whose whole point is that Claude does the work: the
+procedure is written down where Claude reads it, in
+[`.claude/skills/release/SKILL.md`](.claude/skills/release/SKILL.md), and `/release minor`
+runs it. It stops before the tag and asks — publishing is visible to everyone who installs
+the runner, and that stays a decision somebody makes on purpose.
+
+---
+
 ## Uninstall
 
 ```sh

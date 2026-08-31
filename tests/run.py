@@ -41,6 +41,10 @@ from ticket_runner.web import live as web_live  # noqa: E402
 from ticket_runner.runner import short_id, slugify  # noqa: E402
 from ticket_runner.projects import _normalise  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+
+import release  # noqa: E402
+
 CASES = []
 
 
@@ -2468,6 +2472,124 @@ def nothing_is_sent_anywhere_during_a_dry_run():
     finally:
         channels.announce = original
     assert sent == []
+
+
+# -- releases ----------------------------------------------------------------
+
+
+@case
+def the_version_and_the_changelog_never_drift():
+    """The one invariant the whole release system rests on.
+
+    `__version__` and the newest released section of CHANGELOG.md are written by
+    the same command, in the same breath. If they are ever seen apart, something
+    edited one of them by hand — and the release that follows would ship a
+    number whose notes describe a different one.
+    """
+    version = release.read_version()
+    release.parse(version)  # raises if it is not a version at all
+
+    entries = release.released(release.CHANGELOG.read_text(encoding="utf-8"))
+    for name, date, body in entries:
+        release.parse(name)
+        assert date, f"[{name}] has no date"
+        assert body.strip(), f"[{name}] has no notes"
+
+    order = [release.order(name) for name, _date, _body in entries]
+    assert order == sorted(order, reverse=True), "the changelog runs newest first"
+
+    if entries:
+        assert entries[0][0] == version, (
+            f"__version__ is {version}, the newest changelog section is [{entries[0][0]}]"
+        )
+
+
+@case
+def a_release_only_ever_moves_forward():
+    assert release.next_version("0.1.0", "patch") == "0.1.1"
+    assert release.next_version("0.1.9", "minor") == "0.2.0"
+    assert release.next_version("0.9.3", "major") == "1.0.0"
+    assert release.next_version("1.2.3", "2.0.0") == "2.0.0"
+
+    for backwards in ("0.1.0", "1.2.2", "1.0.0"):
+        try:
+            release.next_version("1.2.3", backwards)
+        except release.Problem:
+            pass
+        else:
+            raise AssertionError(f"{backwards} after 1.2.3 must be refused")
+
+    # Once, in a repository's life: nothing released yet, so the number the tree
+    # already carries is the number to release it under.
+    assert release.next_version("0.1.0", "0.1.0", first=True) == "0.1.0"
+
+
+@case
+def a_bump_promotes_the_notes_and_opens_an_empty_unreleased():
+    text = (
+        "# Changelog\n\n## [Unreleased]\n\n### Added\n\n- A thing.\n\n"
+        "## [0.1.0] - 2026-01-01\n\n### Added\n\n- The first thing.\n"
+    )
+    moved = release.promote(text, "0.2.0", "2026-08-31")
+
+    names = [name for name, _date, _body in release.sections(moved)]
+    assert names == ["Unreleased", "0.2.0", "0.1.0"], names
+
+    assert release.notes_for(moved, "0.2.0") == "### Added\n\n- A thing."
+    assert release.notes_for(moved, "0.1.0") == "### Added\n\n- The first thing."
+    unreleased = dict((name, body) for name, _date, body in release.sections(moved))
+    assert unreleased["Unreleased"].strip() == "", "the next cycle starts empty"
+
+
+@case
+def an_empty_unreleased_is_not_a_release():
+    """A tag with no notes is a tag, and nobody came here for a tag."""
+    for refused in (
+        "# Changelog\n\n## [Unreleased]\n\n## [0.1.0] - 2026-01-01\n\n- One.\n",
+        "# Changelog\n\n## [0.1.0] - 2026-01-01\n\n- One.\n",
+    ):
+        try:
+            release.promote(refused, "0.2.0", "2026-08-31")
+        except release.Problem:
+            pass
+        else:
+            raise AssertionError("an empty or missing [Unreleased] must be refused")
+
+    already = "# Changelog\n\n## [Unreleased]\n\n- New.\n\n## [0.2.0] - 2026-01-01\n\n- Old.\n"
+    try:
+        release.promote(already, "0.2.0", "2026-08-31")
+    except release.Problem:
+        pass
+    else:
+        raise AssertionError("a version that already has a section must be refused")
+
+
+@case
+def the_dash_in_a_changelog_heading_is_whichever_one_was_typed():
+    """The file is written by hand, and a hand that writes em dashes writes them here.
+
+    A heading the parser fails to see is a release whose notes silently come out
+    empty, which is only noticed once it is published.
+    """
+    for dash in ("-", "\u2013", "\u2014"):
+        text = f"# Changelog\n\n## [0.1.0] {dash} 2026-01-01\n\n- One.\n"
+        assert release.notes_for(text, "0.1.0") == "- One.", dash
+
+
+@case
+def the_version_is_rewritten_where_the_product_reads_it():
+    """`__version__` is what --version and the console header print.
+
+    The rewrite is a regular expression over the real file, so this checks it
+    against the real file's shape rather than against a fixture that agrees
+    with it by construction.
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        init = Path(directory) / "__init__.py"
+        init.write_text(release.INIT.read_text(encoding="utf-8"), encoding="utf-8")
+        release.write_version("9.9.9", init)
+        assert release.read_version(init) == "9.9.9"
+        assert '__version__ = "9.9.9"' in init.read_text(encoding="utf-8")
 
 
 def main() -> int:
