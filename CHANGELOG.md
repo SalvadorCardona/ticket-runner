@@ -27,12 +27,6 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 - Addresses in the console are links. An answer, the output of a command, a step
   of a session or a comment on a ticket that carries a URL is one click away,
   rather than something to read out loud into another tab.
-- The console's header is a raymarched lattice that reads the runner: it drifts
-  in violet while the timer waits, flies and turns to ember while a ticket runs,
-  ripples once for every event on the stream, and goes grey and red when the
-  stream drops. WebGL, no library and nothing fetched from anywhere — and it
-  stops drawing for a hidden tab, drops its own resolution on a machine that
-  cannot keep up, and holds still where the system asks for reduced motion.
 - A ticket moved to *Ready* becomes a Claude Code session: a disposable git
   worktree, a branch, commits, and a pull request — or, for a project with no
   repository, a document written back into the Notion page itself.
