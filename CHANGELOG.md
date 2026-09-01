@@ -18,7 +18,20 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Added
 
-- A terminal for one ticket, in the console: click a card and the **Ticket** tab
+- The console is a React application. Its page is rebuilt on TypeScript, Vite,
+  Tailwind and [shadcn/ui](https://ui.shadcn.com), and it has a light theme now —
+  a switch in the header, dark still what it opens on. Nothing about how it is
+  installed or served changed: what ships is the built bundle, committed beside
+  the Python that serves it, so a machine still needs `python3` and `git` and no
+  Node at all. Its source lives in `frontend/`.
+- A menu down the left of the console, in place of the row of tabs — and it says
+  more than the tabs could: how many tickets are ready and how many are in
+  review, which ticket the Ticket pane is holding, how many sessions are writing
+  right now. `Ctrl-B` folds it to a rail of icons; on a phone it is a drawer.
+- The repository declares the shadcn MCP server in `.mcp.json`, so an agent
+  working here can search the registry and add a component without leaving the
+  session.
+- A terminal for one ticket, in the console: click a card and the **Ticket** pane
   shows everything said on it — the runner's reports, your answers, the ones you
   gave from Telegram — with a field to say the next thing and, while it runs, its
   session's steps scrolling underneath. What you type is a comment on the ticket,

@@ -69,7 +69,11 @@ if [ -n "${TR_SRC:-}" ]; then
     have tar || die "tar is required"
     [ -d "$TR_SRC/src/ticket_runner" ] || die "$TR_SRC does not contain src/ticket_runner"
     rm -rf "$APP_DIR"; mkdir -p "$APP_DIR"
-    tar -C "$TR_SRC" --exclude='.git' --exclude='__pycache__' -cf - . | tar -C "$APP_DIR" -xf -
+    # `node_modules` is the console's build-time dependency and is measured in
+    # hundreds of megabytes; what the console actually serves is already built
+    # and committed under src/ticket_runner/web/static.
+    tar -C "$TR_SRC" --exclude='.git' --exclude='__pycache__' --exclude='node_modules' \
+        -cf - . | tar -C "$APP_DIR" -xf -
     ok "sources in $APP_DIR (a copy: it will not update itself)"
 else
     # A clone rather than a tarball: it is what lets the runner answer "am I

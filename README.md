@@ -906,21 +906,28 @@ ticket-runner serve
 It prints a URL with a token in it. Open it and you get one page, five things:
 
 ```
-┌──────────────────────────────┬─────────────────────────────┐
-│  Ready                    2  │  you                        │
-│  ┌────────────────────────┐  │  Where is the SQLite ticket │
-│  │ Retirer le bandeau     │  │                             │
-│  │ Site vitrine · High    │  │  workspace                  │
-│  └────────────────────────┘  │  Six minutes in, on Trader  │
-│                              │  IA. It has rewritten       │
-│  In progress              1  │  src/storage.py and is on    │
-│  ┌────────────────────────┐  │  pytest. Nothing committed. │
-│  │ Migrer vers SQLite     │  │                             │
-│  │ Bash · pytest -q       │  │  > status                   │
-│  └────────────────────────┘  │  timer on · 30 min          │
-└──────────────────────────────┴─────────────────────────────┘
-       the board, live                the console
+┌───────────────┬──────────────────────────────┬─────────────────────────────┐
+│ ticket-runner │  Ready                    2  │  you                        │
+│  v0.9.2       │  ┌────────────────────────┐  │  Where is the SQLite ticket │
+│               │  │ Retirer le bandeau     │  │                             │
+│ ▸ Board    4  │  │ Site vitrine · High    │  │  workspace                  │
+│   1 ready     │  └────────────────────────┘  │  Six minutes in, on Trader  │
+│   Ticket      │                              │  IA. It has rewritten       │
+│   #1a2b3c     │  In progress              1  │  src/storage.py and is on   │
+│   Console     │  ┌────────────────────────┐  │  pytest. Nothing committed. │
+│   Live     1  │  │ Migrer vers SQLite     │  │                             │
+│   Settings    │  │ Bash · pytest -q       │  │  > status                   │
+│ ● live        │  └────────────────────────┘  │  timer on · 30 min          │
+└───────────────┴──────────────────────────────┴─────────────────────────────┘
+     the menu           the board, live                the console
 ```
+
+**The menu** down the left is where the five live, and it says more than a row of
+tabs could: how many tickets are ready and how many are in review, which ticket the
+Ticket pane is holding, how many sessions are writing right now, whether the timer
+is on. `⌘B` — `Ctrl-B` — folds it to a rail of icons, each keeping its name in a
+tooltip; on a phone it is a drawer, and choosing something closes it. The fold is
+remembered in a cookie, so it opens the way you left it.
 
 **The board** is the Notion board, read from Notion and written back to it. Nothing here
 is a second database: moving a card moves the ticket, and the new ticket you type at the
@@ -930,7 +937,7 @@ the session log on disk rather than from the `Progress` column. A card in review
 **validate** button, where the board has that column: one click and the next pass merges
 its pull request, or publishes what it holds.
 
-**A card is a way in.** Click one and the **Ticket** tab becomes that ticket's terminal:
+**A card is a way in.** Click one and the **Ticket** pane becomes that ticket's terminal:
 everything said on it, oldest first — the runner's reports, your answers, the answers you
 gave from Telegram — and a field to say the next thing. What you type is a *comment on the
 ticket*, written into the thread the runner last spoke in, which is the gesture the runner
@@ -990,6 +997,77 @@ Each section carries the command that checks it — `> doctor` for Notion, `> no
 Telegram and Slack, `> enable` to write a new interval into the systemd timer — because the
 CLI already knows how to say whether a token works, and a settings page does not need a
 second opinion. A setting that needs more than saving says so, once, and only when it moved.
+
+### The console's own code
+
+The page is a **React** application — TypeScript, [Vite](https://vite.dev) and
+[shadcn/ui](https://ui.shadcn.com) on Tailwind — and it lives in `frontend/`. What ships in
+the package is the *build*: `src/ticket_runner/web/static/` holds `index.html` and one
+`assets/console.js` and `assets/console.css`, and those are committed.
+
+That is the whole arrangement, and it is deliberate. `install.sh` clones this repository
+onto a machine that has `python3` and `git`, and `ticket-runner serve` is `http.server` and
+the standard library. **Nothing about the console asks the machine that runs it for Node.**
+Node is a thing you need to *change* the console, not to use it.
+
+```sh
+cd frontend
+npm install
+npm run build      # writes ../src/ticket_runner/web/static — commit what it writes
+npm run dev        # hot reload, proxying /api to a console you started yourself
+npm run lint       # tsc, in the strict configuration the build uses
+```
+
+`npm run dev` proxies `/api` to `http://127.0.0.1:8787` — set `TICKET_RUNNER_ORIGIN` for
+another address. Open the real console once first (`ticket-runner serve`, then its URL with
+the token): the dev server borrows the cookie that URL sets, because the API refuses
+anything else.
+
+**Adding a component.** The project is a plain shadcn/ui project — `frontend/components.json`
+is its configuration, and the components live in `frontend/src/components/ui/` where the CLI
+puts them:
+
+```sh
+cd frontend
+npx shadcn@latest add dialog dropdown-menu
+```
+
+The repository also declares the **shadcn MCP server** in `.mcp.json`, pointed at
+`frontend/`, so an agent working in this repository can search the registry, read a
+component's source and install it without leaving the session. Claude Code asks before it
+starts a server a repository declares; `/mcp` is where you say yes, and where you check it
+came up.
+
+`components.json` carries an empty `"registries": {}` on purpose. The CLI merges its own
+defaults over that key, so declaring `@shadcn` there by hand would *replace* its
+style-aware URL and quietly break `add`; leaving the key present but empty is what makes
+the MCP server announce the registry — without it, `get_project_registries` answers that
+none is configured and `list_items_in_registries` refuses to look.
+
+**Where the menu's shape comes from.** `frontend/src/lib/menu.ts` writes out
+`MenuItemInterface` from
+[react-resource-view](https://github.com/SalvadorCardona/react-resource-view) rather than
+importing it. That package's menu module is that type plus two "is this the current entry"
+helpers, and the helpers answer by comparing `href` against the location their routing port
+reports — this console has no router and no addresses, a pane being React state. Taking the
+dependency would mean installing `react-data-form`, `resource-registry`, `react-mini-i18n`
+and a router in order to re-implement `isActive` anyway. So the vocabulary is shared and the
+machinery is not: `href` is kept in the shape, and the day the console grows real addresses
+or mounts a `ResourceView` screen, the menu it already has is the one that package expects.
+
+Two rules the console keeps, and they predate React:
+
+- **The stream is the truth.** A click posts and says nothing; what appears on the screen is
+  what came back on `/api/events`. So two open tabs show the same thing, and an answer typed
+  on a phone shows up on the laptop without either of them asking.
+- **Nothing is loaded from anywhere but this machine.** No CDN, no web font, no analytics —
+  a console that reached off the machine would look broken on a train and would tell
+  somebody else when you opened it. A test asserts it against the shipped files.
+
+The page opens dark, because it sits beside a terminal and the thing it shows most of the
+time is a log. The switch in the header changes that, and the choice is one line in the
+browser's `localStorage` — read before the first paint, so the page never flashes white on
+the way to dark.
 
 ### Keeping it running
 
