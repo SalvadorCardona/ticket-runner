@@ -3190,6 +3190,68 @@ def the_console_header_shows_the_version_it_is_given():
 
 
 @case
+def the_header_says_what_the_runner_is_doing_without_words():
+    """The bar's shader is handed the same three facts the bar's words carry.
+
+    A moving picture nobody wired to anything is decoration. This one is a
+    status light — the stream, the run, the event that just landed — so what it
+    is told, and that it is told at all, is worth pinning down.
+    """
+    static = Path(__file__).resolve().parents[1] / "src/ticket_runner/web/static"
+    page = (static / "index.html").read_text(encoding="utf-8")
+    app = (static / "app.js").read_text(encoding="utf-8")
+    header = (static / "header.js").read_text(encoding="utf-8")
+
+    assert 'id="bar-fx"' in page, "the bar has nowhere to draw"
+    assert page.index("header.js") < page.index("app.js"), "app.js calls what header.js defines"
+    assert 'fx("setAlive"' in app, "a dropped stream has to reach the bar"
+    assert 'fx("setEnergy"' in app, "a run in progress has to reach the bar"
+    assert 'fx("pulse")' in app, "an event landing has to reach the bar"
+    assert "if (window.HeaderFX)" in app, "a machine with no WebGL still runs the console"
+    for name in ("setEnergy", "setAlive", "pulse"):
+        assert f"api.{name}" in header, f"the bar answers to {name}"
+
+
+@case
+def the_header_gives_the_machine_back_when_nobody_is_looking():
+    """A shader in the chrome of a local tool is a promise about the fan.
+
+    Four things keep it from costing a laptop its afternoon, and every one of
+    them is the sort a refactor drops without noticing: a hidden tab draws
+    nothing, a machine that cannot keep up is asked for less, a screen asking
+    for stillness gets it, and a context taken away is not a black rectangle.
+    """
+    header = (
+        Path(__file__).resolve().parents[1] / "src/ticket_runner/web/static/header.js"
+    ).read_text(encoding="utf-8")
+
+    assert "document.hidden" in header, "a tab nobody is looking at still renders"
+    assert "prefers-reduced-motion" in header, "stillness asked for is not given"
+    assert "state.scale" in header, "a slow machine is never asked for less"
+    assert "webglcontextlost" in header, "a lost context leaves a black bar"
+    assert "devicePixelRatio" in header, "a retina screen is rendered at full density"
+
+
+@case
+def the_console_asks_for_nothing_it_did_not_ship():
+    """Nothing the page loads comes from anywhere but this machine.
+
+    The console is served by `http.server` on loopback, and a header that
+    reached for a library on a CDN would be a console that looks broken on a
+    train and tells somebody else when you opened it.
+    """
+    # An `xmlns` is a name, not an address; what is looked for here is the
+    # shapes that actually make the browser open a socket.
+    reaches = ('src="http', "src='http", 'href="http', "href='http",
+               "url(http", "url('http", 'url("http', "@import", "//unpkg", "//cdn")
+    static = Path(__file__).resolve().parents[1] / "src/ticket_runner/web/static"
+    for name in ("index.html", "app.js", "header.js", "style.css"):
+        text = (static / name).read_text(encoding="utf-8")
+        for shape in reaches:
+            assert shape not in text, f"{name} reaches off the machine: {shape}"
+
+
+@case
 def the_version_is_rewritten_where_the_product_reads_it():
     """`__version__` is what --version and the console header print.
 

@@ -10,13 +10,19 @@
 </head>
 <body>
 
-<header class="bar">
-  <span class="brand">ticket<span class="dim">-runner</span></span>
-  <span class="version" id="version" title="the version this console is running"></span>
-  <span class="pills" id="pills"></span>
-  <span class="grow"></span>
-  <span class="link" id="connection" title="event stream">connecting…</span>
-  <button class="ghost" id="refresh" title="reread the board now">refresh</button>
+<header class="bar" id="bar">
+  <canvas class="bar-fx" id="bar-fx" aria-hidden="true"></canvas>
+  <div class="bar-veil" aria-hidden="true"></div>
+  <div class="bar-inner">
+    <div class="bar-row">
+      <span class="brand">ticket<span class="dim">-runner</span></span>
+      <span class="version" id="version" title="the version this console is running"></span>
+      <span class="grow"></span>
+      <span class="link" id="connection" title="event stream">connecting…</span>
+      <button class="ghost" id="refresh" title="reread the board now">refresh</button>
+    </div>
+    <span class="pills" id="pills"></span>
+  </div>
 </header>
 
 <nav class="tabs" id="tabs">
@@ -83,6 +89,7 @@
   </section>
 </main>
 
+<script src="/static/header.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>
