@@ -47,27 +47,20 @@ async function api(path, body) {
   return payload;
 }
 
-/* The header's shader is told the same things the header's words say: whether
- * the stream is up, whether a run is going, and that something just happened.
- * It is a status light with a GPU behind it, and `fx` stays a no-op on a machine
- * that could not give it one. */
-const fx = (name, ...args) => { if (window.HeaderFX) window.HeaderFX[name](...args); };
-
 function connect() {
   const stream = new EventSource("/api/events", { withCredentials: true });
   const mark = (text, className) => {
     const node = $("connection");
     node.textContent = text;
     node.className = `link ${className}`;
-    fx("setAlive", className === "on");
   };
   stream.onopen = () => mark("live", "on");
   stream.onerror = () => mark("reconnecting…", "off");
-  stream.addEventListener("board", (event) => { fx("pulse"); renderBoard(JSON.parse(event.data)); });
-  stream.addEventListener("step", (event) => { fx("pulse"); onStep(JSON.parse(event.data)); });
-  stream.addEventListener("chat", (event) => { fx("pulse"); onChat(JSON.parse(event.data)); });
-  stream.addEventListener("command", (event) => { fx("pulse"); onCommand(JSON.parse(event.data)); });
-  stream.addEventListener("talk", (event) => { fx("pulse"); onTalk(JSON.parse(event.data)); });
+  stream.addEventListener("board", (event) => renderBoard(JSON.parse(event.data)));
+  stream.addEventListener("step", (event) => onStep(JSON.parse(event.data)));
+  stream.addEventListener("chat", (event) => onChat(JSON.parse(event.data)));
+  stream.addEventListener("command", (event) => onCommand(JSON.parse(event.data)));
+  stream.addEventListener("talk", (event) => onTalk(JSON.parse(event.data)));
   // Another tab saved, or `ticket-runner config` did. Redraw — unless this tab
   // is in the middle of an edit, which is not something to take away from you.
   stream.addEventListener("settings", () => {
@@ -479,9 +472,6 @@ async function refreshState() {
   if (!info.claude) add("claude not found", "warn");
   add(`${info.handled} handled · $${info.spend}`);
   if (info.update) add(`${info.update} available · run update`, "warn");
-  // Idle is not off: a timer that is armed keeps the bar drifting, a run in
-  // progress makes it fly, and a runner nobody has switched on barely moves.
-  fx("setEnergy", info.running ? 1 : info.timer === "enabled" ? 0.28 : 0.05);
   const version = $("version");
   version.textContent = info.version ? `v${info.version}` : "";
   version.title = info.update

@@ -944,16 +944,6 @@ The comment is written with the runner's own Notion token, because that is the o
 the console has — and it opens the same way an answer relayed from Telegram does, so the
 next run reads it as yours rather than as its own voice.
 
-**The header** is the one you read without looking at it.
-Behind the name is a lattice drawn by the GPU, and it is wired to the runner rather
-than to a clock: violet and slow while the timer waits, faster and the colour of
-embers while a ticket is running, one ripple across the bar for every event that lands
-on the stream, and grey with a red bleed the moment the stream drops. Nothing is
-fetched to draw it — it is a fragment shader in the page, on a machine that is already
-yours. It stops drawing when the tab is hidden, asks less of a machine that cannot keep
-up, and holds still on a system that asks for reduced motion; where there is no WebGL
-at all, the bar is a gradient and everything else is where it was.
-
 **The console** is one field and two gestures, and they are not made to look alike.
 
 - A line starting with `>` is a **`ticket-runner` subcommand** — `>status`, `>list`,
