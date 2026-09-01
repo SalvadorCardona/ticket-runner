@@ -68,3 +68,12 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
   running, an update waiting if there is one, and the commands — rather than an
   argparse usage block. The web console prints the same version beside its name
   in the header, so a browser tab left open says which runner it is talking to.
+
+### Changed
+
+- The console's scroll bars are the console's own: thin, rounded, the colour of
+  its panels, and only really visible under the pointer. The browser's — pale,
+  wide, and drawn for a white page — turned up in every part of the console
+  that scrolls, which is nearly all of it: the board, the transcript, a
+  session's steps, the settings. The dropdowns and the caret follow the same
+  dark now.
