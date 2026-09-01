@@ -39,37 +39,123 @@ code { font-family: var(--mono); font-size: .88em; }
 
 /* -- header ---------------------------------------------------------------- */
 
+/* The bar is three layers: a canvas raymarching a gyroid tunnel, a veil that
+   buys the text its contrast back, and the controls themselves. Everything
+   below the canvas is a header on its own — the gradient here is what you get
+   when the machine has no WebGL to give, and it is not an apology. */
+
 .bar {
-  display: flex;
-  align-items: center;
-  gap: .8rem;
-  padding: .55rem .9rem;
+  position: relative;
+  isolation: isolate;
   border-bottom: 1px solid var(--line);
-  background: var(--panel);
+  background:
+    radial-gradient(120% 220% at 12% 0%, #1d2233 0%, transparent 60%),
+    linear-gradient(97deg, #141a26 0%, #171b26 45%, #1b1730 100%);
   flex: 0 0 auto;
+  overflow: hidden;
 }
-.brand { font-weight: 700; letter-spacing: -.02em; }
+/* The seam between the bar and the rest of the console, lit. It is the one
+   place the brand's three colours are allowed to be stated outright. */
+.bar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  z-index: 3;
+  background: linear-gradient(90deg, transparent 0%, rgba(59, 130, 246, .5) 20%,
+                              rgba(167, 139, 250, .8) 50%, rgba(244, 114, 182, .5) 80%, transparent 100%);
+}
+.bar-fx {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: 0;
+  opacity: .92;
+}
+/* Text over a moving image needs somewhere to stand. The veil is dark where the
+   brand and the pills are, and gets out of the way on the right, which is the
+   half of the bar with nothing written on it. */
+.bar-veil {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(15, 17, 21, .78) 0%, rgba(15, 17, 21, .52) 22%,
+                           rgba(15, 17, 21, .16) 52%, rgba(15, 17, 21, 0) 76%),
+    linear-gradient(270deg, rgba(15, 17, 21, .60) 0%, rgba(15, 17, 21, 0) 15%),
+    linear-gradient(180deg, rgba(15, 17, 21, .28) 0%, transparent 45%,
+                            rgba(15, 17, 21, .48) 100%);
+}
+.bar-inner {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: .45rem;
+  padding: 1.15rem 1.05rem .95rem;
+}
+.bar-row { display: flex; align-items: center; gap: .6rem; }
+
+.brand {
+  font-size: 1.75rem;
+  font-weight: 800;
+  letter-spacing: -.05em;
+  line-height: 1.05;
+  background: linear-gradient(94deg, #ffffff 0%, #cddcff 38%, #a78bfa 68%, #f472b6 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 1px 14px rgba(0, 0, 0, .85), 0 0 26px rgba(167, 139, 250, .35);
+  transition: text-shadow .18s ease, filter .18s ease;
+}
+/* No `opacity` here: it would composite this span on its own, and a
+   transparent glyph outside the parent's clipped background paints nothing.
+   The gradient already tells the two halves apart. */
+.brand .dim { color: inherit; font-weight: 700; }
+.bar:hover .brand {
+  text-shadow: 0 1px 14px rgba(0, 0, 0, .85), .035em 0 rgba(244, 114, 182, .6),
+               -.035em 0 rgba(59, 130, 246, .6), 0 0 30px rgba(167, 139, 250, .5);
+  filter: saturate(1.15);
+}
+
 .version {
   font-size: .72rem;
   color: var(--dim);
-  border: 1px solid var(--line);
+  border: 1px solid rgba(255, 255, 255, .14);
+  background: rgba(15, 17, 21, .5);
   border-radius: 999px;
-  padding: .1rem .4rem;
-  margin-left: -.45rem;
+  padding: .1rem .45rem;
   white-space: nowrap;
+  backdrop-filter: blur(6px);
 }
 .pills { display: flex; gap: .4rem; flex-wrap: wrap; }
 .pill {
   font-size: .76rem;
   padding: .16rem .5rem;
   border-radius: 999px;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(255, 255, 255, .12);
+  background: rgba(15, 17, 21, .55);
   color: var(--dim);
   white-space: nowrap;
+  backdrop-filter: blur(6px);
 }
-.pill.on { color: var(--green); border-color: #1f6b52; }
-.pill.warn { color: var(--amber); border-color: #6b551f; }
-.pill.busy { color: var(--blue); border-color: #1f3f6b; }
+.pill.on { color: var(--green); border-color: rgba(52, 211, 153, .38); }
+.pill.warn { color: var(--amber); border-color: rgba(251, 191, 36, .38); }
+.pill.busy {
+  color: #bfd7ff;
+  border-color: rgba(59, 130, 246, .5);
+  background: rgba(59, 130, 246, .16);
+  animation: breathe 2.4s ease-in-out infinite;
+}
+@keyframes breathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, .0); }
+  50% { box-shadow: 0 0 14px 0 rgba(59, 130, 246, .45); }
+}
 
 button {
   font: inherit;
@@ -85,9 +171,38 @@ button:disabled { opacity: .5; cursor: default; }
 button.primary { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 600; }
 button.primary:hover { background: #2f74e6; }
 button.ghost { background: transparent; color: var(--dim); }
-.link { color: var(--dim); font-size: .8rem; }
+/* The stream, said in a dot: a steady green while it is up, a slow red blink
+   while it is not. */
+.link {
+  color: var(--dim);
+  font-size: .8rem;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, .8);
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+}
+.link::before {
+  content: "";
+  width: .42rem;
+  height: .42rem;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+}
 .link.on { color: var(--green); }
-.link.off { color: var(--red); }
+.link.off { color: var(--red); animation: blink 1.1s steps(2, end) infinite; }
+@keyframes blink { 50% { opacity: .35; } }
+
+.bar .ghost {
+  border-color: rgba(255, 255, 255, .16);
+  background: rgba(15, 17, 21, .5);
+  backdrop-filter: blur(6px);
+}
+.bar .ghost:hover { color: var(--text); border-color: rgba(255, 255, 255, .32); }
+
+@media (prefers-reduced-motion: reduce) {
+  .pill.busy, .link.off { animation: none; }
+}
 
 /* -- panes ----------------------------------------------------------------- */
 
@@ -405,6 +520,10 @@ button.check-run {
 
 @media (max-width: 860px) {
   main { grid-template-columns: 1fr; }
+  .brand { font-size: 1.15rem; }
+  .bar-inner { padding: .5rem .7rem .45rem; }
+  /* No room to fade sideways on a phone: the veil goes flat, and light. */
+  .bar-veil { background: linear-gradient(180deg, rgba(15, 17, 21, .62) 0%, rgba(15, 17, 21, .42) 100%); }
   .tabs button { flex: 1; }
   .tabs button[data-pane="console"] { display: block; }
   .pane, .pane.console { grid-column: 1; }
