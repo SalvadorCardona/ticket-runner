@@ -295,7 +295,12 @@ async function refreshState() {
   if (info.running) add("a run is in progress", "busy");
   if (!info.claude) add("claude not found", "warn");
   add(`${info.handled} handled · $${info.spend}`);
-  add(info.version);
+  if (info.update) add(`${info.update} available · run update`, "warn");
+  const version = $("version");
+  version.textContent = info.version ? `v${info.version}` : "";
+  version.title = info.update
+    ? `v${info.version} — ${info.update} is waiting, run: ticket-runner update`
+    : `v${info.version} — the version this console is running`;
   $("chat-state").textContent = info.chat.session_id
     ? `${info.chat.turns} turn(s) · ${info.chat.resume_command}`
     : "no conversation yet";

@@ -50,3 +50,7 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
   `ticket-runner init` adds it.
 - A release and versioning system: this changelog, `scripts/release.py`, the
   `release` workflow, and the `/release` command Claude uses to cut one.
+- `ticket-runner`, typed alone, presents itself: the product, the version it is
+  running, an update waiting if there is one, and the commands — rather than an
+  argparse usage block. The web console prints the same version beside its name
+  in the header, so a browser tab left open says which runner it is talking to.
