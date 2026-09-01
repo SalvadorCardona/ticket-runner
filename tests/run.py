@@ -30,7 +30,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ticket_runner import config as C  # noqa: E402
-from ticket_runner import agents, channels, conversation, markdown, notion  # noqa: E402
+from ticket_runner import agents, channels, conversation, markdown, naming, notion  # noqa: E402
 from ticket_runner import progress, projects, prompt, provision, session, state  # noqa: E402
 from ticket_runner.channels import slack as slack_channel, telegram as telegram_channel  # noqa: E402
 from ticket_runner import update, workspace  # noqa: E402
@@ -2009,6 +2009,177 @@ def publishing_hands_the_page_as_it_stands_to_a_session_and_then_closes_it():
     assert "Le post d'annonce" in prompt_text, "the page as it stands is what goes out"
     assert "publishing, not producing" in prompt_text
     assert "publié sur le compte Instagram" in runner.client.comments_written[0]
+
+
+# -- naming a ticket nobody titled -------------------------------------------
+
+
+class _NamelessClient:
+    """One ticket, its content, and everything written back onto it."""
+
+    def __init__(self, body: str, refuse: bool = False):
+        self._body = body
+        self._refuse = refuse
+        self.written: list[dict] = []
+
+    def schema(self, database_id: str) -> dict[str, str]:
+        # Not "Name": the title column is called whatever Notion was told.
+        return {"Titre": "title", "Status": "status"}
+
+    def title_property(self, database_id: str) -> str:
+        return notion.Client.title_property(self, database_id)  # the real lookup
+
+    def blocks_text(self, block_id: str, depth: int = 0) -> str:
+        return self._body
+
+    def comments(self, page_id: str) -> list[notion.Comment]:
+        return []
+
+    def update(self, database_id: str, page_id: str, values: dict) -> None:
+        if self._refuse and "Titre" in values:
+            raise notion.NotionError("PATCH /pages/x: 403 insufficient permissions")
+        self.written.append(values)
+
+    def comment(self, page_id: str, text: str, discussion_id: str = "") -> None:
+        pass
+
+
+class _OneRepository:
+    """A resolver for a board whose single project is a repository."""
+
+    def resolve(self, client, page_id: str) -> projects.Project:
+        return projects.Project(name="ticket-runner", path=Path("/repo"))
+
+
+def _nameless(title: str, body: str, refuse: bool = False):
+    """A Runner about to prepare one ticket, with Notion replaced."""
+    page = notion.Page(
+        id="3ce451680af481bc9b66f4d875f74ff5",
+        url="https://notion.so/t",
+        title=title,
+        properties={
+            "Titre": {"type": "title", "title": [{"plain_text": title}]},
+            "Project": {"type": "relation", "relation": [{"id": "p-runner"}]},
+        },
+    )
+    runner = _board_runner([page], {})
+    runner.client = _NamelessClient(body, refuse)
+    runner.config.runner.base_branch = "main"  # so git is never asked anything
+    runner.resolver = _OneRepository()
+    return runner, runner_module.Ticket(page)
+
+
+@contextmanager
+def _naming_session(answer: str, missing: bool = False):
+    """The one-line session that names a ticket, replaced by what it said."""
+    asked: list[str] = []
+
+    def fake_run(prompt_text, **kwargs):
+        asked.append(prompt_text)
+        if missing:
+            raise FileNotFoundError("claude not found in PATH")
+        return session.Outcome(
+            ok=True,
+            blocked=False,
+            session_id="s-name",
+            summary="",
+            log=Path("/tmp/none.jsonl"),
+            answer=answer,
+        )
+
+    original = runner_module.session.run
+    runner_module.session.run = fake_run
+    try:
+        yield asked
+    finally:
+        runner_module.session.run = original
+
+
+@case
+def a_ticket_with_no_title_is_named_from_what_it_says():
+    """And named before the branch, which is what the title is first used for."""
+    runner, ticket = _nameless("", "Le bandeau de la console reste blanc au chargement.")
+    with _state_home(), _naming_session("Réparer le bandeau blanc de la console") as asked:
+        job = runner.prepare(ticket)
+
+    assert asked and "Le bandeau de la console" in asked[0], "it names from the content"
+    assert runner.client.written[0] == {"Titre": "Réparer le bandeau blanc de la console"}
+    assert ticket.title == "Réparer le bandeau blanc de la console"
+    assert job.branch == "ticket/reparer-le-bandeau-blanc-de-la-console-75f74ff5"
+
+
+@case
+def a_ticket_that_already_has_a_title_costs_nothing_and_keeps_it():
+    runner, ticket = _nameless("Retirer le shader", "Il coûte 12 % de CPU pour rien.")
+    with _state_home(), _naming_session("Un titre que personne n'a demandé") as asked:
+        job = runner.prepare(ticket)
+
+    assert asked == [], "the common case must not pay for a session"
+    assert ticket.title == "Retirer le shader"
+    assert all("Titre" not in values for values in runner.client.written)
+    assert job.branch == "ticket/retirer-le-shader-75f74ff5"
+
+
+@case
+def a_ticket_with_neither_a_title_nor_content_is_asked_about_rather_than_named():
+    """Nothing to name from is nothing to invent from: it stays the old question."""
+    runner, ticket = _nameless("", "## Ce qu'il faut faire\n## Comment on saura\n")
+    with _state_home(), _naming_session("Inventé de toutes pièces") as asked:
+        job = runner.prepare(ticket)
+
+    assert job is None and asked == []
+    assert runner.client.written == [{"Status": "Blocked"}]
+
+
+@case
+def a_naming_that_fails_falls_back_on_the_first_line_of_the_content():
+    """No claude on the PATH, and the ticket is still named — and still runs."""
+    runner, ticket = _nameless(
+        "",
+        "## Ce qu'il faut faire\n"
+        "Retirer le shader du bandeau de la console, il coûte 12 % de CPU pour rien.",
+    )
+    with _state_home(), _naming_session("", missing=True):
+        job = runner.prepare(ticket)
+
+    # The first line that says something, cut on a word rather than mid-word.
+    assert runner.client.written[0] == {
+        "Titre": "Retirer le shader du bandeau de la console, il coûte 12 %…"
+    }
+    assert job.branch.startswith("ticket/retirer-le-shader-du-bandeau")
+
+
+@case
+def a_title_notion_refuses_leaves_the_ticket_to_run_under_the_default_label():
+    """A name is a comfort. Losing it must not cost the ticket its run."""
+    runner, ticket = _nameless("", "Le bandeau reste blanc au chargement.", refuse=True)
+    with _state_home(), _naming_session("Réparer le bandeau blanc"):
+        job = runner.prepare(ticket)
+
+    assert job is not None
+    # Kept in memory it would name a branch the board cannot show.
+    assert ticket.title == "(untitled ticket)"
+    assert job.branch == "ticket/untitled-ticket-75f74ff5"
+
+
+@case
+def a_title_is_one_line_however_the_session_wrapped_it():
+    assert (
+        naming.clean('Voici le titre :\n\n"Réparer le bandeau blanc"')
+        == "Réparer le bandeau blanc"
+    )
+    assert naming.clean("**Retirer le shader du bandeau.**") == "Retirer le shader du bandeau"
+    assert naming.clean("   ") == ""
+    assert len(naming.clean("mot " * 40)) <= naming.LIMIT + 1, "a title is a line"
+    assert "language the content is written in" in naming.prompt("Le bandeau reste blanc.")
+
+
+@case
+def a_fallback_title_is_the_first_line_that_says_something():
+    body = "# Ce qu'il faut faire\n\n---\n- Retirer le shader.\nEt aussi le reste."
+    assert naming.fallback(body) == "Retirer le shader"
+    assert naming.fallback("## Titre\n## Autre\n") == "", "a bare template names nothing"
+    assert naming.fallback("") == ""
 
 
 # -- the live report ---------------------------------------------------------

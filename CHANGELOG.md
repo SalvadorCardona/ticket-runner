@@ -18,6 +18,16 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Added
 
+
+- A ticket nobody got round to titling is named by the runner when it becomes
+  ready: a very short session reads what the page says and writes a title back
+  into Notion, so the board shows it too — and the branch reads
+  `ticket/retirer-le-shader-…` instead of one more `untitled-ticket`. A ticket
+  that already has a title keeps it and costs nothing extra, and one with
+  nothing on the page still comes back with the question rather than a name
+  invented for it.
+- A terminal for one ticket, in the console: click a card and the **Ticket** tab
+
 - The console is a React application. Its page is rebuilt on TypeScript, Vite,
   Tailwind and [shadcn/ui](https://ui.shadcn.com), and it has a light theme now —
   a switch in the header, dark still what it opens on. Nothing about how it is
@@ -32,6 +42,7 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
   working here can search the registry and add a component without leaving the
   session.
 - A terminal for one ticket, in the console: click a card and the **Ticket** pane
+
   shows everything said on it — the runner's reports, your answers, the ones you
   gave from Telegram — with a field to say the next thing and, while it runs, its
   session's steps scrolling underneath. What you type is a comment on the ticket,
