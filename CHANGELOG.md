@@ -29,7 +29,9 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
   where you already are, and one word answers it.
 - `ticket-runner serve` — the web console: the board live, the CLI in a browser,
   and a chat with the whole workspace.
-- Progress written as the session runs, at a ten-second cadence.
+- Progress written as the session runs, at a ten-second cadence: a bullet per
+  command run and per file touched, and what the agent says as a paragraph of
+  its own — whole, in its own markdown, and never cut to the length of a bullet.
 - Self-update: a run asks once an hour whether the installed code is still the
   newest, and updates itself between two runs.
 - `ticket-runner history` shows what each ticket cost and how long it took.
