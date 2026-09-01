@@ -38,7 +38,7 @@ from ..config import Config, state_dir
 # useless from a browser, and both would hang the request forever waiting for
 # something that is happening on the server's own screen.
 REFUSED = {
-    "config": "opens an editor on the server — use the file, or ask the chat to edit it",
+    "config": "opens an editor on the server — the Settings tab is that file, in this page",
     "open": "opens a terminal on the server's desktop, which is not where you are",
     "serve": "is what you are already talking to",
 }

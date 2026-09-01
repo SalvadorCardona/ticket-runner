@@ -25,6 +25,7 @@ from .. import update as update_module
 from ..config import Config
 from ..runner import Runner, scheduled_for, short_id
 from . import console, live
+from . import settings as settings_module
 
 # The project index is read from one database query, not one page fetch per
 # project — and kept, because projects are renamed about as often as they are
@@ -285,6 +286,26 @@ class Api:
         )
         self.watch.nudge()
         return {"id": page_id, "status": settings.state(key)}
+
+    # -- the configuration ----------------------------------------------------
+
+    def settings(self) -> dict:
+        """Every setting the file holds, as the console draws it — secrets aside."""
+        return settings_module.describe(self.config)
+
+    def save_settings(self, payload: dict) -> dict:
+        """Write what the console changed, and pick the new file up at once.
+
+        The caches go first because a saved token, workspace or property name is
+        a different board: keeping the old client would have the console explain
+        that the setting did not work.
+        """
+        result = settings_module.save(self.config, payload)
+        if result["saved"]:
+            self.forget()
+            self.hub.publish("settings", saved=result["saved"])
+            self.watch.nudge()
+        return result
 
     # -- the chat's opening frame ---------------------------------------------
 

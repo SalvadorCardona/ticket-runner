@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -334,21 +335,59 @@ def write_notion_value(path: Path, key: str, value: str) -> bool:
     return write_value(path, "notion", key, value)
 
 
-def write_value(path: Path, table: str, key: str, value: str) -> bool:
-    """Set one key of one table, in place, keeping the comments.
+# A TOML key that needs no quotes. Anything else — a project called "Site
+# vitrine", a status column with an accent — is written quoted, and looked up
+# under both spellings: the file may have been typed by hand.
+_BARE_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
+
+_ESCAPES = (("\\", "\\\\"), ('"', '\\"'), ("\n", "\\n"), ("\r", "\\r"), ("\t", "\\t"))
+
+
+def _literal(value: object) -> str:
+    """One TOML right-hand side, in the four shapes this file holds.
+
+    A string is escaped rather than interpolated: a token with a quote in it
+    used to write a line that stopped the file from parsing, and the next thing
+    anybody saw was "configuration not found".
+    """
+    if isinstance(value, bool):  # before int: a bool *is* an int in Python
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(_literal(str(item)) for item in value) + "]"
+    text = str(value)
+    for raw, encoded in _ESCAPES:
+        text = text.replace(raw, encoded)
+    text = "".join(character if character >= " " else "" for character in text)
+    return f'"{text}"'
+
+
+def write_value(path: Path, table: str, key: str, value: object) -> bool:
+    """Set — or, with `value=None`, remove — one key of one table, in place.
 
     A TOML writer is not in the standard library and this file is one the user
     reads and edits by hand — rewriting it from a parsed tree would cost every
     comment in it, which is most of its value. So the line is edited, or added
     under the table header if it is not there.
 
+    Removing rather than emptying is deliberate: a key the file does not carry
+    is a key the loader fills in itself, and that is what the console means when
+    a field is left blank. The comments around it survive, so the line comes
+    back documented if it is ever set again.
+
     `table` is written as it appears between the brackets, dots included:
     "notify.telegram" finds `[notify.telegram]`.
+
+    Returns whether the file changed.
     """
     text = path.read_text(encoding="utf-8")
-    line = f'{key} = "{value}"'
+    written = key if _BARE_KEY.match(key) else _literal(key)
+    line = "" if value is None else f"{written} = {_literal(value)}"
     section = re.search(rf"^\[{re.escape(table)}\]\s*$", text, flags=re.M)
     if not section:
+        if not line:
+            return False
         path.write_text(f"{text.rstrip()}\n\n[{table}]\n{line}\n", encoding="utf-8")
         return True
 
@@ -357,16 +396,115 @@ def write_value(path: Path, table: str, key: str, value: str) -> bool:
     end = start + (following.start() if following else len(text) - start)
     body = text[start:end]
 
-    existing = re.search(rf'^{re.escape(key)}\s*=.*$', body, flags=re.M)
+    spellings = "|".join({re.escape(key), re.escape(_literal(key))})
+    existing = re.search(rf"^(?:{spellings})\s*=.*$", body, flags=re.M)
     if existing:
-        if existing.group(0).strip() == line:
-            return False
-        body = body[: existing.start()] + line + body[existing.end():]
-    else:
+        if line:
+            if existing.group(0).strip() == line:
+                return False
+            body = body[: existing.start()] + line + body[existing.end():]
+        else:
+            stop = existing.end() + (1 if body[existing.end() : existing.end() + 1] == "\n" else 0)
+            body = body[: existing.start()] + body[stop:]
+    elif line:
         body = "\n" + line + body
+    else:
+        return False
 
     path.write_text(text[:start] + body + text[end:], encoding="utf-8")
     return True
+
+
+def edit(path: Path, changes: list[tuple[str, str, object]]) -> list[str]:
+    """Apply a set of changes to the file — all of them, or none at all.
+
+    This is what the console saves through, and it is the one writer that does
+    not trust its caller. A configuration is not a form: half of it applied is a
+    runner that claims tickets it cannot finish. So the edits are made on a copy
+    beside the file, the copy is *loaded* — if it will not parse, or would leave
+    a working installation unable to run, nothing moves — and only then does it
+    take the file's place, in one `os.replace` and with its permissions.
+
+    The file it displaces is kept as `config.toml.bak`, which is what you want
+    the first time a save turns out to have been the wrong idea.
+
+    Returns the names of the keys that actually changed, `table.key` each.
+    """
+    original = path.read_text(encoding="utf-8")
+    try:
+        load(path).require_usable()
+        was_usable = True
+    except ConfigError:
+        was_usable = False
+
+    # Named per call: two saves at once — two browser tabs, a tab and the CLI —
+    # would otherwise edit the same copy and the loser would win.
+    scratch = path.parent / f".{path.name}.saving.{os.getpid()}.{threading.get_ident()}"
+    scratch.write_text(original, encoding="utf-8")
+    try:
+        touched = [
+            f"{table}.{key}"
+            for table, key, value in changes
+            if write_value(scratch, table, key, value)
+        ]
+        if not touched:
+            return []
+        try:
+            fresh = load(scratch)
+            if was_usable:
+                fresh.require_usable()
+        # Broad on purpose: the loader coerces as it reads, and anything it
+        # refuses to read — a port that is not a number, a path that is not one
+        # — has to come back as "not saved" rather than as a traceback and half
+        # a file. The scratch copy is what took it, so there is nothing to undo.
+        except Exception as error:  # noqa: BLE001
+            raise ConfigError(
+                f"that would leave the configuration unusable — "
+                f"{str(error).splitlines()[0].replace(str(scratch), str(path))}"
+            ) from error
+        try:
+            mode = path.stat().st_mode & 0o777
+        except OSError:
+            mode = 0o600
+        backup = path.parent / f"{path.name}.bak"
+        backup.write_text(original, encoding="utf-8")
+        backup.chmod(0o600)
+        scratch.chmod(mode)
+        os.replace(scratch, path)
+    finally:
+        if scratch.exists():
+            scratch.unlink()
+    return touched
+
+
+def read_raw(path: Path) -> dict:
+    """The file as it is written, with nothing filled in.
+
+    `load` is the runner's view: every default applied, every floor enforced.
+    This is the file's own, and the console needs it to tell "you chose the
+    default" from "you said nothing and the default answered".
+    """
+    try:
+        with path.open("rb") as handle:
+            return tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+
+
+def defaults(table: str) -> dict[str, str]:
+    """The names the runner falls back on, for one of the three naming tables.
+
+    `properties`, `status`, `pages` — the three places where a board that spells
+    a column its own way says so. Public because the console draws a field per
+    key, and a key it did not know about would be a setting nobody can reach.
+    """
+    return dict(
+        {
+            "properties": _DEFAULT_PROPERTIES,
+            "status": _DEFAULT_STATUS,
+            "pages": _DEFAULT_PAGES,
+        }[table]
+    )
 
 
 def is_identifier(value: str) -> bool:

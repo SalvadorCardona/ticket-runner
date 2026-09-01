@@ -35,6 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from .. import config as config_module
 from .. import notion
 from ..config import Config, state_dir
 from .api import Api
@@ -228,6 +229,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(self.api.history())
             if route == "/api/chat":
                 return self._json({"messages": self.api.chat.history(), **self.api.chat.state()})
+            if route == "/api/settings":
+                return self._json(self.api.settings())
             if route == "/api/logs":
                 return self._json(self.api.logs())
             if match := re.fullmatch(r"/api/logs/([\w.\-]+)", route):
@@ -276,10 +279,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(self.api.chat.send(str(payload.get("text", ""))))
             if route == "/api/chat/reset":
                 return self._json(self.api.chat.reset())
+            if route == "/api/settings":
+                return self._json(self.api.save_settings(payload))
             if route == "/api/refresh":
                 self.api.forget()
                 self.api.watch.nudge()
                 return self._json({"ok": True})
+        except config_module.ConfigError as error:
+            return self._fail(400, str(error).splitlines()[0])
         except ValueError as error:
             return self._fail(400, str(error))
         except RuntimeError as error:
