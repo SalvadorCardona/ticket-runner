@@ -2026,16 +2026,66 @@ def _tool(name: str, **payload) -> dict:
 def an_event_becomes_the_line_a_human_would_write():
     steps = progress.describe(
         _assistant(
-            {"type": "text", "text": "I will read the\nconfiguration first."},
+            {"type": "text", "text": "I will read the config.\n\nThen the tests."},
             _tool("Bash", command="npm test -- --watch=false"),
             _tool("Read", file_path="src/app/config.ts"),
         )
     )
     assert [step.line for step in steps] == [
-        "I will read the configuration first.",
+        # What was said keeps its own shape; what was done is a line.
+        "I will read the config.\nThen the tests.",
         "Bash · npm test -- --watch=false",
         "Read · src/app/config.ts",
     ]
+    assert [step.said for step in steps] == [True, False, False]
+
+
+@case
+def what_the_agent_said_is_written_whole_and_not_cut_to_a_bullet():
+    """A paragraph of reasoning is the part a human reads; it goes down entire."""
+    said = "Le ticket parle de la documentation. " * 20  # far past a bullet's 200
+    steps = progress.describe(_assistant({"type": "text", "text": said}))
+    assert steps[0].label == said.strip() and "…" not in steps[0].label
+
+    live, client, clock = _reporting()
+    live.add(steps[0])
+    live.add(progress.Step("Bash", "npm test"))
+    clock.now += 11
+    live.flush()
+    # Prose is a paragraph, a tool call is a bullet, and the two are kept apart.
+    assert client.kinds == ["paragraph", "bulleted_list_item"], "no rule before the first word"
+    assert client.blocks[0] == said.strip()
+
+    live.add(steps[0])
+    clock.now += 11
+    live.flush()
+    assert client.kinds[-2:] == ["divider", "paragraph"]
+    # The board column shows a line, whatever the page shows.
+    assert len(client.properties[-1]) <= progress.LINE
+
+
+@case
+def a_turn_too_long_for_a_ticket_page_is_the_only_one_cut():
+    steps = progress.describe(_assistant({"type": "text", "text": "x" * (progress.SAID + 500)}))
+    assert len(steps[0].label) == progress.SAID and steps[0].label.endswith("…")
+
+    live, client, clock = _reporting()
+    live.add(steps[0])
+    clock.now += 11
+    live.flush()
+    # Notion caps a piece of rich text, not a block: the paragraph is in pieces.
+    assert client.pieces[-1] > 1 and client.blocks[-1] == steps[0].label
+
+
+@case
+def the_markdown_an_agent_writes_reaches_the_page_as_markup():
+    live, client, clock = _reporting()
+    live.add(progress.Step("**Interprétation** : lire `README.md`.", said=True))
+    clock.now += 11
+    live.flush()
+    assert client.blocks == ["Interprétation : lire README.md."], "no stray asterisks"
+    marked = [name for mark in client.marks for name, on in mark.items() if on]
+    assert marked == ["bold", "code"]
 
 
 @case
@@ -2071,7 +2121,10 @@ class _Live:
 
     def __init__(self, refuse=False):
         self.refuse = refuse
-        self.blocks = []          # every child appended under the toggle
+        self.blocks = []          # the text of every child appended under the toggle
+        self.kinds = []           # and its block type
+        self.pieces = []          # and how many pieces of rich text it took
+        self.marks = []           # every annotation any of those pieces carried
         self.titles = []          # every title the toggle has carried
         self.properties = []      # every value written to the board column
 
@@ -2080,10 +2133,13 @@ class _Live:
             raise notion.NotionError("403 forbidden")
         if block_id == "page":
             return ["toggle"]
-        self.blocks += [
-            "".join(part["text"]["content"] for part in block["bulleted_list_item"]["rich_text"])
-            for block in blocks
-        ]
+        for block in blocks:
+            kind = block["type"]
+            parts = block[kind].get("rich_text", [])
+            self.kinds.append(kind)
+            self.pieces.append(len(parts))
+            self.blocks.append("".join(part["text"]["content"] for part in parts))
+            self.marks += [part["annotations"] for part in parts if part.get("annotations")]
         return ["block"] * len(blocks)
 
     def update_block(self, block_id, payload):
