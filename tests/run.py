@@ -2428,6 +2428,123 @@ def the_console_only_listens_beyond_localhost_when_told_to():
     assert "bypassPermissions" in explained.getvalue(), "and say why, not just refuse"
 
 
+class _TalkClient:
+    """A page with a discussion on it, and whatever gets written back."""
+
+    def __init__(self, comments: list[notion.Comment]) -> None:
+        self._comments = comments
+        self.written: list[tuple[str, str, str]] = []
+
+    def comments(self, page_id: str) -> list[notion.Comment]:
+        return list(self._comments)
+
+    def comment(self, page_id: str, text: str, discussion_id: str = "") -> None:
+        self.written.append((page_id, text, discussion_id))
+
+
+def _bare_api(client, me: str = "runner-id") -> web_api.Api:
+    """An Api with its Notion replaced, and nothing else built."""
+    api = web_api.Api.__new__(web_api.Api)
+    api._runner = _bare_runner(client)
+    api._runner._me = me
+    api.hub = web_live.Hub()
+    api._config = C.Config(
+        notion=C.Notion(token="ntn_x", tickets_database="a" * 32),
+        runner=C.Runner(),
+        projects={},
+        path=Path("/nowhere/config.toml"),
+        web=C.Web(),
+    )
+    api._stamp = 0.0
+    return api
+
+
+@case
+def a_message_typed_at_a_ticket_is_a_comment_in_your_own_voice():
+    """The console writes with the runner's token; the words are still yours.
+
+    Without the relayed opening, the next run would read its own voice under its
+    own question — and a conversation with oneself is the one failure mode here
+    that never ends on its own.
+    """
+    report = notion.Comment(
+        "ticket-runner@laptop — blocked.\nWhich header?",
+        discussion_id="d-report",
+        created_by="runner-id",
+    )
+    client = _TalkClient([notion.Comment("une note à moi", discussion_id="d-mine"), report])
+    api = _bare_api(client)
+    api.tell("p-ticket", "  Celui du dashboard.  ")
+
+    page, text, discussion = client.written[0]
+    assert page == "p-ticket"
+    assert conversation.is_relayed(text), text
+    assert conversation.said(text) == "Celui du dashboard."
+    assert discussion == "d-report", "an answer goes under the question, not at the foot of the page"
+
+    try:
+        api.tell("p-ticket", "   ")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("an empty message should not become a comment")
+
+
+@case
+def a_ticket_the_runner_has_never_spoken_on_gets_a_thread_of_its_own():
+    """No question to answer, and none invented: the message opens a discussion."""
+    client = _TalkClient([notion.Comment("une remarque", discussion_id="d-mine", created_by="salva")])
+    _bare_api(client).tell("p-ticket", "on reprend ça demain")
+    assert client.written[0][2] == ""
+    # Same when Notion will not say who we are: without an identity there is no
+    # telling our own thread from yours, and guessing is how it goes wrong.
+    other = _TalkClient([notion.Comment("un rapport", discussion_id="d-report", created_by="runner-id")])
+    _bare_api(other, me="").tell("p-ticket", "et celui-ci ?")
+    assert other.written[0][2] == ""
+
+
+@case
+def the_discussion_of_a_ticket_reads_as_a_conversation():
+    """The ticket's terminal is the page's comments, said by who said them."""
+    client = _TalkClient([
+        notion.Comment(
+            "ticket-runner@laptop — blocked.\nWhich header?",
+            created_time="2026-08-30T10:00:00.000Z",
+            discussion_id="d-report",
+            created_by="runner-id",
+        ),
+        notion.Comment(
+            f"{conversation.RELAYED}Telegram by Salva.\nCelui du dashboard.",
+            discussion_id="d-report",
+            created_by="runner-id",
+        ),
+        notion.Comment("Merci.", discussion_id="d-report", created_by="salva"),
+    ])
+    payload = _bare_api(client).talk("p-ticket")
+    assert [message["role"] for message in payload["messages"]] == ["runner", "you", "you"]
+    said = payload["messages"][1]["text"]
+    assert said == "Celui du dashboard.", f"the device it came through is not the message: {said}"
+    assert payload["mention"] == conversation.MENTION, "the hint has to name what the runner answers to"
+
+    # An integration that will not say who we are still leaves the discussion
+    # readable: a report opens with the name the runner signs it with.
+    blind = _bare_api(client, me="").talk("p-ticket")
+    assert [message["role"] for message in blind["messages"]] == ["runner", "you", "you"]
+
+
+@case
+def a_message_written_to_a_ticket_reaches_every_open_console():
+    """A click posts and says nothing: what appears is what came back on the stream."""
+    api = _bare_api(_TalkClient([]))
+    channel = api.hub.subscribe(after=0)
+    api.tell("p-ticket", "on garde le bandeau")
+    event = channel.get_nowait()
+    assert event.kind == "talk"
+    assert event.payload["ticket"] == "p-ticket"
+    assert event.payload["role"] == "you"
+    assert event.payload["text"] == "on garde le bandeau"
+
+
 @case
 def a_relation_is_written_as_notion_spells_it():
     """A ticket created from the console names its project, or it is not one."""

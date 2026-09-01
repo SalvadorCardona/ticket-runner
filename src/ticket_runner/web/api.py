@@ -16,11 +16,12 @@ from __future__ import annotations
 import shutil
 import subprocess
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .. import config as config_module
-from .. import notion, session, state
+from .. import conversation, notion, session, state
 from .. import update as update_module
 from ..config import Config
 from ..runner import Runner, scheduled_for, short_id
@@ -255,6 +256,30 @@ class Api:
                     steps.append({"label": step.label, "detail": step.detail})
         return {"name": target.name, "steps": steps[-1000:]}
 
+    def talk(self, page_id: str) -> dict:
+        """What has been said on one ticket, oldest first.
+
+        This is the ticket's terminal, and it is not a new place to talk: it is
+        the discussion Notion already holds, read as a conversation. An answer
+        relayed from a phone — or from this console — wears the runner's token
+        and is nonetheless yours, so it is shown under your name and without the
+        line that says which device it came through.
+        """
+        me = self.runner.myself()
+        comments = self.runner.client.comments(page_id)
+        return {
+            "id": page_id,
+            "mention": self.config.notion.mention or conversation.MENTION,
+            "messages": [
+                {
+                    "role": _voice(comment, me),
+                    "text": conversation.said(comment.text),
+                    "at": comment.created_time,
+                }
+                for comment in comments
+            ],
+        }
+
     # -- writing --------------------------------------------------------------
 
     def create_ticket(self, title: str, body: str = "", project: str = "", ready: bool = True) -> dict:
@@ -286,6 +311,37 @@ class Api:
         )
         self.watch.nudge()
         return {"id": page_id, "status": settings.state(key)}
+
+    def tell(self, page_id: str, text: str) -> dict:
+        """Say something to a ticket, as a comment on it.
+
+        Which is already how a ticket is answered: a run that ends `blocked`
+        leaves its question on the page, the reply underneath puts the ticket
+        back in the queue, and a reply that names the runner asks it for words
+        instead. The console types into that, rather than beside it.
+
+        Two things make it work. It goes **into the thread the runner last spoke
+        in**, so it sits under the question and so the next pass finds a thread
+        it is part of. And it opens with `conversation.RELAYED`, because the only
+        Notion token this console has is the runner's own: without that line the
+        next run would read its own voice, and answer itself forever.
+        """
+        text = text.strip()
+        if not text:
+            raise ValueError("nothing to say")
+        me = self.runner.myself()
+        comments = self.runner.client.comments(page_id)
+        self.runner.client.comment(
+            page_id, f"{conversation.RELAYED}the console.\n{text}", _thread(comments, me)
+        )
+        self.runner.forget_comments(page_id)
+        message = {
+            "role": "you",
+            "text": text,
+            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        self.hub.publish("talk", ticket=page_id, **message)
+        return message
 
     # -- the configuration ----------------------------------------------------
 
@@ -348,6 +404,39 @@ class Api:
         if context:
             lines += ["", "# Who you are working for", "", context[:6000]]
         return "\n".join(lines)
+
+
+# How every report the runner writes opens, whichever host wrote it. Only ever
+# read as a fallback — see `_voice`.
+REPORT = "ticket-runner@"
+
+
+def _voice(comment: notion.Comment, me: str) -> str:
+    """Who said this: the runner, or you.
+
+    `conversation.ours` is the answer wherever Notion will say who we are. Where
+    it will not — an integration without the *Read user information* capability —
+    the runner's reports still open with the name it signs them with, which is
+    enough to *read* a discussion. It is not enough to answer one, which is why
+    `converse` stays silent in that case and this does not.
+    """
+    if me:
+        return "runner" if conversation.ours(comment, me) else "you"
+    return "runner" if comment.text.startswith(REPORT) else "you"
+
+
+def _thread(comments: list[notion.Comment], me: str) -> str:
+    """The discussion a message typed at a ticket belongs in.
+
+    The last one the runner has spoken in, which is where an answer to its
+    question goes. On a page it has never spoken on there is no such thread, and
+    on a board whose integration will not say who it is there is no telling —
+    both open a discussion of their own, which is the honest thing to do.
+    """
+    for thread in reversed(conversation.threads(comments)):
+        if thread.spoken_by(me) and thread.last.discussion_id:
+            return thread.last.discussion_id
+    return ""
 
 
 def _session_id(value: str) -> str:

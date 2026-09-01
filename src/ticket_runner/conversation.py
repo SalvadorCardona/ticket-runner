@@ -108,6 +108,20 @@ def is_relayed(text: str) -> bool:
     return text.lstrip().startswith(RELAYED)
 
 
+def said(text: str) -> str:
+    """A relayed comment without the line that says where it came from.
+
+    “Answered from Telegram by Salva.” is an address, not a message: read back
+    in the console's own terminal the words belong under your name, and the name
+    is already on the turn.
+    """
+    text = text.strip()
+    if not is_relayed(text):
+        return text
+    _, _, rest = text.partition("\n")
+    return rest.strip() or text
+
+
 def ours(comment: notion.Comment, me: str) -> bool:
     """Is this the runner's own voice — not merely its token?"""
     return bool(me) and comment.created_by == me and not is_relayed(comment.text)

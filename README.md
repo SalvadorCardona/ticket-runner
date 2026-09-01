@@ -903,7 +903,7 @@ is a second window on the same workspace, served from your own machine:
 ticket-runner serve
 ```
 
-It prints a URL with a token in it. Open it and you get one page, four things:
+It prints a URL with a token in it. Open it and you get one page, five things:
 
 ```
 ┌──────────────────────────────┬─────────────────────────────┐
@@ -930,7 +930,21 @@ the session log on disk rather than from the `Progress` column. A card in review
 **validate** button, where the board has that column: one click and the next pass merges
 its pull request, or publishes what it holds.
 
-**The header** is the fourth thing, and it is the one you read without looking at it.
+**A card is a way in.** Click one and the **Ticket** tab becomes that ticket's terminal:
+everything said on it, oldest first — the runner's reports, your answers, the answers you
+gave from Telegram — and a field to say the next thing. What you type is a *comment on the
+ticket*, written into the thread the runner last spoke in, which is the gesture the runner
+already knows: an answer under the question a run asked puts the ticket back in the queue,
+and one that names it — `@claude`, or whatever `notion.mention` says — asks it for words
+instead. Nothing is kept on the side; the same sentence typed into Notion does the same
+thing. While the ticket is running, its session's steps scroll underneath, so reading a
+ticket and watching it work are one place rather than two.
+
+The comment is written with the runner's own Notion token, because that is the only token
+the console has — and it opens the same way an answer relayed from Telegram does, so the
+next run reads it as yours rather than as its own voice.
+
+**The header** is the one you read without looking at it.
 Behind the name is a lattice drawn by the GPU, and it is wired to the runner rather
 than to a clock: violet and slow while the timer waits, faster and the colour of
 embers while a ticket is running, one ripple across the bar for every event that lands
@@ -955,6 +969,10 @@ at all, the bar is a gradient and everything else is where it was.
 That conversation is a real session, like every ticket's: `claude --resume <id>` in a
 terminal opens the very same one, and it survives the browser, the server and the machine.
 *New conversation* starts a fresh one; the old one stays resumable by its identifier.
+
+An address written anywhere the console shows text — an answer, the output of a command, a
+step of a session, a comment on a ticket — is a link you can click. A pull request the
+runner just opened is one click away, not a URL to read out loud into another tab.
 
 **Settings** is `config.toml` drawn as a page — the same file, the same keys, and every one
 of them, from the Notion token down to what your board calls its *Blocked* column. It is
