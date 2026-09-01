@@ -737,8 +737,31 @@ def _pair(configuration: config_module.Config, settings: config_module.Notify) -
     return 0
 
 
+def _branch_kept(repo: Path, worktree: Path, branch: str, base: str) -> str:
+    """Why this branch must outlive its worktree — empty when nothing is lost.
+
+    A branch is named after the ticket's ID, so it is the same one on every
+    attempt: one left behind by a failure makes `add_worktree` refuse the ticket
+    for good. Removing it is therefore the point of `clean` — but that refusal
+    is also what protects a session's work, so the branch only goes when it is
+    established that nobody else holds what is on it.
+    """
+    if git.has_ref(repo, f"origin/{branch}"):
+        url = git.pull_request_on(repo, branch)
+        if url:
+            return f"it is pushed and its pull request is open — {url}"
+    if not git.has_ref(repo, f"origin/{base}") and not git.has_ref(repo, base):
+        return f"there is no {base} here to compare it against"
+    ahead = git.commits_ahead(worktree, base)
+    if ahead:
+        return f"{ahead} commit(s) of its own are absent from {base}"
+    if git.is_dirty(worktree):
+        return "the worktree has changes that were never committed"
+    return ""
+
+
 def command_clean(args: argparse.Namespace) -> int:
-    """Remove what failures left behind: worktrees and scratch directories."""
+    """Remove what failures left behind: worktrees, branches and scratch dirs."""
     state_root = config_module.state_dir()
     directories = [
         directory
@@ -756,14 +779,42 @@ def command_clean(args: argparse.Namespace) -> int:
     if not args.force:
         print(f"\n{DIM}ticket-runner clean --force to remove them{RESET}")
         return 0
+    try:
+        configured_base = config_module.load().runner.base_branch
+    except config_module.ConfigError:
+        configured_base = ""
     for directory in directories:
         origin = git.git(["rev-parse", "--path-format=absolute", "--git-common-dir"], directory).out
         repo = Path(origin).parent if origin else None
-        if repo and repo.exists():
-            git.remove_worktree(repo, directory)
-        else:
+        if not (repo and repo.exists()):
             shutil.rmtree(directory, ignore_errors=True)
+            print(f"  removed {directory}")
+            continue
+        branch = git.git(["rev-parse", "--abbrev-ref", "HEAD"], directory).out
+        # A detached HEAD names no branch — `HEAD` is what git answers then, and
+        # there is nothing to remove afterwards.
+        branch = "" if branch == "HEAD" else branch
+        kept = (
+            _branch_kept(repo, directory, branch, configured_base or git.default_branch(repo))
+            if branch
+            else ""
+        )
+        git.remove_worktree(repo, directory)
         print(f"  removed {directory}")
+        if not branch:
+            continue
+        if kept:
+            warn(f"branch {branch} kept — {kept}")
+            print(
+                f"    {DIM}that ticket cannot run again while it is there:"
+                f" git -C {repo} branch -D {branch}{RESET}"
+            )
+            continue
+        dropped = git.delete_branch(repo, branch)
+        if dropped.ok:
+            print(f"  removed branch {branch}")
+        else:
+            warn(f"branch {branch} kept — {dropped.err or dropped.out}")
     removed = state.prune_logs(args.days)
     if removed:
         print(f"  removed {removed} log file(s) older than {args.days} days")

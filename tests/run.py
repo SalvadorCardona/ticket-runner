@@ -3185,6 +3185,126 @@ def nothing_is_sent_anywhere_during_a_dry_run():
     assert sent == []
 
 
+# -- clean, and the branch a failure leaves behind ----------------------------
+
+
+@contextmanager
+def _git_answering(**answers):
+    """git and gh, replaced by what they would have said."""
+    from ticket_runner import git as git_module
+
+    original = {name: getattr(git_module, name) for name in answers}
+    for name, replacement in answers.items():
+        setattr(git_module, name, replacement)
+    try:
+        yield
+    finally:
+        for name, replacement in original.items():
+            setattr(git_module, name, replacement)
+
+
+def _cleaning(worktrees: dict[str, dict]) -> tuple[str, list[str]]:
+    """Run `clean --force` over invented worktrees, and see which branches went.
+
+    Each entry is a directory under `worktrees/`, and what git and gh would say
+    of it: the branch it is on, whether that branch is pushed, the pull request
+    `gh` finds on it, how many commits it has of its own, and whether anything
+    in it was never committed.
+    """
+    from ticket_runner import git as git_module
+
+    deleted: list[str] = []
+    with _state_home() as state_root, tempfile.TemporaryDirectory() as repository:
+        repo = Path(repository)
+        (repo / ".git").mkdir()
+        root = state_root / "worktrees"
+        root.mkdir(parents=True)
+        for name in worktrees:
+            (root / name).mkdir()
+
+        def facts(worktree) -> dict:
+            return worktrees[Path(worktree).name]
+
+        def raw(args, cwd, timeout=300):
+            if args[1:2] == ["--path-format=absolute"]:
+                return git_module.Result(0, str(repo / ".git"), "")
+            if args == ["rev-parse", "--abbrev-ref", "HEAD"]:
+                return git_module.Result(0, facts(cwd)["branch"], "")
+            raise AssertionError(f"clean asked git something unexpected: {args}")
+
+        def delete(_repo, branch):
+            deleted.append(branch)
+            return git_module.Result(0, f"Deleted branch {branch}", "")
+
+        pushed = {f"origin/{f['branch']}" for f in worktrees.values() if f.get("pushed")}
+        requests = {f["branch"]: f.get("pull_request", "") for f in worktrees.values()}
+        printed = io.StringIO()
+        previous = os.environ.get("TICKET_RUNNER_CONFIG")
+        os.environ["TICKET_RUNNER_CONFIG"] = str(repo / "nothing.toml")
+        try:
+            with _git_answering(
+                git=raw,
+                default_branch=lambda _repo: "main",
+                has_ref=lambda _repo, reference: reference in {"main", "origin/main"} | pushed,
+                pull_request_on=lambda _repo, branch: requests.get(branch, ""),
+                commits_ahead=lambda worktree, _base: facts(worktree).get("commits", 0),
+                is_dirty=lambda worktree: facts(worktree).get("dirty", False),
+                remove_worktree=lambda _repo, worktree: Path(worktree).rmdir(),
+                delete_branch=delete,
+            ), contextlib.redirect_stdout(printed):
+                assert cli_main(["clean", "--force"]) == 0
+        finally:
+            if previous is None:
+                os.environ.pop("TICKET_RUNNER_CONFIG", None)
+            else:
+                os.environ["TICKET_RUNNER_CONFIG"] = previous
+    return _plain(printed.getvalue()), deleted
+
+
+@case
+def clean_removes_the_branch_that_would_block_the_ticket_for_ever():
+    """A branch name comes from the ticket's ID, so it is the same one every time.
+
+    A session that failed without committing leaves the worktree and the branch;
+    `add_worktree` then refuses that ticket for good. Removing the directory and
+    leaving the branch — which is what `clean` used to do — changed nothing.
+    """
+    printed, deleted = _cleaning(
+        {"trader-ia-16e26e94": {"branch": "ticket/ameliorer-la-doc-16e26e94"}}
+    )
+    assert deleted == ["ticket/ameliorer-la-doc-16e26e94"]
+    assert "removed branch ticket/ameliorer-la-doc-16e26e94" in printed
+
+
+@case
+def clean_never_removes_a_branch_that_carries_something_of_its_own():
+    """The refusal `clean` lifts is also what protects the previous session's work.
+
+    A commit that was never pushed — the push failed, and the branch is all
+    that is left of it — an open pull request, or a worktree with uncommitted
+    changes: each of those stays, and the output says which and why, because
+    that ticket is going to stay blocked until somebody looks at it.
+    """
+    printed, deleted = _cleaning(
+        {
+            "unpushed": {"branch": "ticket/ameliorer-la-doc-16e26e94", "commits": 1},
+            "reviewed": {
+                "branch": "ticket/le-header-9d2cb790",
+                "pushed": True,
+                "pull_request": "https://github.com/x/y/pull/12",
+                "commits": 2,
+            },
+            "unsaved": {"branch": "ticket/le-bandeau-3ca45168", "dirty": True},
+        }
+    )
+    assert deleted == []
+    assert "ticket/ameliorer-la-doc-16e26e94 kept — 1 commit(s)" in printed
+    assert "ticket/le-header-9d2cb790 kept — it is pushed" in printed
+    assert "https://github.com/x/y/pull/12" in printed
+    assert "ticket/le-bandeau-3ca45168 kept — the worktree has changes" in printed
+    assert printed.count("branch -D ") == 3, "each kept branch says what is left to do"
+
+
 # -- releases ----------------------------------------------------------------
 
 

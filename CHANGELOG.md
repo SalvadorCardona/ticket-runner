@@ -86,3 +86,14 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
   that scrolls, which is nearly all of it: the board, the transcript, a
   session's steps, the settings. The dropdowns and the caret follow the same
   dark now.
+
+### Fixed
+
+- `ticket-runner clean --force` removes the branch of every worktree it
+  removes. A branch is named after its ticket, so a failed session left one
+  behind that made every later attempt answer `branch ticket/… already exists`:
+  the ticket was stuck for good, and `clean` — which only ever removed the
+  directory — did not help. It does now, and it stops where something would be
+  lost: a branch with commits of its own, one whose pull request is still open,
+  or a worktree with uncommitted changes is kept, named in the output with the
+  reason and with the command that drops it once you have looked.

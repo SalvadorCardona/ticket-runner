@@ -89,6 +89,22 @@ def remove_worktree(repo: Path, path: Path) -> None:
     git(["worktree", "prune"], repo)
 
 
+def has_ref(repo: Path, reference: str) -> bool:
+    return git(["rev-parse", "--verify", "--quiet", reference], repo).ok
+
+
+def delete_branch(repo: Path, branch: str) -> Result:
+    """Drop a branch whose worktree has just been removed.
+
+    Forced, because the caller has already established that the branch carries
+    nothing of its own — and `--delete` alone answers a different question than
+    the one that was asked: it compares the branch with whatever the main
+    checkout happens to be sitting on, which is nobody's base branch in
+    particular.
+    """
+    return git(["branch", "--delete", "--force", branch], repo)
+
+
 def commits_ahead(worktree: Path, base: str) -> int:
     for reference in (f"origin/{base}", base):
         result = git(["rev-list", "--count", f"{reference}..HEAD"], worktree)
@@ -146,6 +162,23 @@ def merge_pull_request(url: str, method: str = "squash") -> str:
     if result.ok:
         return (result.out or f"merged ({method})").strip()
     raise GitError(f"gh pr merge: {result.err or result.out}")
+
+
+def pull_request_on(repo: Path, branch: str) -> str:
+    """The URL of an open pull request made from that branch, or nothing.
+
+    Nothing also means the question could not be asked — `gh` missing, not
+    authenticated, no network. That is deliberately not distinguished here: this
+    is never the only thing a caller looks at before touching a branch.
+    """
+    if not shutil.which("gh"):
+        return ""
+    result = run(
+        ["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "url", "-q", ".[0].url"],
+        cwd=repo,
+        timeout=60,
+    )
+    return result.out if result.ok else ""
 
 
 def pull_request_state(url: str) -> str:
