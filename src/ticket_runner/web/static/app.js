@@ -21,6 +21,10 @@ const state = {
   running: null,   // the steps block of the turn in flight
   command: null,   // the <pre> of the command in flight
   sessions: new Map(),
+  // The ticket whose terminal is open, as the board last described it, plus the
+  // steps block its running session writes into.
+  ticket: null,
+  ticketSteps: null,
   // The settings tab. `edited` holds only what you actually touched: a field
   // left alone is a line the file keeps, comment and all — and a token you did
   // not retype is a token that never left the machine.
@@ -63,6 +67,7 @@ function connect() {
   stream.addEventListener("step", (event) => { fx("pulse"); onStep(JSON.parse(event.data)); });
   stream.addEventListener("chat", (event) => { fx("pulse"); onChat(JSON.parse(event.data)); });
   stream.addEventListener("command", (event) => { fx("pulse"); onCommand(JSON.parse(event.data)); });
+  stream.addEventListener("talk", (event) => { fx("pulse"); onTalk(JSON.parse(event.data)); });
   // Another tab saved, or `ticket-runner config` did. Redraw — unless this tab
   // is in the middle of an edit, which is not something to take away from you.
   stream.addEventListener("settings", () => {
@@ -116,10 +121,22 @@ function renderBoard(board) {
   }
   const done = (groups.get("done") || []).length;
   if (done) host.append(element("p", "empty", `${done} done, kept in Notion.`));
+  refreshTicket(board);
 }
 
 function card(ticket) {
   const node = element("div", `card ${ticket.column}`);
+  // The card is the way into the ticket's terminal — except where it already
+  // carries a gesture of its own: a click on "validate" is not a click on the
+  // card it happens to sit in.
+  node.tabIndex = 0;
+  node.title = "open this ticket’s terminal";
+  node.addEventListener("click", (event) => {
+    if (!event.target.closest("a, button")) openTicket(ticket);
+  });
+  node.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && event.target === node) openTicket(ticket);
+  });
   node.append(element("div", "title", ticket.title));
 
   const meta = element("div", "meta");
@@ -136,6 +153,9 @@ function card(ticket) {
   if (ticket.progress) node.append(element("div", "progress", ticket.progress));
 
   const actions = element("div", "actions");
+  // The whole card opens it too; this is the one you can reach with a keyboard
+  // and the one that says the terminal is there at all.
+  actions.append(action("terminal", () => openTicket(ticket)));
   actions.append(link("Notion", ticket.url));
   if (ticket.pull_request) actions.append(link("pull request", ticket.pull_request));
   if (ticket.session_link) actions.append(link("session", ticket.session_link));
@@ -165,14 +185,13 @@ async function move(ticket, column) {
 function say(role, text) {
   const turn = element("div", `turn ${role}`);
   turn.append(element("div", "who", role === "you" ? "you" : role === "error" ? "problem" : "workspace"));
-  turn.append(element("div", "text", text));
+  turn.append(flow(element("div", "text"), text));
   $("transcript").append(turn);
   scroll();
   return turn;
 }
 
-function scroll() {
-  const view = $("transcript");
+function scroll(view = $("transcript")) {
   view.scrollTop = view.scrollHeight;
 }
 
@@ -194,10 +213,7 @@ function onChat(event) {
       state.running = element("div", "steps");
       $("transcript").append(state.running);
     }
-    const line = element("div");
-    line.append(element("span", "label", event.label));
-    if (event.detail) line.append(textNode(` ${event.detail}`));
-    state.running.append(line);
+    state.running.append(step(event));
     state.running.scrollTop = state.running.scrollHeight;
     scroll();
     return;
@@ -228,7 +244,7 @@ function onCommand(event) {
   }
   if (!state.command) return;
   if (event.stage === "line") {
-    state.command.append(textNode(`${event.text}\n`));
+    flow(state.command, `${event.text}\n`);
     scroll();
     return;
   }
@@ -250,12 +266,20 @@ function onStep(event) {
     state.sessions.set(event.source, list);
   }
   const list = state.sessions.get(event.source);
-  const line = element("div");
-  line.append(element("span", "label", event.label));
-  if (event.detail) line.append(textNode(` ${event.detail}`));
-  list.append(line);
+  list.append(step(event));
   while (list.childElementCount > 200) list.firstElementChild.remove();
   list.scrollTop = list.scrollHeight;
+  // The same step, in the terminal of the ticket it belongs to — so that
+  // reading a ticket and watching it work are one place rather than two.
+  if (state.ticket && event.source === state.ticket.short) ticketStep(event);
+}
+
+/** One line of a session: the tool it used, and what it used it on. */
+function step(event) {
+  const line = element("div");
+  line.append(element("span", "label", event.label));
+  if (event.detail) flow(line, ` ${event.detail}`);
+  return line;
 }
 
 /* -- the composer ----------------------------------------------------------- */
@@ -293,6 +317,148 @@ function resize() {
   $("hint").textContent = isCommand(field.value)
     ? `a ticket-runner command · ${(state.info.commands || []).join(" · ")}`
     : "a sentence talks to your workspace · > runs a ticket-runner command";
+}
+
+/* -- one ticket's terminal ---------------------------------------------------
+ *
+ * The console's two halves — a transcript and a field — pointed at a single
+ * ticket. What you type is a comment on it, and a comment is already how a
+ * ticket is answered: a reply under the question a run asked puts the ticket
+ * back in the queue, and one that names the runner asks it for words instead.
+ * So there is nothing new to learn here, and nothing kept on the side: the
+ * discussion is Notion's, and the same words typed into Notion do the same.
+ */
+
+async function openTicket(ticket, options = {}) {
+  const another = !state.ticket || state.ticket.id !== ticket.id;
+  state.ticket = ticket;
+  if (another) state.ticketSteps = null;
+  drawTicketHead(ticket);
+  if (!options.keepPane) show("ticket");
+  await loadTalk(ticket);
+}
+
+/** The board moved: keep the open ticket's terminal describing the right one. */
+function refreshTicket(board) {
+  if (!state.ticket) return;
+  const fresh = board.tickets.find((item) => item.id === state.ticket.id);
+  if (!fresh) return;
+  // Reread the discussion only when the ticket *moved*: that is when a run
+  // ended and left its report under it. A ticket in flight redraws the board
+  // every few seconds, and asking Notion for its comments each time would be
+  // polling a conversation that has not moved. The `reread` button is there.
+  const moved = fresh.column !== state.ticket.column;
+  state.ticket = fresh;
+  drawTicketHead(fresh);
+  if (moved) loadTalk(fresh);
+}
+
+function drawTicketHead(ticket) {
+  $("ticket-title").textContent = ticket.title;
+  const column = state.board.columns.find((item) => item.key === ticket.column)?.name
+    || LABEL[ticket.column] || ticket.column;
+  $("ticket-where").textContent = ticket.progress ? `${column} · ${ticket.progress}` : column;
+  const links = $("ticket-links");
+  links.textContent = "";
+  links.append(link("Notion", ticket.url));
+  if (ticket.pull_request) links.append(link("pull request", ticket.pull_request));
+  if (ticket.session_link) links.append(link("session", ticket.session_link));
+  $("ticket-state").textContent = ticket.short ? `#${ticket.short}` : "";
+  $("ticket-input").disabled = false;
+  $("ticket-send").disabled = false;
+}
+
+async function loadTalk(ticket) {
+  const view = $("ticket-talk");
+  let payload;
+  try {
+    payload = await api(`/api/tickets/${ticket.id}/talk`);
+  } catch (error) {
+    view.append(talkTurn({ role: "error", text: `could not read the discussion: ${error.message}` }));
+    return scroll(view);
+  }
+  // Notion took a moment and you opened another card in it: this answer is
+  // about a ticket nobody is looking at any more.
+  if (!state.ticket || state.ticket.id !== ticket.id) return;
+  // The steps of a running session are not part of the discussion and are not
+  // reread with it — detached and put back, they keep scrolling underneath.
+  const steps = state.ticketSteps;
+  view.textContent = "";
+  for (const message of payload.messages) view.append(talkTurn(message));
+  if (!payload.messages.length)
+    view.append(element("p", "empty", "Nothing has been said on this ticket yet."));
+  if (steps) view.append(steps);
+  $("ticket-hint").textContent =
+    `a comment on the ticket · an answer to its question runs it again · `
+    + `${payload.mention} asks it for words instead`;
+  scroll(view);
+}
+
+function talkTurn(message) {
+  const turn = element("div", `turn ${message.role}`);
+  const who = message.role === "you" ? "you" : message.role === "error" ? "problem" : "the runner";
+  const at = moment(message.at);
+  turn.append(element("div", "who", at ? `${who} · ${at}` : who));
+  turn.append(flow(element("div", "text"), message.text));
+  return turn;
+}
+
+/** An instant as this browser would write it, or nothing at all. */
+function moment(at) {
+  if (!at) return "";
+  const date = new Date(at);
+  return Number.isNaN(date.getTime())
+    ? ""
+    : date.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+}
+
+function ticketStep(event) {
+  const view = $("ticket-talk");
+  if (!state.ticketSteps || state.ticketSteps.parentNode !== view) {
+    state.ticketSteps = element("div", "steps");
+    view.append(state.ticketSteps);
+  }
+  state.ticketSteps.append(step(event));
+  while (state.ticketSteps.childElementCount > 200) state.ticketSteps.firstElementChild.remove();
+  state.ticketSteps.scrollTop = state.ticketSteps.scrollHeight;
+  scroll(view);
+}
+
+/** Somebody wrote to a ticket — here, or in the other tab, or on a phone. */
+function onTalk(event) {
+  if (!state.ticket || event.ticket !== state.ticket.id) return;
+  const view = $("ticket-talk");
+  view.querySelector(".empty")?.remove();
+  const steps = state.ticketSteps;
+  view.append(talkTurn(event));
+  if (steps && steps.parentNode === view) view.append(steps);
+  scroll(view);
+}
+
+async function tell() {
+  const field = $("ticket-input");
+  const text = field.value.trim();
+  if (!text || !state.ticket) return;
+  const button = $("ticket-send");
+  button.disabled = true;
+  try {
+    // Nothing is drawn here: what appears is what came back on the stream, so
+    // the phone that sent it and the laptop that did not show the same thing.
+    await api(`/api/tickets/${state.ticket.id}/talk`, { text });
+    field.value = "";
+    resizeTicket();
+  } catch (error) {
+    $("ticket-talk").append(talkTurn({ role: "error", text: `not written: ${error.message}` }));
+    scroll($("ticket-talk"));
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function resizeTicket() {
+  const field = $("ticket-input");
+  field.style.height = "auto";
+  field.style.height = `${Math.min(field.scrollHeight, 200)}px`;
 }
 
 /* -- the header ------------------------------------------------------------- */
@@ -598,6 +764,41 @@ function same(left, right) {
   return left === right;
 }
 
+/* An address in a line of text becomes a link, and nothing else does.
+ *
+ * Answers, command output and the steps of a session all carry them — a pull
+ * request, a Notion page, a preview — and reading one out loud into another tab
+ * is not a gesture anybody should have to make. The rule at the top of this file
+ * holds: the address lands in an anchor's `textContent`, never in markup. */
+const ADDRESS = /https?:\/\/[^\s<>"'`]+/g;
+
+function flow(node, text) {
+  const line = String(text);
+  let last = 0;
+  for (const found of line.matchAll(ADDRESS)) {
+    const address = trimmed(found[0]);
+    node.append(textNode(line.slice(last, found.index)), link(address, address));
+    last = found.index + address.length;
+  }
+  node.append(textNode(line.slice(last)));
+  return node;
+}
+
+/** A URL without the punctuation that ended the sentence it was written in. */
+function trimmed(address) {
+  let end = address.length;
+  while (end > 0) {
+    const last = address[end - 1];
+    if (".,;:!?".includes(last)) end -= 1;
+    // A closing bracket is part of the address only where the address opened
+    // one: an encyclopaedia writes them, a sentence in parentheses does not.
+    else if ((last === ")" && !address.slice(0, end).includes("(")) ||
+             (last === "]" && !address.slice(0, end).includes("["))) end -= 1;
+    else break;
+  }
+  return address.slice(0, end);
+}
+
 /** Backticked words become <code>, and nothing else becomes markup. */
 function rich(node, text) {
   text.split("`").forEach((part, index) => {
@@ -665,6 +866,16 @@ async function boot() {
       say("error", error.message);
     }
   });
+  $("ticket-input").addEventListener("input", resizeTicket);
+  $("ticket-input").addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      tell();
+    }
+  });
+  $("ticket-send").addEventListener("click", tell);
+  $("ticket-reread").addEventListener("click", () => { if (state.ticket) loadTalk(state.ticket); });
+
   $("refresh").addEventListener("click", () => api("/api/refresh", {}).catch(() => {}));
   $("settings-save").addEventListener("click", saveSettings);
   $("settings-revert").addEventListener("click", loadSettings);
@@ -735,7 +946,7 @@ function show(pane) {
   document.querySelectorAll(".tabs button").forEach((button) => {
     button.classList.toggle("on", button.dataset.pane === pane);
   });
-  for (const name of ["board", "console", "live", "settings"]) {
+  for (const name of ["board", "ticket", "console", "live", "settings"]) {
     $(`pane-${name}`).classList.toggle("showing", name === pane);
   }
   // On a wide screen the console is always the right-hand column, whichever of

@@ -320,7 +320,10 @@ main {
   border-left: 3px solid var(--line);
   border-radius: var(--radius);
   padding: .6rem .7rem;
+  cursor: pointer;
 }
+.card:hover { border-color: #38404f; }
+.card:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .card.ready { border-left-color: var(--green); }
 .card.running { border-left-color: var(--blue); }
 .card.review { border-left-color: var(--violet); }
@@ -388,6 +391,13 @@ main {
 }
 .turn.command .who { color: var(--amber); }
 
+/* An address in a line of text is an address: answers, command output and the
+   steps of a session all carry them, and reading one out loud into another tab
+   is not a gesture anybody should have to make. */
+.turn .text a, .steps a { color: var(--blue); text-decoration: underline; text-underline-offset: 2px; }
+.turn .text a:hover, .steps a:hover { color: #7dabff; }
+.turn.command .text a { color: var(--amber); }
+
 .steps {
   font-family: var(--mono);
   font-size: .76rem;
@@ -418,6 +428,36 @@ main {
 }
 .composer textarea.command { font-family: var(--mono); color: var(--amber); }
 .composer .row { display: flex; gap: .5rem; align-items: center; margin-top: .5rem; }
+
+/* -- one ticket's terminal ------------------------------------------------- */
+
+/* The console's shape, pointed at a single ticket: the same transcript and the
+   same composer, because what you type here goes the same way — a comment, on
+   the ticket, in the thread the runner is already speaking in. */
+
+.pane.ticket { padding: 0; overflow: hidden; }
+.pane.ticket.showing { display: flex; flex-direction: column; }
+.ticket-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: .5rem;
+  padding: .8rem .9rem .6rem;
+  border-bottom: 1px solid var(--line);
+}
+.ticket-head h2 { font-size: .95rem; margin: 0; }
+.ticket-head p { margin: 0; flex-basis: 100%; }
+.ticket-links { display: flex; gap: .5rem; }
+.ticket-links a {
+  font-size: .76rem;
+  padding: .18rem .45rem;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--dim);
+  text-decoration: none;
+}
+.ticket-links a:hover { color: var(--text); }
+.turn.runner .who { color: var(--violet); }
 
 /* -- live ------------------------------------------------------------------ */
 

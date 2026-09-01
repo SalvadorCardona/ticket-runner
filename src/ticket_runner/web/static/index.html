@@ -27,6 +27,7 @@
 
 <nav class="tabs" id="tabs">
   <button data-pane="board" class="on">Board</button>
+  <button data-pane="ticket">Ticket</button>
   <button data-pane="console">Console</button>
   <button data-pane="live">Live</button>
   <button data-pane="settings">Settings</button>
@@ -46,6 +47,28 @@
       </div>
     </div>
     <div class="columns" id="columns"></div>
+  </section>
+
+  <section class="pane ticket" id="pane-ticket">
+    <div class="ticket-head">
+      <h2 id="ticket-title">No ticket open</h2>
+      <p class="dim small" id="ticket-where">Click a card on the board. What you type here is a
+        comment on that ticket — which is how a ticket is answered.</p>
+      <span class="grow"></span>
+      <span class="ticket-links" id="ticket-links"></span>
+    </div>
+    <div class="transcript" id="ticket-talk"></div>
+    <div class="composer">
+      <div class="hint" id="ticket-hint"></div>
+      <textarea id="ticket-input" rows="1" placeholder="Answer the ticket, or ask it something"
+                autocomplete="off" spellcheck="false" disabled></textarea>
+      <div class="row">
+        <button id="ticket-send" class="primary" disabled>Send</button>
+        <button id="ticket-reread" class="ghost" title="read the discussion again">reread</button>
+        <span class="grow"></span>
+        <span class="dim small" id="ticket-state"></span>
+      </div>
+    </div>
   </section>
 
   <section class="pane console" id="pane-console">

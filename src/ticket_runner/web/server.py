@@ -231,6 +231,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"messages": self.api.chat.history(), **self.api.chat.state()})
             if route == "/api/settings":
                 return self._json(self.api.settings())
+            if match := re.fullmatch(r"/api/tickets/([0-9a-fA-F-]{32,36})/talk", route):
+                return self._json(self.api.talk(match.group(1)))
             if route == "/api/logs":
                 return self._json(self.api.logs())
             if match := re.fullmatch(r"/api/logs/([\w.\-]+)", route):
@@ -273,6 +275,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(
                     self.api.set_status(match.group(1), str(payload.get("column", "")))
                 )
+            if match := re.fullmatch(r"/api/tickets/([0-9a-fA-F-]{32,36})/talk", route):
+                return self._json(self.api.tell(match.group(1), str(payload.get("text", ""))))
             if route == "/api/command":
                 return self._json(self.api.commands.start(str(payload.get("line", ""))))
             if route == "/api/chat":

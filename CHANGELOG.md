@@ -18,6 +18,15 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Added
 
+- A terminal for one ticket, in the console: click a card and the **Ticket** tab
+  shows everything said on it — the runner's reports, your answers, the ones you
+  gave from Telegram — with a field to say the next thing and, while it runs, its
+  session's steps scrolling underneath. What you type is a comment on the ticket,
+  written into the thread the runner last spoke in: answering its question runs
+  the ticket again, and naming it asks it for words instead.
+- Addresses in the console are links. An answer, the output of a command, a step
+  of a session or a comment on a ticket that carries a URL is one click away,
+  rather than something to read out loud into another tab.
 - The console's header is a raymarched lattice that reads the runner: it drifts
   in violet while the timer waits, flies and turns to ember while a ticket runs,
   ripples once for every event on the stream, and goes grey and red when the
