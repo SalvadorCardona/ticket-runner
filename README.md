@@ -294,7 +294,7 @@ for reading rather than for filling in.
 
 | Property | Type | Role |
 | --- | --- | --- |
-| `Name` | title | what the agent must do, in one line |
+| `Name` | title | what the agent must do, in one line — leave it empty and the runner writes one from the body |
 | `Status` | status *or* select | **what drives the whole system** — see below |
 | `Project` | relation | *optional* — to the projects database: decides the repository |
 | `Agent` | relation | *optional* — to the agents database: decides who handles it |
@@ -331,6 +331,17 @@ for a refactor — and a board that shows what each ticket cost.
 The **body** of the ticket page is sent to the agent as the description. Write there what
 you would tell a developer who does not know the subject: what must change, where, and
 how you will know it is done.
+
+And you may stop there. A ticket is often written the way the thought arrives — the
+content first, the title never — so a ticket that reaches *Ready* without one is named by
+the runner: a very short session reads the page and writes a title back **into Notion**,
+in the language the page is written in, so the board shows it too. It happens before the
+branch is drawn, which is what the title is first used for: `ticket/reparer-le-bandeau-…`
+rather than one more `untitled-ticket`. A ticket that already carries a title keeps
+exactly the one you gave it and costs nothing extra; a ticket with neither a title nor a
+body is not invented for — it comes back with the question. And if the naming fails, for
+want of a session or of a Notion that accepts the write, the ticket runs all the same,
+under the label it had.
 
 ### Following the work
 

@@ -25,7 +25,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import agents, channels, conversation, git, notion, notify, progress
+from . import agents, channels, conversation, git, naming, notion, notify, progress
 from . import prompt as prompt_module, session, state
 from . import update as update_module
 from . import workspace as workspace_module
@@ -1017,17 +1017,6 @@ class Runner:
                 return None
 
         short = short_id(ticket.id)
-        stem = f"{slugify(project.name, 24)}-{short}"
-        if project.is_code:
-            base = self.config.runner.base_branch or git.default_branch(project.path)
-            branch = f"{self.config.runner.branch_prefix}{slugify(ticket.title)}-{short}"
-            workdir = state_dir() / "worktrees" / stem
-        else:
-            # No repository: an empty scratch directory, and the answer goes
-            # back into the Notion page instead of into a pull request.
-            base, branch = "", ""
-            workdir = state_dir() / "scratch" / stem
-
         try:
             body = self.client.blocks_text(ticket.page.id)
         except notion.NotionError as error:
@@ -1044,6 +1033,22 @@ class Runner:
                     blocked=True,
                 )
                 return None
+        elif not ticket.page.title.strip() and not self.dry_run:
+            # Named before the branch is drawn, since the branch is made of the
+            # title. Only a page whose title is empty ever gets here, so the
+            # common case costs nothing — and a dry run writes nowhere.
+            self._name(ticket, body, short)
+
+        stem = f"{slugify(project.name, 24)}-{short}"
+        if project.is_code:
+            base = self.config.runner.base_branch or git.default_branch(project.path)
+            branch = f"{self.config.runner.branch_prefix}{slugify(ticket.title)}-{short}"
+            workdir = state_dir() / "worktrees" / stem
+        else:
+            # No repository: an empty scratch directory, and the answer goes
+            # back into the Notion page instead of into a pull request.
+            base, branch = "", ""
+            workdir = state_dir() / "scratch" / stem
 
         # Both are optional and neither can fail a ticket: a database with no
         # Agent column reads as no agent, and unreadable comments as none.
@@ -1086,6 +1091,59 @@ class Runner:
                 },
             )
         return job
+
+    def _name(self, ticket: Ticket, body: str, short: str) -> None:
+        """Give a nameless ticket a title, and write it on the page.
+
+        Into Notion rather than into this run's memory alone: the board has to
+        show it too, or the page stays anonymous for whoever reads it back. And
+        the page is what the runner then works from, so the branch, the report
+        and the pull request all carry the same name.
+
+        Never a reason to fail a ticket. A session that will not start, an
+        answer that says nothing, a Notion that refuses the write: each of them
+        is one line in the journal, and the ticket runs under the default
+        label as it did before. The title is only kept once Notion has taken
+        it — a branch named after something the board does not show would be a
+        worse outcome than a ticket with no name.
+        """
+        title = ""
+        workdir = state_dir() / "scratch" / f"name-{short}"
+        try:
+            workdir.mkdir(parents=True, exist_ok=True)
+            outcome = session.run(
+                naming.prompt(body),
+                cwd=workdir,
+                log=state.log_file(f"{short}-name"),
+                model=self.config.runner.model,
+                # It reads one page and answers one line: the mode a
+                # conversation runs in is more than it needs.
+                permission_mode=self.config.runner.reply_permission_mode,
+                timeout_minutes=naming.TIMEOUT_MINUTES,
+            )
+            if outcome.ok:
+                title = naming.clean(outcome.answer)
+            if not title:
+                self.say("  ! the naming session said nothing usable — reading the content")
+        except (OSError, ValueError) as error:
+            self.say(f"  ! the ticket could not be named by a session: {_line(error)}")
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+
+        title = title or naming.fallback(body)
+        if not title:
+            return
+        try:
+            self.client.update(
+                self.database,
+                ticket.page.id,
+                {self.client.title_property(self.database): title},
+            )
+        except notion.NotionError as error:
+            self.say(f"  ! the title could not be written to Notion: {_line(error)}")
+            return
+        ticket.page.title = title
+        self.say(f"  · named “{title}” — the ticket had none of its own")
 
     # -- execution -----------------------------------------------------------
 

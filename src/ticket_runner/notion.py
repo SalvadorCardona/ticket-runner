@@ -139,6 +139,15 @@ class Client:
         kind = prop.get("type", "")
         return [option.get("name", "") for option in prop.get(kind, {}).get("options", [])]
 
+    def title_property(self, database_id: str) -> str:
+        """The name of the title column, whatever the database calls it.
+
+        Every database has exactly one, and Notion lets you rename it — `Name`,
+        `Titre`, `Ticket`. Writing a page's own name means finding it first.
+        """
+        schema = self.schema(database_id)
+        return next((name for name, kind in schema.items() if kind == "title"), "Name")
+
     def find_database(self, name: str) -> str:
         """The ID of the database whose title matches `name`.
 
@@ -439,8 +448,9 @@ class Client:
     def create_row(self, database_id: str, title: str, values: dict | None = None) -> str:
         """Create a page in a database, titled, and return its ID."""
         schema = self.schema(database_id)
-        name = next((key for key, kind in schema.items() if kind == "title"), "Name")
-        properties: dict[str, Any] = {name: _encode("title", title)}
+        properties: dict[str, Any] = {
+            self.title_property(database_id): _encode("title", title)
+        }
         for key, value in (values or {}).items():
             encoded = _encode(schema.get(key), value)
             if encoded is not None:
