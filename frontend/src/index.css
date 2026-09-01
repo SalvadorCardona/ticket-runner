@@ -1,0 +1,195 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* The console's palette, as shadcn/ui names things.
+ *
+ * The dark values are the ones the hand-written console used — #0f1115 behind
+ * everything, #e7e9ee on top of it, a #3b82f6 blue — because it sits beside a
+ * terminal and a Notion board and the thing it shows most of the time is a log.
+ * The light values are shadcn's slate, for the one person who wants them.
+ *
+ * `--tr-*` are the console's own colours: the ones a column heading, a status
+ * tag or a session step is drawn in. They are not shadcn's to name, and they
+ * are declared here so a component can ask for `text-tr-green` and get the same
+ * green everywhere.
+ */
+
+:root {
+  --radius: 0.75rem;
+
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.208 0.042 265.755);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.208 0.042 265.755);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.208 0.042 265.755);
+  --primary: oklch(0.623 0.214 259.815);
+  --primary-foreground: oklch(0.984 0.003 247.858);
+  --secondary: oklch(0.968 0.007 247.896);
+  --secondary-foreground: oklch(0.208 0.042 265.755);
+  --muted: oklch(0.968 0.007 247.896);
+  --muted-foreground: oklch(0.554 0.046 257.417);
+  --accent: oklch(0.968 0.007 247.896);
+  --accent-foreground: oklch(0.208 0.042 265.755);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.984 0.003 247.858);
+  --border: oklch(0.929 0.013 255.508);
+  --input: oklch(0.929 0.013 255.508);
+  --ring: oklch(0.623 0.214 259.815);
+
+  --sidebar: oklch(0.984 0.003 247.858);
+  --sidebar-foreground: oklch(0.208 0.042 265.755);
+  --sidebar-primary: oklch(0.623 0.214 259.815);
+  --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
+  --sidebar-accent: oklch(0.929 0.013 255.508);
+  --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
+  --sidebar-border: oklch(0.929 0.013 255.508);
+  --sidebar-ring: oklch(0.623 0.214 259.815);
+
+  --tr-blue: #2563eb;
+  --tr-green: #059669;
+  --tr-amber: #b45309;
+  --tr-red: #dc2626;
+  --tr-violet: #7c3aed;
+  --tr-pink: #db2777;
+}
+
+.dark {
+  --background: #0f1115;
+  --foreground: #e7e9ee;
+  --card: #151820;
+  --card-foreground: #e7e9ee;
+  --popover: #1a1e28;
+  --popover-foreground: #e7e9ee;
+  --primary: #3b82f6;
+  --primary-foreground: #f8fafc;
+  --secondary: #1a1e28;
+  --secondary-foreground: #e7e9ee;
+  --muted: #1a1e28;
+  --muted-foreground: #98a2b3;
+  --accent: #262b36;
+  --accent-foreground: #e7e9ee;
+  --destructive: #f87171;
+  --destructive-foreground: #0f1115;
+  --border: #262b36;
+  --input: #2c3240;
+  --ring: #3b82f6;
+
+  /* A shade below the page, not above it: the sidebar is the frame, and a
+     frame that glows brighter than what it holds is a frame you keep reading. */
+  --sidebar: #12141a;
+  --sidebar-foreground: #e7e9ee;
+  --sidebar-primary: #3b82f6;
+  --sidebar-primary-foreground: #f8fafc;
+  --sidebar-accent: #232833;
+  --sidebar-accent-foreground: #e7e9ee;
+  --sidebar-border: #262b36;
+  --sidebar-ring: #3b82f6;
+
+  --tr-blue: #3b82f6;
+  --tr-green: #34d399;
+  --tr-amber: #fbbf24;
+  --tr-red: #f87171;
+  --tr-violet: #a78bfa;
+  --tr-pink: #f472b6;
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-tr-blue: var(--tr-blue);
+  --color-tr-green: var(--tr-green);
+  --color-tr-amber: var(--tr-amber);
+  --color-tr-red: var(--tr-red);
+  --color-tr-violet: var(--tr-violet);
+  --color-tr-pink: var(--tr-pink);
+
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    /* The console is a set of panes that scroll inside themselves. The page
+       behind them does not scroll, or the header leaves with the board. */
+    overflow: hidden;
+    font-synthesis-weight: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* The bar the browser draws is the one part of the page that never heard the
+     console was dark: pale, wide, and laid over the panel rather than living in
+     it. `color-scheme` is what stops it guessing, and it settles the dropdowns
+     and the caret with it. */
+  :root { color-scheme: light; }
+  .dark { color-scheme: dark; }
+}
+
+@layer utilities {
+  /* Written twice, because it is two features. WebKit and Chrome take the
+     pseudo-elements, which is where the rounded thumb and the gap around it
+     come from; Firefox has none of those and takes the pair of standard
+     properties instead — asked for only where the pseudo-elements are not
+     understood, since Chrome would otherwise prefer them. */
+  .scroll-thin::-webkit-scrollbar { width: 10px; height: 10px; }
+  .scroll-thin::-webkit-scrollbar-track { background: transparent; }
+  .scroll-thin::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+    border: 3px solid transparent;
+    background-clip: padding-box;
+    border-radius: 999px;
+  }
+  .scroll-thin::-webkit-scrollbar-thumb:hover {
+    background-color: var(--muted-foreground);
+  }
+  @supports not selector(::-webkit-scrollbar) {
+    .scroll-thin {
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+  }
+}
