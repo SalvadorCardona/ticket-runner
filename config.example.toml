@@ -3,6 +3,11 @@
 #   ~/.config/ticket-runner/config.toml
 #
 # After any change:  ticket-runner doctor
+#
+# Every key in here is also a field in the web console's Settings tab
+# (`ticket-runner serve`). It writes back into this very file, one line at a
+# time, and leaves these comments where they are — so editing it by hand and
+# editing it in a browser are the same gesture, and neither undoes the other.
 
 [notion]
 # Token of an internal Notion integration (https://www.notion.so/my-integrations).

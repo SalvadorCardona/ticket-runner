@@ -252,6 +252,10 @@ presence of each status — and names whichever of those was missed.
 
 ### 4. The rest of the file
 
+Every key below is also a field in the console's **Settings** tab —
+`ticket-runner serve`, and the same file, drawn as a page. What follows is the same list,
+for reading rather than for filling in.
+
 | Key | Default | Effect |
 | --- | --- | --- |
 | `runner.workspace_root` | `~/workspace` | where to look for repositories |
@@ -894,7 +898,7 @@ is a second window on the same workspace, served from your own machine:
 ticket-runner serve
 ```
 
-It prints a URL with a token in it. Open it and you get one page, three things:
+It prints a URL with a token in it. Open it and you get one page, four things:
 
 ```
 ┌──────────────────────────────┬─────────────────────────────┐
@@ -936,6 +940,33 @@ its pull request, or publishes what it holds.
 That conversation is a real session, like every ticket's: `claude --resume <id>` in a
 terminal opens the very same one, and it survives the browser, the server and the machine.
 *New conversation* starts a fresh one; the old one stays resumable by its identifier.
+
+**Settings** is `config.toml` drawn as a page — the same file, the same keys, and every one
+of them, from the Notion token down to what your board calls its *Blocked* column. It is
+still a file you can open in an editor: the console rereads it when it changes on disk, and
+what you save here keeps the comments that were around the line.
+
+Three things it does that a form usually does not.
+
+- **A blank field says nothing**, and the runner's own default answers — shown greyed, in
+  the placeholder. Clearing a field *removes the line* rather than writing an empty one, so
+  "you chose thirty minutes" and "nobody said, so thirty minutes" stay two different
+  statements. It is also how a board tells the runner it has one column for two moments:
+  see [The statuses](#the-statuses).
+- **Your tokens stay on the machine.** A secret goes to the browser as *set, ending in
+  …f3a2* and comes back only if you type a new one — an empty box means "leave it alone",
+  so forgetting one is a button of its own.
+- **A save is all of it or none of it.** The edits are made on a copy beside the file, the
+  copy is loaded — if it would not parse, or would leave a working installation unable to
+  run, nothing moves — and only then does it take the file's place, in one rename and with
+  its permissions. The file it displaces is kept as `config.toml.bak`. A value the loader
+  would have quietly repaired, like an interval of zero, is refused here with the reason
+  rather than saved and silently changed.
+
+Each section carries the command that checks it — `> doctor` for Notion, `> notify` for
+Telegram and Slack, `> enable` to write a new interval into the systemd timer — because the
+CLI already knows how to say whether a token works, and a settings page does not need a
+second opinion. A setting that needs more than saving says so, once, and only when it moved.
 
 ### Keeping it running
 

@@ -21,6 +21,10 @@ const state = {
   running: null,   // the steps block of the turn in flight
   command: null,   // the <pre> of the command in flight
   sessions: new Map(),
+  // The settings tab. `edited` holds only what you actually touched: a field
+  // left alone is a line the file keeps, comment and all — and a token you did
+  // not retype is a token that never left the machine.
+  settings: { drawn: null, edited: new Map(), projects: null },
 };
 
 /* -- talking to the server -------------------------------------------------- */
@@ -52,6 +56,12 @@ function connect() {
   stream.addEventListener("step", (event) => onStep(JSON.parse(event.data)));
   stream.addEventListener("chat", (event) => onChat(JSON.parse(event.data)));
   stream.addEventListener("command", (event) => onCommand(JSON.parse(event.data)));
+  // Another tab saved, or `ticket-runner config` did. Redraw — unless this tab
+  // is in the middle of an edit, which is not something to take away from you.
+  stream.addEventListener("settings", () => {
+    if (!state.settings.edited.size && !state.settings.projects) loadSettings();
+    refreshState();
+  });
   // "notice", not "error": EventSource fires an `error` event of its own for
   // every dropped connection, and a server event under the same name would
   // arrive through the same listener with nothing in it.
@@ -306,6 +316,281 @@ function every(seconds) {
   return seconds < 120 ? `${seconds}s` : `${Math.round(seconds / 60)} min`;
 }
 
+/* -- settings ---------------------------------------------------------------
+ *
+ * Drawn from what the server says the configuration holds, never from a list
+ * kept here: a setting the runner gains appears in this tab the day it is
+ * described, and one it loses stops being offered.
+ *
+ * A field carries three states, not two — what the file says, what the runner
+ * falls back on when it says nothing, and what you have just typed. Clearing a
+ * field is how you go back to the third, and it removes the line rather than
+ * writing an empty one.
+ */
+
+// The command each section is checked with. The CLI already knows how to say
+// whether a token works; the settings tab does not need a second opinion.
+const CHECKS = {
+  notion: ["doctor", "does that token reach your board?"],
+  notify: ["notify", "send yourself a test message"],
+  runner: ["enable", "apply the interval to the timer"],
+};
+
+async function loadSettings() {
+  try {
+    const payload = await api("/api/settings");
+    state.settings.drawn = payload;
+    state.settings.edited.clear();
+    state.settings.projects = null;
+    renderSettings();
+  } catch (error) {
+    say("error", `could not read the configuration: ${error.message}`);
+  }
+}
+
+function renderSettings() {
+  const payload = state.settings.drawn;
+  if (!payload) return;
+  $("settings-path").textContent = payload.path;
+  const problem = $("settings-problem");
+  problem.textContent = payload.problem || "";
+  problem.hidden = !payload.problem;
+
+  const host = $("settings-sections");
+  host.textContent = "";
+  // Open where somebody arriving would start, folded where they would not:
+  // seventy fields at once is a file, not a page.
+  const open = new Set(["notion", "runner", "notify"]);
+  for (const section of payload.sections) {
+    const box = element("details", "group");
+    box.open = open.has(section.key);
+    const head = element("summary");
+    head.append(element("span", "group-title", section.title));
+    const check = CHECKS[section.key];
+    if (check) {
+      const button = action(`> ${check[0]}`, (event) => {
+        event.preventDefault();
+        runCheck(check[0]);
+      });
+      button.title = check[1];
+      button.className = "check-run";
+      head.append(button);
+    }
+    box.append(head);
+    box.append(rich(element("p", "blurb"), section.blurb));
+    if (section.pairs === "projects") box.append(projectRows(payload.projects));
+    else {
+      const grid = element("div", "fields");
+      for (const field of section.fields) grid.append(fieldRow(field));
+      box.append(grid);
+    }
+    host.append(box);
+  }
+  showSaveBar();
+}
+
+function fieldRow(field) {
+  const row = element("div", `field ${field.kind}`);
+  // A <label> around its own control, except where the control is itself a row
+  // of labels: nesting one label in another is invalid, and the browser pulls
+  // the inner ones apart to say so.
+  const wrap = element(field.kind === "events" ? "div" : "label", "stack");
+  wrap.append(element("span", "name", field.label));
+  wrap.append(fieldControl(field));
+  row.append(wrap);
+  if (field.help) row.append(rich(element("p", "help"), field.help));
+  if (field.after) row.append(rich(element("p", "after"), `takes effect once ${field.after}`));
+  return row;
+}
+
+function fieldControl(field) {
+  const remember = (value) => {
+    if (same(value, initial)) state.settings.edited.delete(field.name);
+    else state.settings.edited.set(field.name, value);
+    showSaveBar();
+  };
+  let initial = field.value;
+
+  if (field.kind === "bool") {
+    // Three answers, because the file has three: yes, no, and nothing — which
+    // is the runner's own default and says so.
+    const select = element("select");
+    select.append(option("", `default · ${field.fallback ? "yes" : "no"}`));
+    select.append(option("true", "yes"), option("false", "no"));
+    select.value = field.value === null ? "" : String(field.value);
+    initial = field.value;
+    select.addEventListener("change", () =>
+      remember(select.value === "" ? null : select.value === "true"));
+    return select;
+  }
+
+  if (field.kind === "choice") {
+    const select = element("select");
+    select.append(option("", `default · ${field.fallback}`));
+    for (const choice of field.choices) select.append(option(choice, choice));
+    select.value = field.value || "";
+    initial = field.value || "";
+    select.addEventListener("change", () => remember(select.value || null));
+    return select;
+  }
+
+  if (field.kind === "events") {
+    const box = element("div", "events");
+    const chosen = new Set(field.value === null ? field.fallback : field.value);
+    initial = field.value;
+    for (const choice of field.choices) {
+      const tick = element("label", "check");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = chosen.has(choice);
+      input.addEventListener("change", () => {
+        if (input.checked) chosen.add(choice);
+        else chosen.delete(choice);
+        remember(field.choices.filter((name) => chosen.has(name)));
+      });
+      tick.append(input, textNode(choice));
+      box.append(tick);
+    }
+    return box;
+  }
+
+  if (field.kind === "secret") {
+    const box = element("div", "secret");
+    const input = document.createElement("input");
+    input.type = "password";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    input.placeholder = field.preview ? `set · ends ${field.preview}` : "not set";
+    initial = "";
+    input.addEventListener("input", () => remember(input.value.trim() || ""));
+    box.append(input);
+    if (field.preview) {
+      // Emptying the box means "I did not retype it", so forgetting a token has
+      // to be a gesture of its own rather than the absence of one.
+      const forget = action("forget", () => {
+        input.value = "";
+        input.placeholder = "not set";
+        state.settings.edited.set(field.name, null);
+        forget.disabled = true;
+        showSaveBar();
+      });
+      box.append(forget);
+    }
+    return box;
+  }
+
+  const input = document.createElement("input");
+  input.type = field.kind === "int" ? "number" : "text";
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  input.value = field.value === null ? "" : String(field.value);
+  input.placeholder = field.fallback === "" || field.fallback === null
+    ? "nothing"
+    : `default · ${field.fallback}`;
+  input.addEventListener("input", () => {
+    const text = input.value.trim();
+    if (field.kind === "int") remember(text === "" ? null : Number(text));
+    else remember(text);
+  });
+  return input;
+}
+
+function projectRows(projects) {
+  const box = element("div", "pairs");
+  const rows = state.settings.projects || projects.map((item) => ({ ...item }));
+  const changed = () => {
+    state.settings.projects = rows;
+    showSaveBar();
+  };
+  const draw = () => {
+    box.textContent = "";
+    rows.forEach((row, index) => {
+      const line = element("div", "pair");
+      const name = document.createElement("input");
+      name.value = row.name;
+      name.placeholder = "the project, as Notion names it";
+      name.addEventListener("input", () => { row.name = name.value; changed(); });
+      const path = document.createElement("input");
+      path.value = row.path;
+      path.placeholder = "~/workspace/that-repository";
+      path.addEventListener("input", () => { row.path = path.value; changed(); });
+      line.append(name, path, action("remove", () => { rows.splice(index, 1); changed(); draw(); }));
+      box.append(line);
+    });
+    if (!rows.length) box.append(element("p", "empty", "No mapping here — the project pages carry it."));
+    box.append(action("add a project", () => { rows.push({ name: "", path: "" }); changed(); draw(); }));
+  };
+  draw();
+  return box;
+}
+
+function showSaveBar() {
+  const count = state.settings.edited.size + (state.settings.projects ? 1 : 0);
+  $("savebar").hidden = !count;
+  $("savebar-text").textContent = count === 1 ? "one change, unsaved" : `${count} changes, unsaved`;
+}
+
+async function saveSettings() {
+  const payload = { settings: Object.fromEntries(state.settings.edited) };
+  if (state.settings.projects) payload.projects = state.settings.projects;
+  $("settings-save").disabled = true;
+  try {
+    const result = await api("/api/settings", payload);
+    await loadSettings();
+    await refreshState();
+    const saved = result.saved.length;
+    note(saved
+      ? `Saved ${saved === 1 ? "one setting" : `${saved} settings`}: ${result.saved.join(", ")}.`
+        + (result.after.length ? ` Takes effect once ${result.after.join("; ")}.` : "")
+      : "Nothing to save — the file already said that.");
+  } catch (error) {
+    // On the settings tab, not in the transcript: on a phone the console is a
+    // tab away, and a save you have to go looking for is a save you doubt.
+    note(`Not saved: ${error.message}`, true);
+  } finally {
+    $("settings-save").disabled = false;
+  }
+}
+
+let noteTimer = 0;
+
+/** What became of the last save, where the last save happened. */
+function note(text, bad = false) {
+  const node = $("settings-note");
+  node.textContent = "";
+  rich(node, text);
+  node.className = `notice ${bad ? "bad" : "good"}`;
+  node.hidden = false;
+  clearTimeout(noteTimer);
+  // A problem stays until it is read; a confirmation has been read by then.
+  if (!bad) noteTimer = setTimeout(() => { node.hidden = true; }, 8000);
+}
+
+function runCheck(verb) {
+  show("console");
+  api("/api/command", { line: verb }).catch((error) => say("error", error.message));
+}
+
+function option(value, label) {
+  const node = element("option", null, label);
+  node.value = value;
+  return node;
+}
+
+function same(left, right) {
+  if (Array.isArray(left) && Array.isArray(right))
+    return left.length === right.length && left.every((item, index) => item === right[index]);
+  return left === right;
+}
+
+/** Backticked words become <code>, and nothing else becomes markup. */
+function rich(node, text) {
+  text.split("`").forEach((part, index) => {
+    node.append(index % 2 ? element("code", null, part) : textNode(part));
+  });
+  return node;
+}
+
 /* -- little DOM helpers ----------------------------------------------------- */
 
 function element(tag, className, text) {
@@ -366,6 +651,8 @@ async function boot() {
     }
   });
   $("refresh").addEventListener("click", () => api("/api/refresh", {}).catch(() => {}));
+  $("settings-save").addEventListener("click", saveSettings);
+  $("settings-revert").addEventListener("click", loadSettings);
 
   $("new-title").addEventListener("focus", () => { $("compose-more").hidden = false; });
   $("new-title").addEventListener("keydown", (event) => {
@@ -373,10 +660,13 @@ async function boot() {
   });
   $("create").addEventListener("click", create);
 
+  // The stream first, and only then the three reads: two of them ask Notion,
+  // and a console that opened its live connection *after* a slow board sat
+  // there saying "connecting…" for as long as Notion took to answer.
+  connect();
   await refreshState();
   await loadChat();
   await loadProjects();
-  connect();
 }
 
 async function loadChat() {
@@ -424,10 +714,13 @@ async function create() {
 }
 
 function show(pane) {
+  // Read the first time the tab is opened rather than at boot: most sessions
+  // never open it, and the board is what people came for.
+  if (pane === "settings" && !state.settings.drawn) loadSettings();
   document.querySelectorAll(".tabs button").forEach((button) => {
     button.classList.toggle("on", button.dataset.pane === pane);
   });
-  for (const name of ["board", "console", "live"]) {
+  for (const name of ["board", "console", "live", "settings"]) {
     $(`pane-${name}`).classList.toggle("showing", name === pane);
   }
   // On a wide screen the console is always the right-hand column, whichever of

@@ -48,5 +48,11 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
   `--dry-run` says what it would merge or publish without touching anything.
   Optional: a board without the column behaves exactly as before, and
   `ticket-runner init` adds it.
+- A **Settings** tab in the web console: `config.toml` drawn as a page, every
+  key of it, written back into that very file one line at a time — the comments
+  around it survive, and the console picks the change up without a restart. A
+  blank field says nothing and shows the default it falls back on; tokens are
+  never sent to the browser, only *set, ending in …f3a2*; and a save is all of
+  it or none of it, on a copy that has to load before it takes the file's place.
 - A release and versioning system: this changelog, `scripts/release.py`, the
   `release` workflow, and the `/release` command Claude uses to cut one.
