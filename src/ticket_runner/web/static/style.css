@@ -49,6 +49,15 @@ code { font-family: var(--mono); font-size: .88em; }
   flex: 0 0 auto;
 }
 .brand { font-weight: 700; letter-spacing: -.02em; }
+.version {
+  font-size: .72rem;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: .1rem .4rem;
+  margin-left: -.45rem;
+  white-space: nowrap;
+}
 .pills { display: flex; gap: .4rem; flex-wrap: wrap; }
 .pill {
   font-size: .76rem;

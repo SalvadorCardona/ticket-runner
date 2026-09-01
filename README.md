@@ -1196,12 +1196,13 @@ once, or would go wrong silently.
 
 ## Releases and versions
 
-`ticket-runner --version` — and the console's header — print a real number now, and
-[`CHANGELOG.md`](CHANGELOG.md) says what each one changed, in the words a user would use
-rather than in commit subjects. The numbers are [semantic](https://semver.org/), read from
-an installed runner's point of view: **major** when your installation needs a hand to keep
-working, **minor** when the runner gained something, **patch** when it stopped getting
-something wrong.
+`ticket-runner` typed alone presents the product and the version it is running — as do
+`ticket-runner --version` and the console's header, beside the name. The number is a real
+one, and [`CHANGELOG.md`](CHANGELOG.md) says what each one changed, in the words a user
+would use rather than in commit subjects. The numbers are [semantic](https://semver.org/),
+read from an installed runner's point of view: **major** when your installation needs a
+hand to keep working, **minor** when the runner gained something, **patch** when it
+stopped getting something wrong.
 
 **A release does not change how the runner updates itself.** It follows the branch it was
 installed from, commit by commit — an installation on `main` picks up work as it is

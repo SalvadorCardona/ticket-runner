@@ -18,6 +18,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -35,7 +36,11 @@ from ticket_runner.channels import slack as slack_channel, telegram as telegram_
 from ticket_runner import update, workspace  # noqa: E402
 from ticket_runner import runner as runner_module  # noqa: E402
 from ticket_runner.runner import Runner  # noqa: E402
-from ticket_runner.__main__ import _names, subcommands  # noqa: E402
+from ticket_runner import __version__  # noqa: E402
+from ticket_runner.__main__ import _names, banner, subcommands, welcome  # noqa: E402
+from ticket_runner.__main__ import main as cli_main  # noqa: E402
+from ticket_runner.__main__ import build_parser  # noqa: E402
+from ticket_runner.web import api as web_api  # noqa: E402
 from ticket_runner.web import console as web_console  # noqa: E402
 from ticket_runner.web import live as web_live  # noqa: E402
 from ticket_runner.runner import short_id, slugify  # noqa: E402
@@ -2890,6 +2895,81 @@ def the_dash_in_a_changelog_heading_is_whichever_one_was_typed():
     for dash in ("-", "\u2013", "\u2014"):
         text = f"# Changelog\n\n## [0.1.0] {dash} 2026-01-01\n\n- One.\n"
         assert release.notes_for(text, "0.1.0") == "- One.", dash
+
+
+def _plain(text: str) -> str:
+    """The same output a pipe would get: colour is not part of what is asserted."""
+    return re.sub(r"\033\[[0-9;]*m", "", text)
+
+
+@case
+def a_bare_command_line_presents_the_product_and_its_version():
+    """`ticket-runner`, typed alone, is somebody's first look at what they installed.
+
+    So it answers the two questions that come with that — what is this, and
+    which version am I on — before it lists the verbs. The frame is drawn from
+    the uncoloured text, which is what keeps it square once colours are on.
+    """
+    with _state_home():
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            assert cli_main([]) == 0
+        printed = _plain(buffer.getvalue())
+
+    assert f"ticket-runner {__version__}" in printed
+    assert "Turns ready Notion tickets into Claude Code sessions." in printed
+    for name in subcommands():
+        assert f"\n    {name} " in printed or f"\n    {name}  " in printed, (
+            f"{name} is a command the welcome screen does not name"
+        )
+
+    framed = [line for line in _plain(banner()).splitlines() if line.strip()]
+    assert len({len(line) for line in framed}) == 1, "the frame is not square"
+
+
+@case
+def a_waiting_update_is_said_on_the_welcome_screen():
+    """The one thing worth adding to a version number: that it is not the newest.
+
+    Read from the stamp a run already wrote — a welcome screen that fetched
+    would be a network round trip for every `ticket-runner` typed by mistake.
+    """
+    with _state_home():
+        update.remember(update.Status(current="a" * 40, latest="b" * 40))
+        assert "b" * 8 in _plain(banner())
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            welcome(build_parser())
+        assert "ticket-runner update" in _plain(buffer.getvalue())
+
+
+@case
+def the_console_header_and_the_command_line_agree_on_the_version():
+    """One number, two surfaces: what --version prints is what the browser shows.
+
+    The console reads it bare — an update waiting is a separate field, so the
+    header can print a version where a version belongs rather than a sentence.
+    """
+    with _state_home():
+        assert web_api._version() == __version__
+        assert web_api._update_available() == "", "nothing checked yet is not an update"
+        update.remember(update.Status(current="a" * 40, latest="b" * 40))
+        assert web_api._version() == __version__
+        assert web_api._update_available() == "b" * 8
+
+
+@case
+def the_console_header_shows_the_version_it_is_given():
+    """The number reaches the header, rather than staying in the payload."""
+    app = (Path(__file__).resolve().parents[1] / "src/ticket_runner/web/static/app.js").read_text(
+        encoding="utf-8"
+    )
+    page = (Path(__file__).resolve().parents[1] / "src/ticket_runner/web/static/index.html").read_text(
+        encoding="utf-8"
+    )
+    assert 'id="version"' in page, "the header has nowhere to print the version"
+    assert "info.version" in app and '$("version")' in app
+    assert "info.update" in app, "an update waiting has to be said too"
 
 
 @case

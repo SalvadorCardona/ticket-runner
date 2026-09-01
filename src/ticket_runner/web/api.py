@@ -216,6 +216,7 @@ class Api:
             "permission_mode": configuration.runner.permission_mode,
             "claude": bool(session.available()),
             "version": _version(),
+            "update": _update_available(),
             "spend": round(sum(float(entry.get("cost_usd") or 0) for entry in entries), 2),
             "handled": len(entries),
             "chat": self.chat.state(),
@@ -350,18 +351,26 @@ def _mtime(path: Path) -> float:
 
 
 def _version() -> str:
-    """What is installed, and whether something newer is waiting.
+    """The number this console is running — nothing else.
+
+    Kept bare so the header can print it where a version belongs, next to the
+    name, rather than as one more sentence in a row of pills. What is *newer*
+    than it is `_update_available`, which is a different question.
+    """
+    from .. import __version__
+
+    return __version__
+
+
+def _update_available() -> str:
+    """The commit waiting to be installed, or an empty string for "none".
 
     Read from the stamp a run already writes — never by asking the remote: the
     console redraws its header on every reconnection, and a `git fetch` behind
     that would be a fetch every time a laptop wakes up.
     """
-    from .. import __version__
-
     status = update_module.remembered()
-    if status.stale:
-        return f"{__version__} — {status.latest[:8]} available"
-    return __version__
+    return status.latest[:8] if status.stale else ""
 
 
 def _timer_state() -> str:

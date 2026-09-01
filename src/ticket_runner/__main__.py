@@ -30,6 +30,9 @@ if sys.stdout.isatty():
     BOLD, DIM = "\033[1m", "\033[2m"
     GREEN, RED, YELLOW, RESET = "\033[32m", "\033[31m", "\033[33m", "\033[0m"
 
+PRODUCT = "ticket-runner"
+TAGLINE = "Turns ready Notion tickets into Claude Code sessions."
+
 
 def ok(message: str) -> None:
     print(f"  {GREEN}✓{RESET} {message}")
@@ -848,12 +851,75 @@ def command_timer(args: argparse.Namespace) -> int:
 # -- entry point -------------------------------------------------------------
 
 
+def banner_lines() -> list[tuple[str, str]]:
+    """What the frame holds: every line as (plain, coloured).
+
+    The two are kept side by side because escape codes take no room on screen —
+    a frame measured with them in it comes out crooked the moment colours are
+    on, which is exactly when somebody is looking at it.
+    """
+    lines = [
+        (
+            f"{PRODUCT} {__version__}",
+            f"{BOLD}{PRODUCT}{RESET} {GREEN}{__version__}{RESET}",
+        ),
+        (TAGLINE, f"{DIM}{TAGLINE}{RESET}"),
+    ]
+    # Read from the stamp a run already wrote, never by asking the remote: a
+    # welcome screen is not the place to spend a network round trip.
+    status = update_module.remembered()
+    if status.stale:
+        waiting = f"{status.latest[:8]} is waiting — ticket-runner update"
+        lines.append((waiting, f"{YELLOW}{waiting}{RESET}"))
+    return lines
+
+
+def banner() -> str:
+    """The product and its version, framed."""
+    lines = banner_lines()
+    width = max(len(plain) for plain, _ in lines)
+    drawn = [f"  {DIM}╭─{'─' * width}─╮{RESET}"]
+    for plain, coloured in lines:
+        drawn.append(f"  {DIM}│{RESET} {coloured}{' ' * (width - len(plain))} {DIM}│{RESET}")
+    drawn.append(f"  {DIM}╰─{'─' * width}─╯{RESET}")
+    return "\n".join(drawn)
+
+
+def commands_of(parser: argparse.ArgumentParser) -> list[tuple[str, str]]:
+    """Every verb and the one line that says what it does, in the order declared."""
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return [(choice.dest, choice.help or "") for choice in action._choices_actions]
+    return []
+
+
+def welcome(parser: argparse.ArgumentParser) -> None:
+    """What a bare `ticket-runner` shows: the product, its version, its verbs.
+
+    Not argparse's usage block. Somebody typing the name alone is looking at
+    the thing for the first time, or checking what they installed — both are
+    answered better by the version and a list of commands in plain columns.
+    """
+    print()
+    print(banner())
+    print()
+    commands = commands_of(parser)
+    width = max((len(name) for name, _ in commands), default=0)
+    title("  Commands")
+    for name, help_text in commands:
+        print(f"    {name.ljust(width)}  {DIM}{help_text}{RESET}")
+    print()
+    print(f"  {DIM}ticket-runner <command> --help says what a command takes.{RESET}")
+    print(f"  {DIM}Start with:{RESET} ticket-runner doctor")
+    print()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="ticket-runner",
-        description="Turns ready Notion tickets into Claude Code sessions.",
+        prog=PRODUCT,
+        description=TAGLINE,
     )
-    parser.add_argument("--version", action="version", version=f"ticket-runner {__version__}")
+    parser.add_argument("--version", action="version", version=f"{PRODUCT} {__version__}")
     subparsers = parser.add_subparsers(dest="command")
 
     run = subparsers.add_parser("run", help="handle the ready tickets (one run)")
@@ -955,7 +1021,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if not getattr(args, "function", None):
-        parser.print_help()
+        welcome(parser)
         return 0
     try:
         return args.function(args)
