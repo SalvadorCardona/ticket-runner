@@ -1059,7 +1059,7 @@ ticket-runner status       # timer, current run, recent tickets
 ticket-runner history      # what has been handled, with the pull requests
 ticket-runner projects     # Notion project → local repository mapping
 ticket-runner doctor       # full diagnostics
-ticket-runner clean --force          # remove worktrees and scratch dirs left by failures
+ticket-runner clean --force          # remove worktrees, their branches, and scratch dirs
 ticket-runner update       # move the installation to the newest version
 ticket-runner update --check         # what is available, changing nothing
 ticket-runner enable       # apply interval_seconds and start the timer
@@ -1075,6 +1075,21 @@ The first attempt is best made by hand, on a ticket you choose:
 ticket-runner run --ticket https://www.notion.so/... --dry-run   # look first
 ticket-runner run --ticket https://www.notion.so/...             # then go
 ```
+
+### What `clean` removes, and what it refuses to
+
+A branch is named after its ticket, so it is the same name on every attempt: a
+branch left behind by a failure is what makes the next run answer
+`branch ticket/… already exists` and stops that ticket for good. So `clean --force`
+removes the branch along with the worktree — but only when nothing on it is
+anybody's but the runner's.
+
+A branch with commits of its own that are not on the base branch, one whose pull
+request is still open, or a worktree holding changes that were never committed:
+those are kept, named, and given the reason. That ticket stays blocked until you
+look at it — which is the point, since a commit that failed to push is sometimes
+the only copy there is — and the line printed under it is the command that drops
+the branch once you have what you need.
 
 ---
 
@@ -1150,6 +1165,7 @@ board is shared with people you would not hand those credentials to, leave the c
 | a ticket became a document when you wanted code | its project names no repository. Give the project page a `Path` or a `Repository` |
 | “nothing to work from” | the ticket has neither a title nor a description — a page left on the bare template counts as empty |
 | a ticket sat in *In progress* forever | it no longer can: the next run puts back any ticket this host claimed while no run was alive |
+| a ticket fails with `branch … already exists` | an earlier failure left that branch behind. `ticket-runner clean --force` removes it with its worktree — and says so, or says why it would not |
 | no desktop notification | `notify-send` is missing, or the service has no session bus. `runner.notify = false` silences the attempt |
 | nothing arrives in Telegram or Slack | `ticket-runner notify` says which end refused — a revoked token, a chat id that is not yours, a bot not invited to the channel |
 | an answer typed in Slack changes nothing | the bot cannot read the channel: add `channels:history` (or `groups:history`, `im:history`) and reinstall the app |
