@@ -3289,6 +3289,27 @@ def the_header_gives_the_machine_back_when_nobody_is_looking():
 
 
 @case
+def the_console_scrolls_in_its_own_colours():
+    """The bars the console scrolls on are drawn by the console, not the browser.
+
+    Left alone, a browser paints them for a light page — pale and wide over a
+    panel that is neither — and the console scrolls almost everywhere. Both
+    spellings have to stay: the pseudo-elements for Chrome and WebKit, the two
+    standard properties for Firefox, which has nothing else.
+    """
+    style = (
+        Path(__file__).resolve().parents[1] / "src/ticket_runner/web/static/style.css"
+    ).read_text(encoding="utf-8")
+
+    assert "color-scheme: dark" in style, "the browser is left to guess at a dark page"
+    assert "::-webkit-scrollbar-thumb" in style, "Chrome and WebKit keep the browser's bar"
+    assert "scrollbar-color" in style, "Firefox keeps the browser's bar"
+    assert "@supports not selector(::-webkit-scrollbar)" in style, (
+        "Chrome prefers the standard properties, and would drop the rounded thumb"
+    )
+
+
+@case
 def the_console_asks_for_nothing_it_did_not_ship():
     """Nothing the page loads comes from anywhere but this machine.
 

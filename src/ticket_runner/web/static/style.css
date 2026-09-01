@@ -37,6 +37,40 @@ body {
 .grow { flex: 1; }
 code { font-family: var(--mono); font-size: .88em; }
 
+/* -- scrollbars ------------------------------------------------------------ */
+
+/* Nearly everything here scrolls — the board, the transcript, a session's
+   steps, the settings — and the bar the browser draws for it is the one part
+   of the page that never heard the console was dark: pale, wide, and laid over
+   the panel rather than living in it. Saying `color-scheme` is what stops the
+   browser guessing, and it settles the dropdowns and the caret with it.
+
+   The bar itself is written twice, because it is two features. WebKit and
+   Chrome take the pseudo-elements, which is where the rounded thumb and the
+   gap around it come from; Firefox has none of those and takes the pair of
+   standard properties instead. Chrome understands those too and would prefer
+   them over the pseudo-elements, so they are only asked for where the
+   pseudo-elements are not understood. */
+
+:root { color-scheme: dark; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  /* Clipping to the padding box turns the transparent border into the gap that
+     holds the thumb off the edge of whatever it is scrolling. */
+  background: var(--line);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover { background: #38404f; background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+}
+
 /* -- header ---------------------------------------------------------------- */
 
 /* The bar is three layers: a canvas raymarching a gyroid tunnel, a veil that
