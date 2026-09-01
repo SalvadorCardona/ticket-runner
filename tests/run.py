@@ -3468,18 +3468,51 @@ def the_console_header_and_the_command_line_agree_on_the_version():
         assert web_api._update_available() == "b" * 8
 
 
+ROOT = Path(__file__).resolve().parents[1]
+STATIC = ROOT / "src/ticket_runner/web/static"
+FRONTEND = ROOT / "frontend"
+
+
+def _shipped() -> list[Path]:
+    """Every file the console hands a browser, as it sits in the package.
+
+    `frontend/` is the source; this is the build, and the build is what is
+    committed — the installer is a `git clone` onto a machine that has python3
+    and git and no reason to have Node.
+    """
+    return [STATIC / "index.html", *sorted((STATIC / "assets").glob("*"))]
+
+
+@case
+def the_console_ships_its_built_bundle():
+    """A clone of this repository is a console that opens, with nothing built.
+
+    `ticket-runner` installs by cloning and running `python3`. If the bundle
+    lived only in `frontend/` and were built on the way in, the install would
+    need Node — which is exactly the dependency this tool exists without.
+    """
+    page = (STATIC / "index.html").read_text(encoding="utf-8")
+    assert (STATIC / "assets/console.js").is_file(), "the console was never built"
+    assert (STATIC / "assets/console.css").is_file(), "the console has no stylesheet"
+    # Vite is told to write these names rather than hashed ones, so the page and
+    # the files it names cannot drift apart, and a commit does not rename two
+    # build artefacts every time.
+    assert "/static/assets/console.js" in page, "the page does not load the bundle"
+    assert "/static/assets/console.css" in page, "the page does not load the stylesheet"
+    assert (FRONTEND / "package.json").is_file(), "the source the bundle is built from is gone"
+    assert (FRONTEND / "components.json").is_file(), "shadcn/ui is no longer configured"
+
+
 @case
 def the_console_header_shows_the_version_it_is_given():
-    """The number reaches the header, rather than staying in the payload."""
-    app = (Path(__file__).resolve().parents[1] / "src/ticket_runner/web/static/app.js").read_text(
-        encoding="utf-8"
-    )
-    page = (Path(__file__).resolve().parents[1] / "src/ticket_runner/web/static/index.html").read_text(
-        encoding="utf-8"
-    )
-    assert 'id="version"' in page, "the header has nowhere to print the version"
-    assert "info.version" in app and '$("version")' in app
-    assert "info.update" in app, "an update waiting has to be said too"
+    """The number reaches the header, rather than staying in the payload.
+
+    Read from the React source rather than the bundle: the bundle is minified,
+    and asserting on minified identifiers is asserting on the minifier.
+    """
+    header = (FRONTEND / "src/components/console/header.tsx").read_text(encoding="utf-8")
+    assert "runner.version" in header, "the header has nowhere to print the version"
+    assert "runner.update" in header, "an update waiting has to be said too"
 
 
 @case
@@ -3491,16 +3524,14 @@ def the_console_scrolls_in_its_own_colours():
     spellings have to stay: the pseudo-elements for Chrome and WebKit, the two
     standard properties for Firefox, which has nothing else.
     """
-    style = (
-        Path(__file__).resolve().parents[1] / "src/ticket_runner/web/static/style.css"
-    ).read_text(encoding="utf-8")
-
-    assert "color-scheme: dark" in style, "the browser is left to guess at a dark page"
-    assert "::-webkit-scrollbar-thumb" in style, "Chrome and WebKit keep the browser's bar"
-    assert "scrollbar-color" in style, "Firefox keeps the browser's bar"
-    assert "@supports not selector(::-webkit-scrollbar)" in style, (
-        "Chrome prefers the standard properties, and would drop the rounded thumb"
-    )
+    for style in ((FRONTEND / "src/index.css"), (STATIC / "assets/console.css")):
+        text = style.read_text(encoding="utf-8")
+        assert "color-scheme" in text, "the browser is left to guess at the page's colours"
+        assert "::-webkit-scrollbar-thumb" in text, "Chrome and WebKit keep the browser's bar"
+        assert "scrollbar-color" in text, "Firefox keeps the browser's bar"
+        assert "@supports not selector(::-webkit-scrollbar)" in text, (
+            "Chrome prefers the standard properties, and would drop the rounded thumb"
+        )
 
 
 @case
@@ -3509,17 +3540,17 @@ def the_console_asks_for_nothing_it_did_not_ship():
 
     The console is served by `http.server` on loopback, and a page that reached
     for a library on a CDN would be a console that looks broken on a train and
-    tells somebody else when you opened it.
+    tells somebody else when you opened it. React and shadcn/ui change nothing
+    here: they are compiled into the bundle beside the page, not fetched.
     """
     # An `xmlns` is a name, not an address; what is looked for here is the
     # shapes that actually make the browser open a socket.
     reaches = ('src="http', "src='http", 'href="http', "href='http",
                "url(http", "url('http", 'url("http', "@import", "//unpkg", "//cdn")
-    static = Path(__file__).resolve().parents[1] / "src/ticket_runner/web/static"
-    for name in ("index.html", "app.js", "style.css"):
-        text = (static / name).read_text(encoding="utf-8")
+    for path in _shipped():
+        text = path.read_text(encoding="utf-8", errors="replace")
         for shape in reaches:
-            assert shape not in text, f"{name} reaches off the machine: {shape}"
+            assert shape not in text, f"{path.name} reaches off the machine: {shape}"
 
 
 @case

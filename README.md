@@ -991,6 +991,60 @@ Telegram and Slack, `> enable` to write a new interval into the systemd timer �
 CLI already knows how to say whether a token works, and a settings page does not need a
 second opinion. A setting that needs more than saving says so, once, and only when it moved.
 
+### The console's own code
+
+The page is a **React** application — TypeScript, [Vite](https://vite.dev) and
+[shadcn/ui](https://ui.shadcn.com) on Tailwind — and it lives in `frontend/`. What ships in
+the package is the *build*: `src/ticket_runner/web/static/` holds `index.html` and one
+`assets/console.js` and `assets/console.css`, and those are committed.
+
+That is the whole arrangement, and it is deliberate. `install.sh` clones this repository
+onto a machine that has `python3` and `git`, and `ticket-runner serve` is `http.server` and
+the standard library. **Nothing about the console asks the machine that runs it for Node.**
+Node is a thing you need to *change* the console, not to use it.
+
+```sh
+cd frontend
+npm install
+npm run build      # writes ../src/ticket_runner/web/static — commit what it writes
+npm run dev        # hot reload, proxying /api to a console you started yourself
+npm run lint       # tsc, in the strict configuration the build uses
+```
+
+`npm run dev` proxies `/api` to `http://127.0.0.1:8787` — set `TICKET_RUNNER_ORIGIN` for
+another address. Open the real console once first (`ticket-runner serve`, then its URL with
+the token): the dev server borrows the cookie that URL sets, because the API refuses
+anything else.
+
+**Adding a component.** The project is a plain shadcn/ui project — `frontend/components.json`
+is its configuration, and the components live in `frontend/src/components/ui/` where the CLI
+puts them:
+
+```sh
+cd frontend
+npx shadcn@latest add dialog dropdown-menu
+```
+
+The repository also declares the **shadcn MCP server** in `.mcp.json`, pointed at
+`frontend/`, so an agent working in this repository can search the registry, read a
+component's source and install it without leaving the session. Claude Code asks before it
+starts a server a repository declares; `/mcp` is where you say yes, and where you check it
+came up.
+
+Two rules the console keeps, and they predate React:
+
+- **The stream is the truth.** A click posts and says nothing; what appears on the screen is
+  what came back on `/api/events`. So two open tabs show the same thing, and an answer typed
+  on a phone shows up on the laptop without either of them asking.
+- **Nothing is loaded from anywhere but this machine.** No CDN, no web font, no analytics —
+  a console that reached off the machine would look broken on a train and would tell
+  somebody else when you opened it. A test asserts it against the shipped files.
+
+The page opens dark, because it sits beside a terminal and the thing it shows most of the
+time is a log. The switch in the header changes that, and the choice is one line in the
+browser's `localStorage` — read before the first paint, so the page never flashes white on
+the way to dark.
+
 ### Keeping it running
 
 ```sh
