@@ -1,32 +1,35 @@
 import * as React from "react"
 
+import { AppSidebar } from "@/components/console/app-sidebar"
 import { BoardPane } from "@/components/console/board-pane"
 import { ConsolePane } from "@/components/console/console-pane"
 import { Header } from "@/components/console/header"
 import { LivePane } from "@/components/console/live-pane"
 import { SettingsPane } from "@/components/console/settings-pane"
 import { TicketPane } from "@/components/console/ticket-pane"
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { ConsoleProvider, useConsole } from "@/hooks/use-console"
+import type { Pane } from "@/lib/menu"
 import { cn } from "@/lib/utils"
 
-/* Two columns on a screen, one at a time on a phone.
+/* The shape of the page.
  *
- * The console is always the right-hand one, whichever of the other four is
- * chosen — so choosing one must not take it away. Below 861px there is only
- * room for one, and the console becomes a tab like the rest.
+ * A menu down the left, and to the right of it two columns: the pane the menu
+ * chose, and the console — which stays put whichever of the other four is
+ * chosen, because it is the thing you talk to while looking at them. Below
+ * 861px there is only room for one column and the console becomes an entry in
+ * the menu like the rest; below 768px the menu itself becomes a drawer.
  */
 
-type Pane = "board" | "ticket" | "console" | "live" | "settings"
-
-const PANES: { key: Pane; label: string }[] = [
-  { key: "board", label: "Board" },
-  { key: "ticket", label: "Ticket" },
-  { key: "console", label: "Console" },
-  { key: "live", label: "Live" },
-  { key: "settings", label: "Settings" },
-]
+const TITLE: Record<Pane, string> = {
+  board: "Board",
+  ticket: "Ticket",
+  console: "Console",
+  live: "Sessions",
+  settings: "Settings",
+}
 
 function Console() {
   const [pane, setPane] = React.useState<Pane>("board")
@@ -47,12 +50,11 @@ function Console() {
     void runCommand(verb)
   }
 
-  const chosen = (name: Pane) => (
+  const cell = (name: Exclude<Pane, "console">) => (
     <div
       key={name}
       className={cn(
-        "col-start-1 row-start-1 min-h-0 overflow-y-auto",
-        "scroll-thin",
+        "scroll-thin col-start-1 row-start-1 min-h-0 overflow-y-auto",
         pane === name ? "block" : "hidden",
         // The two panes that hold a composer at the bottom manage their own
         // scrolling, and must not be scrolled a second time by this cell.
@@ -68,43 +70,28 @@ function Console() {
   )
 
   return (
-    <div className="flex h-full flex-col">
-      <Header />
+    <>
+      <AppSidebar pane={pane} setPane={setPane} />
+      <SidebarInset className="min-h-0 overflow-hidden">
+        <div className="flex h-full min-h-0 flex-col">
+          <Header title={TITLE[pane]} />
 
-      <nav className="flex gap-1 border-b px-3 py-1.5">
-        {PANES.map((item) => (
-          <button
-            key={item.key}
-            onClick={() => setPane(item.key)}
-            aria-current={pane === item.key}
-            className={cn(
-              "focus-visible:ring-ring/50 cursor-pointer rounded-md px-3 py-1 text-sm font-medium transition-colors focus-visible:ring-[3px] focus-visible:outline-none",
-              pane === item.key
-                ? "bg-secondary text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            {item.label}
-          </button>
-        ))}
-      </nav>
+          <div className="grid min-h-0 flex-1 grid-cols-1 min-[861px]:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+            {(["board", "ticket", "live", "settings"] as const).map(cell)}
 
-      <main className="grid min-h-0 flex-1 grid-cols-1 min-[861px]:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
-        {PANES.filter((item) => item.key !== "console").map((item) => chosen(item.key))}
-
-        <div
-          className={cn(
-            "col-start-1 row-start-1 min-h-0 flex-col border-l",
-            "min-[861px]:col-start-2 min-[861px]:flex",
-            pane === "console" ? "flex max-[860px]:border-l-0" : "hidden"
-          )}
-        >
-          <ConsolePane />
+            <div
+              className={cn(
+                "col-start-1 row-start-1 min-h-0 flex-col",
+                "min-[861px]:col-start-2 min-[861px]:flex min-[861px]:border-l",
+                pane === "console" ? "flex" : "hidden"
+              )}
+            >
+              <ConsolePane />
+            </div>
+          </div>
         </div>
-      </main>
-
-      <Toaster />
-    </div>
+      </SidebarInset>
+    </>
   )
 }
 
@@ -112,7 +99,10 @@ export default function App() {
   return (
     <TooltipProvider>
       <ConsoleProvider>
-        <Console />
+        <SidebarProvider className="h-svh min-h-0">
+          <Console />
+          <Toaster />
+        </SidebarProvider>
       </ConsoleProvider>
     </TooltipProvider>
   )

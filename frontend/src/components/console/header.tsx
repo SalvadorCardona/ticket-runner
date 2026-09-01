@@ -1,10 +1,8 @@
-import { Moon, RefreshCw, Sun } from "lucide-react"
-
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Separator } from "@/components/ui/separator"
+import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useConsole } from "@/hooks/use-console"
-import { useTheme } from "@/hooks/use-theme"
 import { cn } from "@/lib/utils"
 
 /** An interval, as somebody would say it out loud. */
@@ -19,28 +17,14 @@ function every(seconds: number): string {
  * for: is the timer on, is something running now, is `claude` even installed,
  * what has this cost, is there a version waiting.
  */
-export function Header() {
-  const { runner, connection, refresh } = useConsole()
-  const { theme, toggle } = useTheme()
+export function Header({ title }: { title: string }) {
+  const { runner } = useConsole()
 
   return (
-    <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-2">
-      <span className="text-[0.95rem] font-semibold tracking-tight">
-        ticket<span className="text-muted-foreground">-runner</span>
-      </span>
-
-      {runner?.version ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="text-muted-foreground font-mono text-xs">v{runner.version}</span>
-          </TooltipTrigger>
-          <TooltipContent>
-            {runner.update
-              ? `v${runner.version} — ${runner.update} is waiting, run: ticket-runner update`
-              : `v${runner.version} — the version this console is running`}
-          </TooltipContent>
-        </Tooltip>
-      ) : null}
+    <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-3 py-2">
+      <SidebarTrigger className="-ml-1" />
+      <Separator orientation="vertical" className="mr-1 !h-4" />
+      <span className="text-sm font-semibold tracking-tight">{title}</span>
 
       <div className="flex flex-wrap items-center gap-1.5">
         {runner ? (
@@ -71,53 +55,23 @@ export function Header() {
               {runner.handled} handled · ${runner.spend}
             </Badge>
             {runner.update ? (
-              <Badge className="bg-tr-amber/15 text-tr-amber border-tr-amber/30" variant="outline">
-                {runner.update} available · run update
-              </Badge>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge
+                    className="bg-tr-amber/15 text-tr-amber border-tr-amber/30"
+                    variant="outline"
+                  >
+                    {runner.update} available · run update
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                  v{runner.version} — {runner.update} is waiting, run: ticket-runner update
+                </TooltipContent>
+              </Tooltip>
             ) : null}
           </>
         ) : null}
       </div>
-
-      <span className="flex-1" />
-
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span
-            className={cn(
-              "flex items-center gap-1.5 font-mono text-xs",
-              connection === "live" ? "text-tr-green" : "text-muted-foreground"
-            )}
-          >
-            <span
-              className={cn(
-                "size-1.5 rounded-full",
-                connection === "live" ? "bg-tr-green" : "bg-tr-amber animate-pulse"
-              )}
-            />
-            {connection === "live" ? "live" : connection === "connecting" ? "connecting…" : "reconnecting…"}
-          </span>
-        </TooltipTrigger>
-        <TooltipContent>event stream</TooltipContent>
-      </Tooltip>
-
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="ghost" size="icon" onClick={refresh} aria-label="reread the board now">
-            <RefreshCw />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>reread the board now</TooltipContent>
-      </Tooltip>
-
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="ghost" size="icon" onClick={toggle} aria-label="switch theme">
-            {theme === "dark" ? <Sun /> : <Moon />}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{theme === "dark" ? "go light" : "go dark"}</TooltipContent>
-      </Tooltip>
     </header>
   )
 }
