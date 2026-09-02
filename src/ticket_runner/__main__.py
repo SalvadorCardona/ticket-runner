@@ -188,7 +188,7 @@ def command_status(args: argparse.Namespace) -> int:
         bad(str(error))
         return 2
 
-    title("Timer")
+    title("Services")
     if shutil.which("systemctl"):
         active = subprocess.run(
             ["systemctl", "--user", "is-enabled", "ticket-runner.timer"],
@@ -201,6 +201,19 @@ def command_status(args: argparse.Namespace) -> int:
         (ok if active == "enabled" else warn)(f"ticket-runner.timer: {active or 'not installed'}")
         for line in timers[1:2]:
             print(f"    {DIM}{line.strip()}{RESET}")
+        # The console runs by default, so its absence is worth a line: nothing
+        # about a ticket goes wrong when it is down, you simply have no board.
+        console = subprocess.run(
+            ["systemctl", "--user", "is-active", "ticket-runner-web.service"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        (ok if console == "active" else warn)(
+            f"ticket-runner-web.service: {console or 'not installed'}"
+        )
+        if console == "active":
+            print(f"    {DIM}http://{configuration.web.host}:{configuration.web.port}{RESET}")
+        else:
+            print(f"    {DIM}ticket-runner enable   to start it{RESET}")
     else:
         warn("no systemd — the runner only runs on demand")
 
@@ -875,19 +888,30 @@ def command_serve(args: argparse.Namespace) -> int:
 
 
 def command_timer(args: argparse.Namespace) -> int:
+    """Both units at once: the timer that runs tickets, and the console.
+
+    They are enabled and disabled together because they are the same answer to
+    "is the runner on this machine running" — a console left behind by a
+    `disable` would keep showing a board nothing is picking up.
+    """
     if not shutil.which("systemctl"):
         print("systemd not available", file=sys.stderr)
         return 1
     if args.command == "disable":
-        return subprocess.call(
+        code = subprocess.call(
             ["systemctl", "--user", "disable", "--now", "ticket-runner.timer"]
         )
+        subprocess.call(
+            ["systemctl", "--user", "disable", "--now", "ticket-runner-web.service"]
+        )
+        return code
 
     try:
-        interval = config_module.load().runner.interval_seconds
+        configuration = config_module.load()
     except config_module.ConfigError as error:
         print(f"{RED}error:{RESET} {error}", file=sys.stderr)
         return 2
+    interval = configuration.runner.interval_seconds
     update_module.write_units(interval)
     subprocess.call(["systemctl", "--user", "daemon-reload"])
     code = subprocess.call(
@@ -896,6 +920,13 @@ def command_timer(args: argparse.Namespace) -> int:
     if code == 0:
         every = f"{interval}s" if interval < 120 else f"{interval // 60} min"
         ok(f"timer enabled — one run every {every}")
+    console = subprocess.call(
+        ["systemctl", "--user", "enable", "--now", "ticket-runner-web.service"]
+    )
+    if console == 0:
+        ok(f"console enabled — http://{configuration.web.host}:{configuration.web.port}")
+    else:
+        warn("the console's unit refused to start — journalctl --user -u ticket-runner-web")
     return code
 
 
@@ -985,7 +1016,7 @@ def build_parser() -> argparse.ArgumentParser:
     projects = subparsers.add_parser("projects", help="check the project → repository mapping")
     projects.set_defaults(function=command_projects)
 
-    status = subparsers.add_parser("status", help="timer, current run, recent tickets")
+    status = subparsers.add_parser("status", help="timer, console, current run, recent tickets")
     status.set_defaults(function=command_status)
 
     history = subparsers.add_parser("history", help="tickets already handled")
@@ -1045,8 +1076,8 @@ def build_parser() -> argparse.ArgumentParser:
     clean.set_defaults(function=command_clean)
 
     for name, help_text in (
-        ("enable", "apply runner.interval_seconds and start the timer"),
-        ("disable", "stop the timer"),
+        ("enable", "apply runner.interval_seconds, start the timer and the console"),
+        ("disable", "stop the timer and the console"),
     ):
         timer = subparsers.add_parser(name, help=help_text)
         timer.set_defaults(function=command_timer)
