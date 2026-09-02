@@ -104,7 +104,13 @@ def command_list(args: argparse.Namespace) -> int:
     configuration = load_config()
     runner = Runner(configuration, quiet=True)
     tickets, waiting = runner.queue()
-    if not tickets and not waiting:
+    # The validated column keeps a calendar of its own: what you have accepted
+    # and dated is waiting to go out, exactly as a dated ready ticket is waiting
+    # to run. One list, or the half of it that is shown lies about the other.
+    rows = [(ticket, moment, "") for ticket, moment in waiting]
+    rows += [(ticket, moment, " · validated") for ticket, moment in runner.scheduled()]
+    rows.sort(key=lambda row: row[1])
+    if not tickets and not rows:
         print("No ticket ready.")
         return 0
     if tickets:
@@ -126,15 +132,15 @@ def command_list(args: argparse.Namespace) -> int:
         tail = " · ".join([part for part in [project, kind, *badges] if part])
         print(f"  {position}. {ticket.title}\n     {DIM}{tail}{RESET}\n     {DIM}{ticket.url}{RESET}")
 
-    if waiting:
-        title(f"\n{len(waiting)} ticket(s) waiting for their date")
+    if rows:
+        title(f"\n{len(rows)} ticket(s) waiting for their date")
         now = datetime.now().astimezone()
-        for ticket, moment in waiting:
+        for ticket, moment, note in rows:
             delay = moment - now
             hours = delay.total_seconds() / 3600
             when = f"in {hours:.0f} h" if hours < 48 else f"in {delay.days} days"
             stamp = moment.strftime("%Y-%m-%d %H:%M")
-            print(f"  {ticket.title}\n     {DIM}{stamp} — {when}{RESET}")
+            print(f"  {ticket.title}\n     {DIM}{stamp} — {when}{note}{RESET}")
     return 0
 
 
@@ -568,7 +574,7 @@ def command_doctor(args: argparse.Namespace) -> int:
         ("cost", "number", "what the run cost, written back"),
         ("duration", "number", "how long it took, in minutes"),
         ("progress", "rich_text", "what the session is doing, while it does it"),
-        ("due", "date", "hold the ticket until that date, then run it"),
+        ("due", "date", "hold the ticket until that date, then run — or publish — it"),
         ("role", "relation", "which agent handles the ticket; its page is the role"),
     )
     for key, preferred, why in optional:

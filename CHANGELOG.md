@@ -18,6 +18,13 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Added
 
+- A date on a **validated** ticket is honoured too, so the board schedules what is
+  finished and not only what is to be done: the post you wrote on Monday and accepted on
+  Tuesday goes out on Thursday at 18:00, on its own, rather than on the pass that follows
+  your click. The ticket waits in its column until the moment comes, and a pull request
+  waits the same way — one column, one rule. `ticket-runner list` shows what *Validated*
+  is holding back beside the ready tickets waiting for their date, and a pass counts them
+  both.
 
 - A ticket nobody got round to titling is named by the runner when it becomes
   ready: a very short session reads what the page says and writes a title back
