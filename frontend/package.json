@@ -4,6 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "description": "The ticket-runner web console: React, Vite and shadcn/ui, built into the package the Python server serves.",
+  "homepage": "https://cardona.digital",
+  "author": {
+    "name": "Salvador Cardona",
+    "url": "https://cardona.digital"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
