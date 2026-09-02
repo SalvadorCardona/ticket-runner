@@ -309,12 +309,18 @@ for reading rather than for filling in.
 | `Cost` | number | *optional* — written back, in dollars |
 | `Duration` | number | *optional* — written back, in minutes |
 | `Progress` | text | *optional* — **what the session is doing right now**, rewritten every ten seconds |
-| `Scheduled` | date | *optional* — **hold the ticket until that moment**, then run it |
+| `Scheduled` | date | *optional* — **hold the ticket until that moment**, then run it — or, on a validated ticket, publish it |
 
 `Scheduled` is what turns the board into a calendar. A ticket without one starts within
 seconds of reaching the ready column, so a date on it can only mean *not yet*: the runner
 leaves it alone until the moment comes, then treats it like any other. Write the release
 post on Monday, run the monthly report on the first — the ticket sits ready and waits.
+
+The same date is honoured in *Validated*, which is where it pays off for work that is
+already **finished**: the post is written, you have read it and said yes, and it still goes
+out at the hour you chose. Accept it on Tuesday for Thursday 18:00 and it sits in its
+column until Thursday 18:00 — no alarm to set, nothing to come back and click. Merges wait
+the same way: one column, one rule.
 
 A bare date means the start of that day in the runner's own timezone, so a ticket dated
 30 August begins on the 30th rather than at some hour dictated by UTC. A date with a time
@@ -772,7 +778,7 @@ So the board reads end to end: *Ready* is you asking for the work, *Validated* i
 accepting it, and *Done* means it is actually out in the world rather than merely
 finished. Between the two, the runner does the typing.
 
-Four things are worth knowing:
+Five things are worth knowing:
 
 - **the column is opt-in.** A board whose `Status` does not offer *Validated* is never
   even queried, and everything behaves exactly as it did — you merge by hand, and
@@ -790,6 +796,12 @@ Four things are worth knowing:
   settled at the top of a pass, before any new ticket is claimed — a ticket you have
   accepted comes before one nobody has read. Publications run side by side under
   `max_concurrent`, so four of them cost one session's wait rather than four;
+- **a date on the ticket still holds.** `Scheduled` says "not before this moment"
+  wherever it is written, so a validated ticket dated Thursday is merged or published on
+  Thursday rather than on the next pass. It is what makes the column a schedule and not
+  just a *go*: you accept the post when you have read it, and it goes out when it should.
+  `ticket-runner list` shows those alongside the ready tickets that are waiting, and a
+  pass says how many are;
 - **it is never guessed at.** The runner acts on that column and on nothing else: no
   ticket is merged or published because a session felt sure of itself. And
   `ticket-runner run --dry-run` says what it *would* merge or publish without touching

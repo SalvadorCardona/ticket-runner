@@ -1929,6 +1929,91 @@ def _never_merged(url: str, method: str = "squash") -> str:
     raise AssertionError("a dry run never merges anything")
 
 
+def _dated(page: notion.Page, when: str) -> notion.Page:
+    """The same ticket, with a date on it."""
+    page.properties["Scheduled"] = {"type": "date", "date": {"start": when}}
+    return page
+
+
+def _in(**delta) -> str:
+    """A Notion date this far from now, as the board would store it."""
+    from datetime import datetime, timedelta
+
+    return (datetime.now().astimezone() + timedelta(**delta)).isoformat(timespec="minutes")
+
+
+@case
+def a_validated_publication_waits_for_its_date():
+    """The post is written and accepted; the hour it goes out is still the one
+    the ticket names."""
+    runner = _board_runner([_dated(_reviewed("ppost", "Validated", None), _in(days=2))], {})
+    runner._publish = lambda ticket, project: (_ for _ in ()).throw(
+        AssertionError("published before its date")
+    )
+    assert runner.deliver() == []
+    assert runner.client.written == [], "nothing is claimed, nothing moves"
+    held = runner._deferred
+    assert [ticket.id for ticket, _ in held] == ["ppost"]
+    assert "ppost" in runner._claimed, "its comments go into the publication, not an answer"
+
+
+@case
+def a_validated_pull_request_waits_for_its_date_too():
+    """One column, one rule: a merge is held back like a publication."""
+    runner = _board_runner(
+        [_dated(_reviewed("ppr", "Validated", "https://github.com/x/y/pull/1"), _in(hours=3))],
+        {},
+    )
+    with _github({"https://github.com/x/y/pull/1": "OPEN"}, merge=_never_merged):
+        assert runner.deliver() == []
+    assert runner.client.written == []
+    assert [ticket.id for ticket, _ in runner._deferred] == ["ppr"]
+    assert "ppr" not in runner._claimed, "a ticket with a pull request stays talkable-to"
+
+
+@case
+def a_validated_ticket_whose_date_has_passed_is_carried_out_at_once():
+    """The date says "not before", never "not until somebody looks again"."""
+    runner = _board_runner(
+        [_dated(_reviewed("ppr", "Validated", "https://github.com/x/y/pull/1"), _in(hours=-1))],
+        {},
+    )
+    merges: list[tuple[str, str]] = []
+    with _github({"https://github.com/x/y/pull/1": "OPEN"}, merge=lambda url, method="squash": (
+        merges.append((url, method)) or "merged"
+    )):
+        results = runner.deliver()
+    assert merges == [("https://github.com/x/y/pull/1", "squash")]
+    assert results and results[0]["status"] == "done"
+    assert runner._deferred == []
+
+
+@case
+def a_validated_date_that_cannot_be_read_never_holds_a_publication_back():
+    """The same rule as the queue: an unreadable date freezes nothing."""
+    runner = _board_runner([_dated(_reviewed("ppost", "Validated", None), "bientôt")], {})
+    published: list[str] = []
+    runner._publish = lambda ticket, project: published.append(ticket.id)
+    runner._project_of = lambda ticket: projects.Project(name="Blog", path=None)
+    runner.deliver()
+    assert published == ["ppost"] and runner._deferred == []
+
+
+@case
+def what_the_validated_column_is_holding_back_is_listed():
+    """`ticket-runner list` shows the whole calendar, both columns of it."""
+    runner = _board_runner(
+        [
+            _dated(_reviewed("plater", "Validated", None), _in(days=3)),
+            _dated(_reviewed("psoon", "Validated", None), _in(hours=2)),
+            _reviewed("pnow", "Validated", None),
+            _dated(_reviewed("pelsewhere", "Ready", None), _in(hours=1)),
+        ],
+        {},
+    )
+    assert [ticket.id for ticket, _ in runner.scheduled()] == ["psoon", "plater"]
+
+
 @case
 def a_publication_a_crash_interrupted_comes_back_as_a_question():
     """Put back in ready it would be redone; the post may already be out."""

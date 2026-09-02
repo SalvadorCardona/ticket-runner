@@ -174,6 +174,8 @@ class Runner:
         # already going into its prompt: answering it as well would be the
         # runner talking over itself.
         self._claimed: set[str] = set()
+        # What the last `deliver` left for later, so a pass can say so.
+        self._deferred: list[tuple[Ticket, datetime]] = []
 
     @property
     def workspace(self) -> workspace_module.Workspace:
@@ -288,6 +290,16 @@ class Runner:
 
     # -- reading -------------------------------------------------------------
 
+    def _moment(self, ticket: Ticket) -> datetime | None:
+        """When this ticket may be acted on, or `None` if it carries no date.
+
+        The one reading of the date property. Two columns honour it — ready,
+        where it holds the work back, and validated, where it holds back the
+        merge or the publication — and they must not drift apart on what a date
+        means.
+        """
+        return scheduled_for(notion.read(ticket.page, self.config.notion.prop("due")))
+
     def queue(self) -> tuple[list[Ticket], list[tuple[Ticket, datetime]]]:
         """The tickets to run now, and those waiting for their date.
 
@@ -316,7 +328,7 @@ class Runner:
         waiting: list[tuple[Ticket, datetime]] = []
         moments: dict[str, float] = {}
         for ticket in tickets:
-            moment = scheduled_for(notion.read(ticket.page, self.config.notion.prop("due")))
+            moment = self._moment(ticket)
             if moment and moment > now:
                 waiting.append((ticket, moment))
                 continue
@@ -595,6 +607,14 @@ class Runner:
         queried — `ticket-runner init` adds the option to a board that predates
         it, and until then you merge by hand as before.
 
+        A date on the ticket is honoured here too. `Scheduled` means "not before
+        this moment" wherever it is written, so a validated ticket dated Thursday
+        is left in its column until Thursday and carried out then — which is what
+        turns the board into a calendar for work that is *finished*: the post is
+        written, you have read it and said yes, and it still goes out at the hour
+        you chose. Merges wait the same way, for the same reason: one column, one
+        rule.
+
         Merges are two `gh` calls and are done one after another. A publication
         is a Claude session, so publications are run the way tickets are run:
         side by side, never more than `max_concurrent` at once. They still
@@ -603,21 +623,28 @@ class Runner:
         costs one session's wait rather than four.
         """
         settings = self.config.notion
-        validated = settings.state("validated")
-        if validated in (settings.state("review"), settings.state("done")):
-            return []
-        status_property = settings.prop("status")
-        if validated not in self.client.options(self.database, status_property):
-            return []
-        kind = self.client.schema(self.database).get(status_property, "status")
-        pages = self.client.query(
-            self.database, {"property": status_property, kind: {"equals": validated}}
-        )
         results: list[dict] = []
         publishing: list[tuple[Ticket, Project]] = []
-        for page in pages:
+        held: list[tuple[Ticket, datetime]] = []
+        now = datetime.now().astimezone()
+        for page in self.validated():
             ticket = Ticket(page)
             url = str(notion.read(page, settings.prop("pull_request")) or "")
+            moment = self._moment(ticket)
+            if moment and moment > now:
+                # A date says "not before this moment", and it says it here as
+                # much as in the ready column: the post accepted on Tuesday for
+                # Thursday goes out on Thursday. Merges wait with publications —
+                # validating asks one question, and the date answers *when*.
+                held.append((ticket, moment))
+                if not url.startswith("http"):
+                    # Its comments travel into the publication when the moment
+                    # comes, exactly as a scheduled ready ticket's do, so the
+                    # runner does not also answer them in the meantime. A ticket
+                    # with a pull request is left talkable-to: there, a comment
+                    # is a conversation about work already done.
+                    self._claimed.add(ticket.id)
+                continue
             if self.dry_run:
                 # A dry run says what it would do here as everywhere else. It
                 # matters more here than anywhere: this is the only column whose
@@ -648,7 +675,43 @@ class Runner:
                 )
                 continue
             publishing.append((ticket, project))
+        self._deferred = sorted(held, key=lambda pair: pair[1])
         return results + self._publish_all(publishing)
+
+    def validated(self) -> list[notion.Page]:
+        """The pages sitting in the validated column.
+
+        None at all where the board has no such column: the gesture is opt-in,
+        and a board that never offers it is never even queried.
+        """
+        settings = self.config.notion
+        validated = settings.state("validated")
+        if validated in (settings.state("review"), settings.state("done")):
+            return []
+        status_property = settings.prop("status")
+        if validated not in self.client.options(self.database, status_property):
+            return []
+        kind = self.client.schema(self.database).get(status_property, "status")
+        return self.client.query(
+            self.database, {"property": status_property, kind: {"equals": validated}}
+        )
+
+    def scheduled(self) -> list[tuple[Ticket, datetime]]:
+        """Validated tickets whose moment has not come, soonest first.
+
+        What `deliver` will carry out later rather than now. Read for the sake
+        of saying so — a post you accepted on Tuesday for Thursday is as much a
+        thing waiting to happen as a ticket sitting in ready with a date on it,
+        and `ticket-runner list` shows the whole calendar rather than half of it.
+        """
+        now = datetime.now().astimezone()
+        held: list[tuple[Ticket, datetime]] = []
+        for page in self.validated():
+            ticket = Ticket(page)
+            moment = self._moment(ticket)
+            if moment and moment > now:
+                held.append((ticket, moment))
+        return sorted(held, key=lambda pair: pair[1])
 
     def _publish_all(self, publishing: list[tuple[Ticket, Project]]) -> list[dict]:
         """Every validated publication of this pass, up to `max_concurrent` at once."""
@@ -1756,13 +1819,17 @@ class Runner:
             self._claimed |= {ticket.id for ticket in tickets} | {
                 ticket.id for ticket, _ in waiting
             }
+            # A ticket held in ready and one held in validated are both work
+            # with an hour on it: counted together, so a pass says how much of
+            # the board is waiting for a date rather than half of it.
+            held = len(waiting) + len(self._deferred)
             if not tickets:
                 replies = self.converse()
                 if self.announce_idle and not replies and not delivered:
-                    later = f", {len(waiting)} waiting for their date" if waiting else ""
+                    later = f", {held} waiting for their date" if held else ""
                     self.say(f"No ticket ready{later}.")
                 return delivered + replies
-            later = f", {len(waiting)} scheduled for later" if waiting else ""
+            later = f", {held} scheduled for later" if held else ""
             self.say(f"{len(tickets)} ticket(s) ready{later}.")
 
         # Said here rather than on resolution: at a ten-second cadence, a run
