@@ -22,6 +22,7 @@ is why:
 
 from __future__ import annotations
 
+import errno
 import hmac
 import json
 import mimetypes
@@ -413,6 +414,14 @@ def serve(
     try:
         server = Console((host, port), Handler, api, secret)
     except OSError as error:
+        if error.errno == errno.EADDRINUSE:
+            # The console's unit starts with the machine, so a taken port is the
+            # ordinary answer to `serve` rather than a failure: somebody typing
+            # it wants the console, and the one already listening is it.
+            print(f"already listening on http://{host}:{port} — the console is running")
+            print(f"  open  http://{host}:{port}/?token={secret}")
+            print("  stop  systemctl --user stop ticket-runner-web")
+            return 0
         print(f"cannot listen on {host}:{port} — {error}")
         return 1
 

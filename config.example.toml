@@ -330,9 +330,12 @@ channel = ""
 # ---------------------------------------------------------------------------
 # The web console — ticket-runner serve
 # ---------------------------------------------------------------------------
-# The board, this CLI and a chat with your whole workspace, in one page:
-#   ticket-runner serve                # it prints the URL, token included
-#   systemctl --user enable --now ticket-runner-web    # keep it running
+# The board, this CLI and a chat with your whole workspace, in one page. It is
+# started for you — `install.sh` and `ticket-runner enable` arm its unit along
+# with the timer, so it is up on http://127.0.0.1:8787 with nothing to type:
+#   ticket-runner serve --print-token             # the token, if you lost the URL
+#   systemctl --user stop ticket-runner-web       # stop it until the next boot
+#   ticket-runner disable                         # stop the timer and the console
 #
 # READ THIS BEFORE CHANGING host. Behind this port sits a runner that starts
 # Claude Code sessions with bypassPermissions — anything that can reach it can

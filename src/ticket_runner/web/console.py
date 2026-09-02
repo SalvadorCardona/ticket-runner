@@ -34,13 +34,15 @@ from typing import Callable
 from .. import progress, session
 from ..config import Config, state_dir
 
-# Commands the console will not run, and why. Neither is dangerous — both are
-# useless from a browser, and both would hang the request forever waiting for
-# something that is happening on the server's own screen.
+# Commands the console will not run, and why. None is dangerous — each is
+# useless from a browser and would hang the request forever: `config` and `open`
+# wait on the server's own screen, `serve` is this process, and `disable` stops
+# it halfway through answering.
 REFUSED = {
     "config": "opens an editor on the server — the Settings tab is that file, in this page",
     "open": "opens a terminal on the server's desktop, which is not where you are",
     "serve": "is what you are already talking to",
+    "disable": "stops the console you are typing in — do it from a terminal",
 }
 
 # A command is not a session: nothing in the CLI legitimately takes minutes.

@@ -107,7 +107,9 @@ curl -LsSf https://raw.githubusercontent.com/SalvadorCardona/ticket-runner/main/
 The script checks the dependencies, installs the `ticket-runner` command into
 `~/.local/bin`, asks for your Notion token, and arms a systemd timer that picks up ready
 tickets **every 30 minutes** — `interval_seconds` in the configuration changes that, down
-to a few seconds if you want a ticket picked up as soon as you move it. Then:
+to a few seconds if you want a ticket picked up as soon as you move it. It also starts
+the [web console](#the-web-console) on `http://127.0.0.1:8787` and prints the address to
+open it with; `TR_NO_WEB=1` leaves it stopped. Then:
 
 ```sh
 ticket-runner doctor
@@ -142,7 +144,8 @@ compare itself against: it says so once per check and carries on.
 | Variable | Effect |
 | --- | --- |
 | `TR_INTERVAL=10` | seconds between two runs (default: 1800, i.e. 30 min) |
-| `TR_NO_SERVICE=1` | no timer: you run `ticket-runner run` yourself |
+| `TR_NO_SERVICE=1` | no timer and no console: you run `ticket-runner run` yourself |
+| `TR_NO_WEB=1` | the console's unit is installed, but left stopped |
 | `TR_SRC=.` | install from a local clone, without the network — and without self-updating |
 | `TR_REF=v1.2` | install a tag instead of `main`, and stay on it |
 
@@ -908,13 +911,14 @@ cannot answer, which is the half that matters least. A channel is four methods
 ## The web console
 
 Notion is where tickets are written and read; it is a poor place to *steer* from. So there
-is a second window on the same workspace, served from your own machine:
+is a second window on the same workspace, served from your own machine — and it is running
+already: the installer starts it and prints the address, token included.
 
 ```sh
-ticket-runner serve
+ticket-runner serve --print-token   # the token, if you lost the URL
 ```
 
-It prints a URL with a token in it. Open it and you get one page, five things:
+Open `http://127.0.0.1:8787` and you get one page, five things:
 
 ```
 ┌───────────────┬──────────────────────────────┬─────────────────────────────┐
@@ -1082,13 +1086,20 @@ the way to dark.
 
 ### Keeping it running
 
+It already is. `install.sh` arms the console's unit along with the timer, and
+`ticket-runner enable` does the same on an installation that predates this — so the
+console is up on `http://127.0.0.1:8787` with nothing to type, and comes back with the
+machine.
+
 ```sh
-systemctl --user enable --now ticket-runner-web    # the unit install.sh laid down
-ticket-runner serve --print-token                  # the token, if you lost the URL
+ticket-runner serve --print-token             # the token, if you lost the URL
+systemctl --user stop ticket-runner-web       # stop it until the next boot
+ticket-runner disable                         # stop the timer and the console for good
 ```
 
-The unit is installed and left disabled: it opens a port, and that is a decision rather
-than a default.
+What it opens is loopback, which is why it can be a default: the port is reachable from
+this machine and from nowhere else. Widening it is still a decision, and the next section
+is why. `TR_NO_WEB=1 sh install.sh` installs the unit and leaves it stopped.
 
 ### What is behind that port
 
@@ -1134,16 +1145,16 @@ ticket-runner run          # one run, right now
 ticket-runner run --dry-run          # what it would do, touching nothing
 ticket-runner run --ticket <url>     # that one ticket, whatever its status
 ticket-runner logs -f      # follow the running session
-ticket-runner status       # timer, current run, recent tickets
+ticket-runner status       # timer, console, current run, recent tickets
 ticket-runner history      # what has been handled, with the pull requests
 ticket-runner projects     # Notion project → local repository mapping
 ticket-runner doctor       # full diagnostics
 ticket-runner clean --force          # remove worktrees, their branches, and scratch dirs
 ticket-runner update       # move the installation to the newest version
 ticket-runner update --check         # what is available, changing nothing
-ticket-runner enable       # apply interval_seconds and start the timer
-ticket-runner disable      # stop the timer
-ticket-runner serve        # the web console: board, command line and chat
+ticket-runner enable       # apply interval_seconds, start the timer and the console
+ticket-runner disable      # stop the timer and the console
+ticket-runner serve        # the web console, in this terminal (it already runs on its own)
 ticket-runner notify       # send yourself a test message on Telegram or Slack
 ticket-runner notify --pair          # find your Telegram chat id and save it
 ```

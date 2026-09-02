@@ -189,7 +189,8 @@ def write_units(interval_seconds: int, app: Path | None = None) -> Path:
     # The console's unit is written whether or not it is enabled: writing it
     # costs nothing, and an update that refreshed the timer but left the console
     # on last month's ExecStart would be the kind of half-update this module
-    # exists to prevent. Enabling it stays a decision — it opens a port.
+    # exists to prevent. Starting it is `install.sh` and `ticket-runner enable`;
+    # an update never turns on what somebody turned off.
     console = app / "systemd" / "ticket-runner-web.service.in"
     if console.exists():
         text = console.read_text()

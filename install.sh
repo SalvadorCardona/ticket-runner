@@ -10,7 +10,8 @@
 #   TR_SRC        local folder to copy     (install from a clone, no network,
 #                                          and no auto-update: there is no remote)
 #   TR_INTERVAL   seconds between runs     (default: 1800, i.e. 30 min)
-#   TR_NO_SERVICE=1   do not install the systemd timer
+#   TR_NO_SERVICE=1   do not install the systemd units (timer nor console)
+#   TR_NO_WEB=1       install the console's unit, but leave it stopped
 set -eu
 
 TR_REPO="${TR_REPO:-SalvadorCardona/ticket-runner}"
@@ -132,6 +133,19 @@ PY
     fi
 fi
 
+# The address the console answers on — read from the configuration rather than
+# assumed, so a machine that moved the port is told where its own console is.
+CONSOLE=$(python3 - "$CONFIG" <<'PY'
+import pathlib, sys, tomllib
+try:
+    with pathlib.Path(sys.argv[1]).open("rb") as handle:
+        web = tomllib.load(handle).get("web", {})
+except (OSError, ValueError):
+    web = {}
+print("http://%s:%d" % (web.get("host") or "127.0.0.1", int(web.get("port") or 8787)))
+PY
+)
+
 # --- 5. clickable session links ---------------------------------------------
 # Registers ticket-runner:// with the desktop, so the Session cell of a ticket
 # opens a terminal already inside that Claude Code session.
@@ -150,7 +164,7 @@ if [ -d "$APP_DIR/desktop" ]; then
     fi
 fi
 
-# --- 6. timer ---------------------------------------------------------------
+# --- 6. timer and console ---------------------------------------------------
 if [ "${TR_NO_SERVICE:-0}" != "1" ] && have systemctl; then
     # The interval lives in the configuration, so that changing it later is one
     # number and "ticket-runner enable" rather than a reinstall. TR_INTERVAL
@@ -178,21 +192,32 @@ PY
         "$APP_DIR/systemd/ticket-runner.service.in" > "$UNIT_DIR/ticket-runner.service"
     sed -e "s|@INTERVAL@|$INTERVAL|g" -e "s|@ACCURACY@|$ACCURACY|g" \
         "$APP_DIR/systemd/ticket-runner.timer.in" > "$UNIT_DIR/ticket-runner.timer"
-    # The console's unit is installed and left alone. It listens on a port, and
-    # behind that port sits a runner that starts Claude Code sessions with
-    # bypassPermissions — opening it is a decision, not a default.
     sed -e "s|@BIN@|$BIN|g" -e "s|@PATH@|$PATH|g" \
         "$APP_DIR/systemd/ticket-runner-web.service.in" > "$UNIT_DIR/ticket-runner-web.service"
     systemctl --user daemon-reload
     systemctl --user enable --now ticket-runner.timer >/dev/null 2>&1 \
         && ok "ticket-runner.timer enabled" \
         || warn "enable it by hand: systemctl --user enable --now ticket-runner.timer"
+    # The console starts with the rest. What it opens is loopback — behind that
+    # port sits a runner that starts Claude Code sessions with bypassPermissions,
+    # so it is reachable from this machine and from nowhere else, and widening
+    # `web.host` remains the decision it always was. A board you have to remember
+    # to start by hand is a board you end up not looking at; TR_NO_WEB=1 keeps
+    # the unit installed and stopped.
+    if [ "${TR_NO_WEB:-0}" != "1" ]; then
+        if systemctl --user enable --now ticket-runner-web.service >/dev/null 2>&1; then
+            CONSOLE_UP=1
+            ok "ticket-runner-web.service enabled — $CONSOLE"
+        else
+            warn "start it by hand: systemctl --user enable --now ticket-runner-web"
+        fi
+    fi
     # Without lingering, the timer stops when the session closes.
     if have loginctl && [ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" != "yes" ]; then
         warn "to keep it running with no session open: sudo loginctl enable-linger $USER"
     fi
 else
-    warn "timer not installed — run passes by hand with “ticket-runner run”"
+    warn "no unit installed — run passes with “ticket-runner run”, the console with “ticket-runner serve”"
 fi
 
 # --- 7. summary -------------------------------------------------------------
@@ -203,7 +228,18 @@ printf '  %sconfiguration%s  %s\n' "$DIM" "$RESET" "$CONFIG"
 printf '  %sready tickets%s  ticket-runner list\n' "$DIM" "$RESET"
 printf '  %sone run%s        ticket-runner run\n' "$DIM" "$RESET"
 printf '  %sfollow along%s   ticket-runner logs -f\n' "$DIM" "$RESET"
-printf '  %sweb console%s    ticket-runner serve   %s(board, CLI and chat, on 127.0.0.1)%s\n' "$DIM" "$RESET" "$DIM" "$RESET"
+# The console is up, so what is worth printing is the address that opens it —
+# token included, because the one it draws on first start is otherwise only
+# readable from a state file nobody would think to look in.
+TOKEN=""
+if [ "${CONSOLE_UP:-0}" = "1" ]; then
+    TOKEN=$("$BIN" serve --print-token 2>/dev/null || true)
+fi
+if [ -n "$TOKEN" ]; then
+    printf '  %sweb console%s    %s/?token=%s\n' "$DIM" "$RESET" "$CONSOLE" "$TOKEN"
+else
+    printf '  %sweb console%s    ticket-runner serve   %s(board, CLI and chat, on %s)%s\n' "$DIM" "$RESET" "$DIM" "$CONSOLE" "$RESET"
+fi
 printf '  %stold on Telegram%s  ticket-runner notify --pair   %s(and answer with one word)%s\n' "$DIM" "$RESET" "$DIM" "$RESET"
 printf '  %sversion%s        kept up to date on its own — ticket-runner update\n\n' "$DIM" "$RESET"
 case ":$PATH:" in

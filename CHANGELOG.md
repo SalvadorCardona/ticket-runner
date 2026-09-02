@@ -98,6 +98,20 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Changed
 
+- **The web console starts on its own.** Its unit was installed and left
+  stopped, so the board only existed for as long as you remembered to type
+  `ticket-runner serve` in a terminal you then had to leave open. It is now
+  armed with the timer — by `install.sh` on a new machine, by `ticket-runner
+  enable` on one that already has the runner — so `http://127.0.0.1:8787` is up
+  after a boot with nothing to type, and the installer prints the address with
+  the token in it rather than leaving it in a state file. What it opens is
+  loopback and nothing else, which is what makes it a reasonable default;
+  widening `web.host` is still the decision it always was. `TR_NO_WEB=1 sh
+  install.sh` installs the unit and leaves it stopped, `ticket-runner disable`
+  stops both — from a terminal, the console's own command line refusing the one
+  command that would cut it off mid-answer — and `ticket-runner serve` on a
+  machine where the console is already listening says where it is instead of
+  failing on the port.
 - The console's scroll bars are the console's own: thin, rounded, the colour of
   its panels, and only really visible under the pointer. The browser's — pale,
   wide, and drawn for a white page — turned up in every part of the console
