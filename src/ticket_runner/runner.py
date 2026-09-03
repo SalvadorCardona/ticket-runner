@@ -65,6 +65,7 @@ class Job:
     agent: agents.Agent = field(default_factory=agents.Agent)
     comments: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    resumed: bool = False
 
 
 def scheduled_for(value: object) -> datetime | None:
@@ -1232,6 +1233,17 @@ class Runner:
             agent_name=job.agent.name,
             agent_brief=job.agent.brief,
             comments=job.comments,
+            # A branch picked up from an earlier attempt: the session is told,
+            # because a worktree that opens on somebody's half-done work and
+            # reads as empty is how the same thing gets written twice.
+            resumed=(
+                f"- This ticket has run before, and its branch already carries what that "
+                f"session committed, replayed on top of `{job.base}`. Read "
+                f"`git log {job.base}..HEAD` and its diff first: you are continuing that "
+                f"work, not starting it again.\n"
+                if job.resumed
+                else ""
+            ),
         )
         log = job.log or state.log_file(short_id(job.ticket.id))
         # The ticket first, then its agent, then the runner: the narrower the
@@ -1396,9 +1408,16 @@ class Runner:
         if self.config.runner.fetch:
             git.fetch(project.path)
         try:
-            git.add_worktree(project.path, job.workdir, job.branch, job.base)
+            worktree = git.add_worktree(project.path, job.workdir, job.branch, job.base)
         except git.GitError as error:
             return self._fail(ticket, "worktree could not be created", str(error))
+        if worktree.note:
+            # A ticket that has run before: said out loud, because the session
+            # about to start is continuing somebody's work rather than opening
+            # on an empty branch, and the comment should carry that too.
+            self.say("    · " + worktree.note.replace("`", ""))
+            job.notes.append(worktree.note)
+            job.resumed = worktree.reused
 
         try:
             outcome = self._run_session(
@@ -1443,7 +1462,7 @@ class Runner:
 
         pull_request = ""
         if self.config.runner.push:
-            pushed = git.push(job.workdir, job.branch)
+            pushed = git.push(job.workdir, job.branch, force=worktree.reused)
             if not pushed.ok:
                 return self._fail(
                     ticket,

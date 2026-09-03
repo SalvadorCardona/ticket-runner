@@ -42,7 +42,7 @@ nobody to talk to: no one can answer a question while the session runs.
 - Repository: {repo}
 - You are in a dedicated git worktree, on branch `{branch}`, created from \
 `{base}`. Your working copy is shared with no one.
-- Notion ticket: {url}
+{resumed}- Notion ticket: {url}
 
 # What is expected
 
@@ -213,6 +213,7 @@ def build(
     agent_name: str = "",
     agent_brief: str = "",
     comments: list[str] | None = None,
+    resumed: str = "",
 ) -> str:
     scope, frame, heading, role, discussion = _frames(
         project, context, brief, agent_name, agent_brief, comments
@@ -230,6 +231,7 @@ def build(
         branch=branch,
         base=base,
         url=url,
+        resumed=resumed,
     )
 
 

@@ -1180,11 +1180,12 @@ ticket-runner run --ticket https://www.notion.so/...             # then go
 
 ### What `clean` removes, and what it refuses to
 
-A branch is named after its ticket, so it is the same name on every attempt: a
-branch left behind by a failure is what makes the next run answer
-`branch ticket/… already exists` and stops that ticket for good. So `clean --force`
-removes the branch along with the worktree — but only when nothing on it is
-anybody's but the runner's.
+A branch is named after its ticket, so it is the same name on every attempt. A
+run that finds it there picks it up rather than refusing the ticket — the branch
+is checked out again, replayed on top of the newest base, and the session
+continues what the last one committed. `clean --force` is what you run when you
+would rather it started over: it removes the branch along with the worktree, but
+only when nothing on it is anybody's but the runner's.
 
 A branch with commits of its own that are not on the base branch, one whose pull
 request is still open, or a worktree holding changes that were never committed:
@@ -1212,7 +1213,9 @@ them on the program's normal path:
   `blocked` status with the question in a comment.
 - **A failing ticket takes only itself down.** The others in the same run carry on. Its
   worktree is kept for the post-mortem, and the session ID reopens the conversation
-  exactly where it stopped: `claude --resume <id>`.
+  exactly where it stopped: `claude --resume <id>`. The next attempt picks that same
+  branch up — rebased onto the base branch first — rather than starting from nothing or
+  refusing the ticket because the branch is there.
 - **Answering a comment cannot change anything.** A conversation runs in the repository
   itself, but under `reply_permission_mode` — `plan` by default, which Claude Code cannot
   write from. Asking it a question in a comment can cost you a minute of its time and
@@ -1267,7 +1270,8 @@ board is shared with people you would not hand those credentials to, leave the c
 | a ticket became a document when you wanted code | its project names no repository. Give the project page a `Path` or a `Repository` |
 | “nothing to work from” | the ticket has neither a title nor a description — a page left on the bare template counts as empty |
 | a ticket sat in *In progress* forever | it no longer can: the next run puts back any ticket this host claimed while no run was alive |
-| a ticket fails with `branch … already exists` | an earlier failure left that branch behind. `ticket-runner clean --force` removes it with its worktree — and says so, or says why it would not |
+| a ticket ran before and its branch is still there | it is picked up, not refused: the branch is checked out again and rebased onto the base branch, and the session continues from what it already holds. The ticket's comment says so, and says when the rebase conflicted. `ticket-runner clean --force` is what starts it over instead |
+| `branch … is checked out in …` | two attempts at the same ticket at once, or a worktree kept somewhere else — the one case that still stops it. `git worktree remove <path>`, once you are done with what is in there |
 | no desktop notification | `notify-send` is missing, or the service has no session bus. `runner.notify = false` silences the attempt |
 | nothing arrives in Telegram or Slack | `ticket-runner notify` says which end refused — a revoked token, a chat id that is not yours, a bot not invited to the channel |
 | an answer typed in Slack changes nothing | the bot cannot read the channel: add `channels:history` (or `groups:history`, `im:history`) and reinstall the app |
