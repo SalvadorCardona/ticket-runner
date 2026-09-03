@@ -16,6 +16,22 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- A ticket that has run before is picked up instead of being refused. Its branch
+  is named after it, so a session that failed, or a pull request nobody merged,
+  left a branch that answered `branch ticket/… already exists — ticket already
+  handled?` on every pass afterwards — the ticket was stuck until somebody ran
+  `ticket-runner clean --force` by hand. That branch is now checked out again,
+  replayed on top of the newest base, and the session carries on from what it
+  already holds: the agent is told it is continuing somebody's work, the ticket's
+  comment says what was reused and what it was rebased onto, and the push that
+  follows forces with a lease, since the history under it was replayed. A rebase
+  that conflicts is undone rather than left half-applied — the session still runs,
+  and the conflict is a line in the comment. Two things still stop the ticket, and
+  both should: a branch another worktree has checked out, and a directory holding
+  commits or changes that were never anywhere else.
+
 ### Added
 
 - A date on a **validated** ticket is honoured too, so the board schedules what is

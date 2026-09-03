@@ -4,6 +4,12 @@ One rule, and it is not negotiable: **a ticket is never worked on in the main
 repository**. Every ticket gets a `git worktree` on its own branch, which lets
 two tickets of the same project move at once and leaves your working copy
 exactly as you left it.
+
+A second rule follows from the first: **a ticket that has run before is picked
+up, not refused**. Its branch is named after its ID, so the branch a failed
+session left behind is the same one the next attempt asks for — that branch is
+checked out again and replayed on top of the newest base, rather than standing
+in the way of the ticket for good.
 """
 
 from __future__ import annotations
@@ -69,17 +75,148 @@ def fetch(repo: Path) -> None:
     git(["fetch", "--quiet", "origin"], repo, timeout=180)
 
 
-def add_worktree(repo: Path, path: Path, branch: str, base: str) -> None:
-    """Create the worktree on a fresh branch, off the latest state of `base`."""
+@dataclass
+class Worktree:
+    """What making the ticket's worktree took, when it took anything.
+
+    `note` is what the ticket's comment should say about it, empty when the
+    branch was drawn fresh — which is the ordinary case, and says nothing worth
+    reading. `reused` says the branch was already there: whatever is under it
+    now is a history the last attempt left, replayed, so the push that follows
+    is no longer a fast-forward of what origin holds.
+    """
+
+    note: str = ""
+    reused: bool = False
+
+
+def _held_at(repo: Path, branch: str) -> str:
+    """The worktree that has this branch checked out, as git spells the path."""
+    result = git(["worktree", "list", "--porcelain"], repo)
+    if not result.ok:
+        return ""
+    path = ""
+    for line in result.out.splitlines():
+        if line.startswith("worktree "):
+            path = line.split(" ", 1)[1]
+        elif line == f"branch refs/heads/{branch}":
+            return path
+    return ""
+
+
+def _same(one: str, other: Path) -> bool:
+    try:
+        return Path(one).resolve() == other.resolve()
+    except OSError:  # a path nobody can resolve is not the one we are after
+        return False
+
+
+def rebase(worktree: Path, onto: str) -> str:
+    """Replay the branch on top of `onto`. Says why it could not, or nothing.
+
+    `--autostash` because a worktree kept from a failed session usually holds
+    changes that were never committed, and those are exactly what the next
+    session is meant to carry on from — refusing to rebase over them would put
+    us back where we started.
+
+    A rebase that stops is aborted rather than left half-applied: an agent that
+    opens on a conflicted index reads it as the state of the world and starts
+    resolving somebody else's merge instead of doing the ticket. The branch goes
+    back to what it was, the session runs on it, and the conflict is a line in
+    the ticket's comment.
+    """
+    result = git(["rebase", "--autostash", onto], worktree)
+    if result.ok:
+        return ""
+    git(["rebase", "--abort"], worktree)
+    lines = [line.strip() for line in (result.out + "\n" + result.err).splitlines() if line.strip()]
+    conflict = next((line for line in lines if line.startswith("CONFLICT")), "")
+    return conflict or (lines[0] if lines else f"git rebase {onto} failed")
+
+
+def add_worktree(repo: Path, path: Path, branch: str, base: str) -> Worktree:
+    """The ticket's worktree, on its own branch, off the latest state of `base`.
+
+    A branch is named after the ticket's ID, so every attempt at one ticket asks
+    for the same branch — and one left behind by a session that failed, or by a
+    pull request nobody merged, used to refuse that ticket for good. Refusing is
+    the wrong answer to "this ticket has run before": the branch is picked up
+    instead, replayed on top of the newest base, and the session carries on from
+    where the last one stopped. Nothing is thrown away to make room, and nothing
+    that another worktree is holding is touched.
+    """
     start = base
     if git(["rev-parse", "--verify", "--quiet", f"origin/{base}"], repo).ok:
         start = f"origin/{base}"
-    if git(["rev-parse", "--verify", "--quiet", branch], repo).ok:
-        raise GitError(f"branch {branch} already exists — ticket already handled?")
+    # Registrations for directories somebody deleted by hand: git still counts
+    # those as holding their branch, and would refuse to check it out again.
+    git(["worktree", "prune"], repo)
+
+    local = git(["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], repo).ok
+    remote = git(["rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}"], repo).ok
     path.parent.mkdir(parents=True, exist_ok=True)
-    result = git(["worktree", "add", "-b", branch, str(path), start], repo)
-    if not result.ok:
-        raise GitError(f"git worktree add: {result.err or result.out}")
+
+    if not local and not remote:
+        _make_room(repo, path, base)
+        result = git(["worktree", "add", "-b", branch, str(path), start], repo)
+        if not result.ok:
+            raise GitError(f"git worktree add: {result.err or result.out}")
+        return Worktree()
+
+    held = _held_at(repo, branch)
+    if held and not _same(held, path):
+        raise GitError(
+            f"branch {branch} is checked out in {held} — another attempt at this "
+            f"ticket is either running or was kept for a post-mortem.\n"
+            f"  git -C {repo} worktree remove {held}   once you are done with it"
+        )
+    if held:
+        kept = "its worktree was still there"
+    else:
+        _make_room(repo, path, base)
+        add = (
+            ["worktree", "add", str(path), branch]
+            if local
+            else ["worktree", "add", "--track", "-b", branch, str(path), f"origin/{branch}"]
+        )
+        result = git(add, repo)
+        if not result.ok:
+            raise GitError(f"git worktree add: {result.err or result.out}")
+        kept = "an earlier attempt left it" if local else "it was pushed but never merged"
+
+    carried = commits_ahead(path, base)
+    commits = f"{carried} commit(s)" if carried else "no commit of its own"
+    was = f"Branch `{branch}` was already there ({kept}, {commits})"
+    if failure := rebase(path, start):
+        return Worktree(
+            note=(
+                f"{was} and is reused as it stands: it does not replay onto `{start}` "
+                f"— {failure}. Whatever it is behind on is for this session to deal with."
+            ),
+            reused=True,
+        )
+    return Worktree(
+        note=f"{was}, rebased onto `{start}` and picked up where it stopped.",
+        reused=True,
+    )
+
+
+def _make_room(repo: Path, path: Path, base: str) -> None:
+    """Clear the ticket's directory, unless what is in it is somebody's work.
+
+    Only ever the leavings of an earlier attempt at this same ticket: the path
+    is made of the project and the ticket's ID, and nothing else writes there.
+    A worktree with commits of its own or changes never committed is not ours to
+    remove, and it is the one case where the ticket still has to stop.
+    """
+    if not path.exists():
+        return
+    if (path / ".git").exists() and (commits_ahead(path, base) or is_dirty(path)):
+        raise GitError(
+            f"{path} still holds work from an earlier attempt.\n"
+            "  ticket-runner clean --force   removes it, and says so when it would not"
+        )
+    remove_worktree(repo, path)
 
 
 def remove_worktree(repo: Path, path: Path) -> None:
@@ -117,8 +254,20 @@ def is_dirty(worktree: Path) -> bool:
     return bool(git(["status", "--porcelain"], worktree).out)
 
 
-def push(worktree: Path, branch: str) -> Result:
-    return git(["push", "--set-upstream", "origin", branch], worktree, timeout=300)
+def push(worktree: Path, branch: str, force: bool = False) -> Result:
+    """Push the ticket's branch, forcing only when its history was replayed.
+
+    `force` comes from the branch having been picked up from an earlier attempt
+    and rebased: origin holds the version from before the rebase, so an ordinary
+    push is refused as not being a fast-forward. `--force-with-lease` is what
+    makes that safe to answer automatically — it still refuses if origin has
+    moved since the fetch this run started with, which is the only case where
+    somebody else's commit could be under there.
+    """
+    force_flag = ["--force-with-lease"] if force else []
+    return git(
+        ["push", "--set-upstream", *force_flag, "origin", branch], worktree, timeout=300
+    )
 
 
 def open_pull_request(worktree: Path, title: str, body: str, base: str) -> str:

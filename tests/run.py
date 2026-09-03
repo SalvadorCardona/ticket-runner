@@ -3561,6 +3561,212 @@ def clean_never_removes_a_branch_that_carries_something_of_its_own():
     assert printed.count("branch -D ") == 3, "each kept branch says what is left to do"
 
 
+# -- worktrees ---------------------------------------------------------------
+
+
+def _worktree_for(
+    branch="ticket/le-header-9d2cb790",
+    *,
+    refs=("main", "origin/main"),
+    held="",
+    held_here=False,
+    commits=0,
+    dirty=False,
+    rebase="",
+    path_exists=False,
+):
+    """Make the ticket's worktree against an invented repository.
+
+    `refs` is what git can resolve, `held` the worktree that already has the
+    branch checked out — `held_here` when that worktree is the ticket's own —
+    and `rebase` what a rebase would print instead of working.
+    Returns what `add_worktree` answered — or the GitError it raised — and every
+    command it ran, which is where the interesting part of this lives.
+    """
+    from ticket_runner import git as git_module
+
+    commands: list[list[str]] = []
+
+    def fake(args, cwd, timeout=300):
+        commands.append(list(args))
+        head = args[:1]
+        if args[:3] == ["rev-parse", "--verify", "--quiet"]:
+            return git_module.Result(0 if args[3] in refs else 1, "", "")
+        if args[:2] == ["worktree", "list"]:
+            listing = f"worktree {held}\nHEAD abc\nbranch refs/heads/{branch}\n" if held else ""
+            return git_module.Result(0, listing, "")
+        if head == ["rev-list"]:
+            return git_module.Result(0, str(commits), "")
+        if args[:2] == ["status", "--porcelain"]:
+            return git_module.Result(0, "M src/x.py" if dirty else "", "")
+        if args[:2] == ["rebase", "--autostash"]:
+            if rebase:
+                return git_module.Result(1, f"CONFLICT (content): {rebase}", "error: could not apply")
+            return git_module.Result(0, "", "")
+        return git_module.Result(0, "", "")
+
+    with tempfile.TemporaryDirectory() as home:
+        repo, path = Path(home) / "repo", Path(home) / "worktrees" / "site-9d2cb790"
+        if held_here:
+            held = str(path)
+        if path_exists:
+            path.mkdir(parents=True)
+            # What a worktree has instead of a repository: the file that points
+            # back at the one it belongs to.
+            (path / ".git").write_text(f"gitdir: {repo}/.git/worktrees/site-9d2cb790\n")
+        with _git_answering(git=fake):
+            try:
+                made = git_module.add_worktree(repo, path, branch, "main")
+            except git_module.GitError as error:
+                made = error
+    return made, commands
+
+
+def _one(commands: list[list[str]], prefix: list[str]) -> list[str]:
+    """The one command that starts like that — there is never a second."""
+    found = [command for command in commands if command[: len(prefix)] == prefix]
+    assert len(found) == 1, f"{prefix} ran {len(found)} time(s): {commands}"
+    return found[0]
+
+
+@case
+def a_ticket_that_never_ran_gets_its_branch_drawn_fresh():
+    made, commands = _worktree_for()
+    assert made.note == "", "nothing happened worth telling anyone about"
+    assert not made.reused
+    assert ["worktree", "add", "-b", "ticket/le-header-9d2cb790"] == commands[-1][:4]
+    assert not any(command[:1] == ["rebase"] for command in commands)
+
+
+@case
+def a_branch_left_by_an_earlier_attempt_is_picked_up_and_replayed():
+    """The failure this whole thing exists to stop.
+
+    A branch is named after the ticket's ID, so every attempt asks for the same
+    one: a session that failed, or a pull request nobody merged, used to leave a
+    branch that refused that ticket for ever — “already exists — ticket already
+    handled?” on every pass, until somebody ran `clean` by hand. It is checked
+    out again and rebased onto the newest base instead.
+    """
+    made, commands = _worktree_for(
+        refs=("main", "origin/main", "refs/heads/ticket/le-header-9d2cb790"), commits=2
+    )
+    assert made.reused, "the push that follows is not a fast-forward any more"
+    assert "2 commit(s)" in made.note and "rebased onto `origin/main`" in made.note
+    added = _one(commands, ["worktree", "add"])
+    assert added[-1] == "ticket/le-header-9d2cb790", "checked out, not drawn again"
+    assert "-b" not in added
+    assert commands[-1] == ["rebase", "--autostash", "origin/main"]
+
+
+@case
+def a_branch_that_only_exists_on_origin_comes_back_with_its_commits():
+    """A push that landed and a run that died after it: the work is on origin.
+
+    Checking out a fresh branch of the same name would silently drop it — and
+    the pull request open on it would sit there, describing commits nobody can
+    see any more.
+    """
+    made, commands = _worktree_for(
+        refs=("main", "origin/main", "refs/remotes/origin/ticket/le-header-9d2cb790"), commits=1
+    )
+    assert made.reused
+    assert "it was pushed but never merged" in made.note
+    added = _one(commands, ["worktree", "add"])
+    assert added[:4] == ["worktree", "add", "--track", "-b"]
+    assert added[-1] == "origin/ticket/le-header-9d2cb790"
+
+
+@case
+def a_worktree_kept_for_a_post_mortem_is_worked_in_again():
+    """`keep_worktree_on_failure` leaves the directory *and* the branch in it.
+
+    Nothing needs creating there — the branch is already checked out where the
+    ticket wants it. Asking git for it again would only be told that it is.
+    """
+    from ticket_runner import git as git_module
+
+    made, commands = _worktree_for(
+        refs=("main", "origin/main", "refs/heads/ticket/le-header-9d2cb790"),
+        held_here=True,
+        path_exists=True,
+    )
+    assert isinstance(made, git_module.Worktree) and made.reused
+    assert "its worktree was still there" in made.note
+    assert not any(command[:2] == ["worktree", "add"] for command in commands)
+    assert commands[-1] == ["rebase", "--autostash", "origin/main"]
+
+
+@case
+def a_branch_held_by_another_worktree_is_never_taken_from_it():
+    """The one case that still stops the ticket, and it should.
+
+    Two runs of the same ticket at once, or a worktree kept somewhere else: what
+    is in there is someone's work in progress, and moving its branch out from
+    under it would break both. The message says where it is and how to let go.
+    """
+    from ticket_runner import git as git_module
+
+    made, _commands = _worktree_for(
+        refs=("main", "origin/main", "refs/heads/ticket/le-header-9d2cb790"),
+        held="/somewhere/else",
+    )
+    assert isinstance(made, git_module.GitError)
+    assert "/somewhere/else" in str(made) and "worktree remove" in str(made)
+
+
+@case
+def a_rebase_that_conflicts_is_undone_and_the_session_runs_anyway():
+    """A conflict is not a reason to refuse the ticket a second time.
+
+    The branch goes back to exactly what it was — an agent that opened on a
+    half-applied rebase would spend its session resolving somebody else's merge
+    — the session runs on it, and the comment says what it is behind on.
+    """
+    made, commands = _worktree_for(
+        refs=("main", "origin/main", "refs/heads/ticket/le-header-9d2cb790"),
+        commits=1,
+        rebase="src/app.py",
+    )
+    assert made.reused
+    assert "reused as it stands" in made.note and "src/app.py" in made.note
+    assert commands[-1] == ["rebase", "--abort"], "nothing is left half-applied"
+
+
+@case
+def a_directory_holding_work_is_not_cleared_to_make_room():
+    """Uncommitted changes under the ticket's path outrank the ticket."""
+    from ticket_runner import git as git_module
+
+    made, _commands = _worktree_for(commits=0, dirty=True, path_exists=True)
+    assert isinstance(made, git_module.GitError)
+    assert "still holds work" in str(made) and "clean --force" in str(made)
+
+
+@case
+def only_a_replayed_branch_is_ever_force_pushed():
+    """A rebase rewrites what origin already has, so the push stops being a
+
+    fast-forward — and a ticket that came back with “the push was refused” for
+    doing exactly what it was told to do would be the same dead end one step
+    later. `--force-with-lease`, never `--force`: origin moving under us is
+    still a refusal.
+    """
+    from ticket_runner import git as git_module
+
+    sent: list[list[str]] = []
+
+    def fake(args, cwd, timeout=300):
+        sent.append(list(args))
+        return git_module.Result(0, "", "")
+
+    with _git_answering(git=fake):
+        git_module.push(Path("/nowhere"), "ticket/le-header-9d2cb790")
+        git_module.push(Path("/nowhere"), "ticket/le-header-9d2cb790", force=True)
+    assert "--force-with-lease" not in sent[0]
+    assert "--force-with-lease" in sent[1] and "--force" not in sent[1]
+
+
 # -- releases ----------------------------------------------------------------
 
 
