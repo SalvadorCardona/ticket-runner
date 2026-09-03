@@ -1435,6 +1435,14 @@ pushed are never touched.
 
 ---
 
+## Author
+
+ticket-runner is written by [Salvador Cardona — portfolio](https://cardona.digital), web
+developer for thirteen years, currently on Animalink. The rest of what comes out of the
+same workshop is over there.
+
+---
+
 ## Licence
 
 MIT.
