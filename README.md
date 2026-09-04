@@ -30,6 +30,8 @@ guess at asks its question on **Telegram or Slack**, and *oui* is the whole answ
 reply lands on the ticket and the next run carries on. See
 [Being told, and answering with one word](#being-told-and-answering-with-one-word).
 
+📖 **[The documentation, online](https://cardona.digital/ticket-runner/)**
+
 ```
 Notion                    ticket-runner                       what you get
 ──────                    ─────────────                       ────────────
