@@ -2,6 +2,7 @@ import * as React from "react"
 import { toast } from "sonner"
 
 import { api, why } from "@/lib/api"
+import { patchTicket, publishBoard } from "@/lib/board-store"
 import type {
   Board,
   ChatEvent,
@@ -65,6 +66,7 @@ interface ConsoleValue {
   ticketSteps: Step[]
   talkLoading: boolean
   openTicket: (ticket: Ticket) => void
+  closeTicket: () => void
   rereadTalk: () => void
   tell: (text: string) => Promise<void>
   submit: (text: string) => Promise<void>
@@ -150,11 +152,20 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
       if (another) {
         setTicketSteps([])
         setTalk([])
+        void loadTalk(open)
       }
-      void loadTalk(open)
     },
     [loadTalk]
   )
+
+  const closeTicket = React.useCallback(() => {
+    openId.current = null
+    openShort.current = ""
+    openColumn.current = ""
+    setTicket(null)
+    setTicketSteps([])
+    setTalk([])
+  }, [])
 
   const rereadTalk = React.useCallback(() => {
     if (ticket) void loadTalk(ticket)
@@ -165,6 +176,8 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const connection = useStream({
     board: (fresh: Board) => {
       setBoard(fresh)
+      // The same board, where the resource views read it from.
+      publishBoard(fresh)
       // The board moved: keep the open ticket's terminal describing the right
       // one. Reread the discussion only when the ticket *changed column* — that
       // is when a run ended and left its report under it. A ticket in flight
@@ -345,6 +358,8 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
 
   const move = React.useCallback(
     async (target: Ticket, column: string) => {
+      // The card moves now; the board event that follows the write agrees.
+      patchTicket(target.id, { column: column as Ticket["column"] })
       try {
         await api.setStatus(target.id, column)
       } catch (error) {
@@ -413,6 +428,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     ticketSteps,
     talkLoading,
     openTicket,
+    closeTicket,
     rereadTalk,
     tell,
     submit,

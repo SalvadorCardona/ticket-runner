@@ -2712,6 +2712,8 @@ def _bare_api(client, me: str = "runner-id") -> web_api.Api:
         web=C.Web(),
     )
     api._stamp = 0.0
+    api._projects = {}
+    api._projects_at = 0.0
     return api
 
 
@@ -2799,6 +2801,50 @@ def a_message_written_to_a_ticket_reaches_every_open_console():
     assert event.payload["ticket"] == "p-ticket"
     assert event.payload["role"] == "you"
     assert event.payload["text"] == "on garde le bandeau"
+
+
+class _PageClient(_TalkClient):
+    """A ticket page: its row, and the blocks written under it."""
+
+    def __init__(self, content: str, status: str = "Ready") -> None:
+        super().__init__([])
+        self._content = content
+        self._status = status
+
+    def page(self, page_id: str) -> notion.Page:
+        return notion.Page(
+            id="1a2b3c4d-0000-0000-0000-000000000000",
+            url="https://notion.so/p",
+            title="Retirer le bandeau",
+            properties={"Status": {"type": "status", "status": {"name": self._status}}},
+            raw={"created_time": "2026-09-01T09:00:00.000Z"},
+        )
+
+    def blocks_text(self, page_id: str, depth: int = 0) -> str:
+        return self._content
+
+
+@case
+def a_ticket_read_on_its_own_is_the_card_and_the_page_under_it():
+    """The board hands out rows; the ticket's page hands out what was written on it.
+
+    Same shape as the card — the console draws one component for both — plus
+    the page's blocks flattened the way the runner reads them before a run: the
+    brief you wrote, and the report a run appended under it.
+    """
+    api = _bare_api(_PageClient("# Brief\nRetirer le bandeau du dashboard.\n\n- [x] fait"))
+    api._runner._workspace = type("W", (), {"projects": ""})()
+    payload = api.ticket("1a2b3c4d000000000000000000000000")
+    assert payload["id"] == "1a2b3c4d000000000000000000000000", "the id is the one the board uses"
+    assert payload["short"] == "00000000", "the short id is the tail, where the entropy is"
+    assert payload["title"] == "Retirer le bandeau"
+    assert payload["column"] == "ready", "the column is named the way the board names it"
+    assert payload["content"].startswith("# Brief"), "the page's blocks come with the row"
+    assert "- [x] fait" in payload["content"]
+
+    elsewhere = _bare_api(_PageClient("", status="Parked"))
+    elsewhere._runner._workspace = type("W", (), {"projects": ""})()
+    assert elsewhere.ticket("1a2b3c4d000000000000000000000000")["column"] == "other"
 
 
 @case

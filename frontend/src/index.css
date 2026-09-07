@@ -1,6 +1,14 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* The views and the forms are written in Tailwind classes against the shadcn
+   variables below, so Tailwind has to read their compiled files to emit the
+   classes they use. Their own `styles.css` is not imported: the palette is
+   this file's. */
+@source "../node_modules/react-resource-view/dist";
+@source "../node_modules/react-data-form/dist";
+@source "../node_modules/@shadcn/react/dist";
+
 @custom-variant dark (&:is(.dark *));
 
 /* The console's palette, as shadcn/ui names things.

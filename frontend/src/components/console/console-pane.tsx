@@ -3,10 +3,10 @@ import * as React from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { useConsole } from "@/hooks/use-console"
-import { useStickToBottom } from "@/hooks/use-stick-to-bottom"
 
 import { Flow } from "./text"
 import { Steps } from "./steps"
+import { Line, Transcript } from "./transcript"
 import { Turn } from "./turn"
 
 /* A sentence talks to your workspace; a line that starts with `>` runs a
@@ -17,7 +17,6 @@ const isCommand = (text: string) => text.trimStart().startsWith(">")
 export function ConsolePane() {
   const { transcript, busy, submit, resetChat, runner } = useConsole()
   const [text, setText] = React.useState("")
-  const view = useStickToBottom<HTMLDivElement>(transcript)
 
   const send = () => {
     if (!text.trim() || busy) return
@@ -32,38 +31,49 @@ export function ConsolePane() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div ref={view} className="scroll-thin min-h-0 flex-1 space-y-2 overflow-y-auto p-3.5">
+      <Transcript>
         {transcript.map((entry) => {
+          const id = String(entry.id)
           if (entry.kind === "turn")
-            return <Turn key={entry.id} role={entry.role} text={entry.text} />
+            return (
+              <Line key={id} id={id} anchor={entry.role === "you"}>
+                <Turn role={entry.role} text={entry.text} />
+              </Line>
+            )
           if (entry.kind === "steps")
-            return <Steps key={entry.id} steps={entry.steps} done={entry.done} />
+            return (
+              <Line key={id} id={id}>
+                <Steps steps={entry.steps} done={entry.done} />
+              </Line>
+            )
           if (entry.kind === "note")
             return (
-              <p key={entry.id} className="text-muted-foreground text-xs">
-                {entry.text}
-              </p>
+              <Line key={id} id={id}>
+                <p className="text-muted-foreground text-xs">{entry.text}</p>
+              </Line>
             )
           return (
-            <div key={entry.id} className="bg-card rounded-lg border px-3 py-2">
-              <div className="text-muted-foreground mb-1 font-mono text-[0.7rem]">
-                ticket-runner {entry.argv.join(" ")}
+            <Line key={id} id={id} anchor>
+              <div className="bg-card rounded-lg border px-3 py-2">
+                <div className="text-muted-foreground mb-1 font-mono text-[0.7rem]">
+                  ticket-runner {entry.argv.join(" ")}
+                </div>
+                <pre className="scroll-thin max-h-96 overflow-auto font-mono text-xs leading-relaxed whitespace-pre-wrap">
+                  {entry.lines.map((line, index) => (
+                    <React.Fragment key={index}>
+                      <Flow text={line} />
+                      {"\n"}
+                    </React.Fragment>
+                  ))}
+                  {entry.code ? `\n[exit ${entry.code}]` : ""}
+                </pre>
               </div>
-              <pre className="scroll-thin max-h-96 overflow-auto font-mono text-xs leading-relaxed whitespace-pre-wrap">
-                {entry.lines.map((line, index) => (
-                  <React.Fragment key={index}>
-                    <Flow text={line} />
-                    {"\n"}
-                  </React.Fragment>
-                ))}
-                {entry.code ? `\n[exit ${entry.code}]` : ""}
-              </pre>
-            </div>
+            </Line>
           )
         })}
-      </div>
+      </Transcript>
 
-      <div className="space-y-2 border-t p-3">
+      <div className="flex flex-col gap-2 border-t p-3">
         <p className="text-muted-foreground text-xs">{hint}</p>
         <Textarea
           value={text}

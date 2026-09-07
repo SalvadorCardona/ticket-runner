@@ -1,4 +1,7 @@
+import { PanelRightClose, PanelRightOpen } from "lucide-react"
+
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -15,16 +18,28 @@ function every(seconds: number): string {
  *
  * Every pill here answers a question somebody would otherwise open a terminal
  * for: is the timer on, is something running now, is `claude` even installed,
- * what has this cost, is there a version waiting.
+ * what has this cost, is there a version waiting. At the right edge, the
+ * switch that folds the second column away — a board of seven columns wants
+ * the width more often than not.
  */
-export function Header({ title }: { title: string }) {
+export function Header({
+  title,
+  aside,
+  asideLabel,
+  onToggleAside,
+}: {
+  title: string
+  aside: boolean
+  asideLabel: string
+  onToggleAside: () => void
+}) {
   const { runner } = useConsole()
 
   return (
     <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-3 py-2">
       <SidebarTrigger className="-ml-1" />
       <Separator orientation="vertical" className="mr-1 !h-4" />
-      <span className="text-sm font-semibold tracking-tight">{title}</span>
+      <span className="truncate text-sm font-semibold tracking-tight">{title}</span>
 
       <div className="flex flex-wrap items-center gap-1.5">
         {runner ? (
@@ -72,6 +87,22 @@ export function Header({ title }: { title: string }) {
           </>
         ) : null}
       </div>
+
+      <span className="flex-1" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground max-[860px]:hidden"
+            onClick={onToggleAside}
+            aria-label={aside ? `hide the ${asideLabel}` : `show the ${asideLabel}`}
+          >
+            {aside ? <PanelRightClose /> : <PanelRightOpen />}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{aside ? `hide the ${asideLabel}` : `show the ${asideLabel}`}</TooltipContent>
+      </Tooltip>
     </header>
   )
 }
