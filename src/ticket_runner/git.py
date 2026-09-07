@@ -330,6 +330,24 @@ def pull_request_on(repo: Path, branch: str) -> str:
     return result.out if result.ok else ""
 
 
+def current_name(owner_and_name: str) -> str:
+    """What GitHub calls that repository today, as `owner/name` — or nothing.
+
+    A repository renamed on GitHub keeps answering to its old name: GitHub
+    redirects, and `gh repo view old/name` reports the new one. Nothing means
+    the question could not be asked or had no answer — `gh` missing, not
+    authenticated, no network, or a repository that never existed under any
+    name. The caller treats every one of those the same way: no rename known.
+    """
+    if not shutil.which("gh"):
+        return ""
+    result = run(
+        ["gh", "repo", "view", owner_and_name, "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+        timeout=60,
+    )
+    return result.out if result.ok else ""
+
+
 def pull_request_state(url: str) -> str:
     """What GitHub says of that pull request: MERGED, OPEN, CLOSED — or nothing.
 
