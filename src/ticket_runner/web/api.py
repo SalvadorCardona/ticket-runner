@@ -110,38 +110,7 @@ class Api:
         projects = self.projects()
         host = self.config.runner.session_host
 
-        tickets = []
-        for page in pages:
-            status = str(notion.read(page, settings.prop("status")) or "")
-            relation = notion.read(page, settings.prop("project")) or []
-            project = projects.get(relation[0]) if relation else None
-            session_id = str(notion.read(page, settings.prop("session")) or "")
-            moment = scheduled_for(notion.read(page, settings.prop("due")))
-            tickets.append(
-                {
-                    "id": page.id.replace("-", ""),
-                    "short": short_id(page.id),
-                    "title": page.title or "(untitled ticket)",
-                    "url": page.url,
-                    "status": status,
-                    "column": names.get(status, "other"),
-                    "project": (project or {}).get("name", ""),
-                    "kind": (project or {}).get("kind", ""),
-                    "priority": str(notion.read(page, settings.prop("priority")) or ""),
-                    "model": str(notion.read(page, settings.prop("model")) or ""),
-                    "progress": str(notion.read(page, settings.prop("progress")) or ""),
-                    "runner": str(notion.read(page, settings.prop("agent")) or ""),
-                    "pull_request": str(notion.read(page, settings.prop("pull_request")) or ""),
-                    "session": _session_id(session_id),
-                    "session_link": session.deep_link(_session_id(session_id), host=host)
-                    if _session_id(session_id)
-                    else "",
-                    "cost": notion.read(page, settings.prop("cost")),
-                    "duration": notion.read(page, settings.prop("duration")),
-                    "scheduled": moment.isoformat(timespec="minutes") if moment else "",
-                    "created": page.raw.get("created_time", ""),
-                }
-            )
+        tickets = [self._ticket(page, names, projects, host) for page in pages]
 
         # Whether this board has a validated column at all. The console offers
         # the gesture only where the runner would honour it: a button that
@@ -170,6 +139,56 @@ class Api:
                 if settings.state(key) not in [settings.state(other) for other in COLUMNS[: COLUMNS.index(key)]]
             ],
         }
+
+    def _ticket(self, page: notion.Page, names: dict[str, str], projects: dict, host: str) -> dict:
+        """One page of the tickets database, as a card reads it."""
+        settings = self.config.notion
+        status = str(notion.read(page, settings.prop("status")) or "")
+        relation = notion.read(page, settings.prop("project")) or []
+        project = projects.get(relation[0]) if relation else None
+        session_id = _session_id(str(notion.read(page, settings.prop("session")) or ""))
+        moment = scheduled_for(notion.read(page, settings.prop("due")))
+        return {
+            "id": page.id.replace("-", ""),
+            "short": short_id(page.id),
+            "title": page.title or "(untitled ticket)",
+            "url": page.url,
+            "status": status,
+            "column": names.get(status, "other"),
+            "project": (project or {}).get("name", ""),
+            "kind": (project or {}).get("kind", ""),
+            "priority": str(notion.read(page, settings.prop("priority")) or ""),
+            "model": str(notion.read(page, settings.prop("model")) or ""),
+            "progress": str(notion.read(page, settings.prop("progress")) or ""),
+            "runner": str(notion.read(page, settings.prop("agent")) or ""),
+            "pull_request": str(notion.read(page, settings.prop("pull_request")) or ""),
+            "session": session_id,
+            "session_link": session.deep_link(session_id, host=host) if session_id else "",
+            "cost": notion.read(page, settings.prop("cost")),
+            "duration": notion.read(page, settings.prop("duration")),
+            "scheduled": moment.isoformat(timespec="minutes") if moment else "",
+            "created": page.raw.get("created_time", ""),
+        }
+
+    def ticket(self, page_id: str) -> dict:
+        """One ticket, and what its page says.
+
+        The card on the board is the row; this is the page under it — the
+        brief you wrote, the report a run appended, the notes in between —
+        flattened the way the runner itself reads it before it starts. It is
+        the same page the ticket's discussion hangs off, so a console showing
+        both is showing one thing.
+        """
+        settings = self.config.notion
+        names = {settings.state(key): key for key in COLUMNS}
+        try:
+            page = self.runner.client.page(page_id)
+            content = self.runner.client.blocks_text(page_id)
+        except notion.NotionError:
+            self.forget()
+            raise
+        card = self._ticket(page, names, self.projects(), self.config.runner.session_host)
+        return {**card, "content": content}
 
     def projects(self) -> dict[str, dict]:
         """{page id: {name, kind}} — one query, kept for a few minutes.

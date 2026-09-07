@@ -38,6 +38,12 @@ export interface Ticket {
   created: string
 }
 
+/** A ticket, with the page under it: the brief, the report, the notes between. */
+export interface TicketDetail extends Ticket {
+  /** The page's blocks, flattened the way the runner reads them. */
+  content: string
+}
+
 export interface Board {
   tickets: Ticket[]
   /** Whether this board has a `validated` column the runner would honour. */

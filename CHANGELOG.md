@@ -16,6 +16,32 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- The web console's board is now the board: the columns your Notion board has,
+  under its own names, and a card dragged into one moves the ticket. The
+  *table* tab shows the same tickets as rows. A new ticket is written in a form
+  over the board rather than in a strip above it.
+- A card opens a page of its own — the brief, the report a run appended, the
+  notes in between, read from the Notion page — with the ticket's terminal
+  beside it, in place of the workspace console. The *Ticket* entry of the menu
+  is gone: the page is where the card takes you, and it has an address
+  (`/?view=console/tickets/read/<id>`) a reload or a link comes back to. Every
+  page does — `/?page=live`, `/?page=settings`.
+- The board, the ticket page and the form are one declaration for
+  [react-resource-view](https://github.com/SalvadorCardona/react-resource-view)
+  and [react-data-form](https://github.com/SalvadorCardona/react-data-form);
+  the two transcripts are shadcn's `message` and `message-scroller`. A switch at
+  the right of the header folds the second column away, for a board that wants
+  the width.
+
+### Added
+
+- `GET /api/tickets/<id>`: one ticket, with the page under it flattened the way
+  the runner reads it before a run.
+- The official `shadcn` skill, vendored under `.claude/skills/shadcn`, so a
+  session working on the console composes from the same kit.
+
 ### Fixed
 
 - A ticket that has run before is picked up instead of being refused. Its branch

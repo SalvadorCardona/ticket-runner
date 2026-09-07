@@ -8,6 +8,7 @@ import type {
   Settings,
   SettingValue,
   Talk,
+  TicketDetail,
 } from "./types"
 
 /* Talking to the server.
@@ -57,6 +58,7 @@ export const api = {
   projects: () => request<{ projects: Project[] }>("/api/projects"),
   chat: () => request<{ messages: Message[] } & ChatState & { busy?: boolean }>("/api/chat"),
   settings: () => request<Settings>("/api/settings"),
+  ticket: (id: string) => request<TicketDetail>(`/api/tickets/${id}`),
   talk: (id: string) => request<Talk>(`/api/tickets/${id}/talk`),
 
   createTicket: (ticket: {

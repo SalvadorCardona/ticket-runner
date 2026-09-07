@@ -1,0 +1,144 @@
+import * as React from "react"
+
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import { useConsole } from "@/hooks/use-console"
+import { why } from "@/lib/api"
+import { cn } from "@/lib/utils"
+
+import { Steps } from "./steps"
+import { Line, Transcript } from "./transcript"
+import { Turn } from "./turn"
+
+/** An instant as this browser would write it, or nothing at all. */
+function moment(at?: string): string {
+  if (!at) return ""
+  const date = new Date(at)
+  return Number.isNaN(date.getTime())
+    ? ""
+    : date.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })
+}
+
+/* One ticket's terminal.
+ *
+ * A transcript and a field, pointed at a single ticket. What you type is a
+ * comment on it, and a comment is already how a ticket is answered: a reply
+ * under the question a run asked puts the ticket back in the queue, and one
+ * that names the runner asks it for words instead. So there is nothing new to
+ * learn here, and nothing kept on the side: the discussion is Notion's, and
+ * the same words typed into Notion do the same.
+ */
+export function TicketTalk({
+  className,
+  bounded = false,
+}: {
+  className?: string
+  /** Given a height of its own rather than the pane's, for when it sits under the page. */
+  bounded?: boolean
+}) {
+  const { ticket, talk, mention, ticketSteps, tell, rereadTalk, talkLoading } = useConsole()
+  const [text, setText] = React.useState("")
+  const [sending, setSending] = React.useState(false)
+  const [problem, setProblem] = React.useState("")
+
+  const send = async () => {
+    if (!text.trim() || !ticket || sending) return
+    setSending(true)
+    setProblem("")
+    try {
+      await tell(text)
+      setText("")
+    } catch (error) {
+      setProblem(`not written: ${why(error)}`)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <div className={cn("flex min-h-0 flex-col", bounded ? "h-[70svh]" : "h-full", className)}>
+      <div className="border-b px-3.5 py-2">
+        <h3 className="text-sm font-semibold">
+          {ticket ? `Talking to #${ticket.short}` : "No ticket open"}
+        </h3>
+        <p className="text-muted-foreground mt-0.5 text-xs">
+          {ticket
+            ? "Everything said on the ticket, oldest first. What you type is a comment on it."
+            : "Open a ticket from the board."}
+        </p>
+      </div>
+
+      <Transcript>
+        {talk.map((message, index) => (
+          <Line key={index} id={`talk-${index}`} anchor={message.role === "you"}>
+            <Turn
+              role={message.role}
+              text={message.text}
+              who={
+                message.role === "you" ? "you" : message.role === "error" ? "problem" : "the runner"
+              }
+              when={moment(message.at)}
+            />
+          </Line>
+        ))}
+        {!talk.length && ticket && !talkLoading ? (
+          <Line id="talk-none">
+            <p className="text-muted-foreground text-sm">Nothing has been said on this ticket yet.</p>
+          </Line>
+        ) : null}
+        {talkLoading && !talk.length ? (
+          <Line id="talk-loading">
+            <p className="text-muted-foreground text-sm">reading the discussion…</p>
+          </Line>
+        ) : null}
+        {/* The steps of a running session are not part of the discussion and
+            are not reread with it: they keep scrolling underneath. */}
+        {ticketSteps.length ? (
+          <Line id="talk-steps">
+            <Steps steps={ticketSteps} />
+          </Line>
+        ) : null}
+      </Transcript>
+
+      <div className="flex flex-col gap-2 border-t p-3">
+        {ticket ? (
+          <p className="text-muted-foreground text-xs">
+            an answer to its question runs it again ·{" "}
+            <code className="bg-muted rounded px-1 py-0.5 font-mono">{mention}</code> asks it for
+            words instead
+          </p>
+        ) : null}
+        {problem ? <p className="text-destructive text-xs">{problem}</p> : null}
+        <Textarea
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault()
+              void send()
+            }
+          }}
+          disabled={!ticket}
+          rows={1}
+          spellCheck={false}
+          autoComplete="off"
+          className="max-h-50 min-h-9"
+          placeholder="Answer the ticket, or ask it something"
+        />
+        <div className="flex items-center gap-2">
+          <Button onClick={send} disabled={!ticket || sending || !text.trim()}>
+            {sending ? "sending…" : "Send"}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={rereadTalk}
+            disabled={!ticket || talkLoading}
+            title="read the discussion again"
+          >
+            {talkLoading ? "reading…" : "reread"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
