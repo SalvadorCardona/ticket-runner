@@ -3,6 +3,12 @@ Description=ticket-runner — picks up ready Notion tickets
 Documentation=https://github.com/SalvadorCardona/ticket-runner
 
 [Timer]
+# Three starting points, because a timer with none of them never fires again.
+# OnUnitActiveSec counts from the service's last activation and OnBootSec from
+# the boot: a timer (re)started long after boot, after a service that failed,
+# had neither and sat "active" with no next run. OnActiveSec counts from the
+# timer's own start, and always holds.
+OnActiveSec=@INTERVAL@s
 OnBootSec=@INTERVAL@s
 OnUnitActiveSec=@INTERVAL@s
 # A ten-second timer needs second-level accuracy; a half-hourly one does not,

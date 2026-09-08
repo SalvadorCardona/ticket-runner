@@ -44,6 +44,20 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Fixed
 
+- The runner no longer goes quiet after a run that failed. On 7 September 2026
+  a Notion timeout failed a run, the timer was restarted, and nothing ran for
+  the next two hours: the timer counted from the boot and from the service's
+  last activation, had neither to count from, and sat *enabled* with no next
+  run — `status` showed a green tick the whole time. The timer now also counts
+  from its own start (`OnActiveSec`), so it always has a next run. `status` and
+  `doctor` read that next run rather than `is-enabled`, and a timer that has
+  none is a red line, not a tick; the console's badge says *stalled*. And
+  `status` no longer reports a run in progress on the strength of a `run.lock`
+  a dead process left behind: it asks the lock itself, which the kernel drops
+  with the process. **An existing installation keeps its old unit, and the fault
+  with it, until `ticket-runner enable` is run again** — which now restarts the
+  timer rather than leaving an active one as it was, since a reload alone does
+  not revive a starved timer.
 - A ticket that has run before is picked up instead of being refused. Its branch
   is named after it, so a session that failed, or a pull request nobody merged,
   left a branch that answered `branch ticket/… already exists — ticket already

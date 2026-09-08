@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ticket_runner import config as C  # noqa: E402
 from ticket_runner import agents, channels, conversation, markdown, naming, notion  # noqa: E402
-from ticket_runner import progress, projects, prompt, provision, session, state  # noqa: E402
+from ticket_runner import progress, projects, prompt, provision, session, state, systemd  # noqa: E402
 from ticket_runner.channels import slack as slack_channel, telegram as telegram_channel  # noqa: E402
 from ticket_runner import update, workspace  # noqa: E402
 from ticket_runner import runner as runner_module  # noqa: E402
@@ -1585,6 +1585,67 @@ def a_copy_is_told_apart_from_a_clone_before_anything_is_fetched():
     """An install made with TR_SRC has no remote: a reason, not a failure."""
     status = update._look(Path(tempfile.mkdtemp()))
     assert not status.stale and "copy" in status.reason
+
+
+# -- staying alive -----------------------------------------------------------
+
+
+@case
+def a_lock_left_by_a_dead_run_is_not_a_run():
+    """`run.lock` on disk is what a killed run leaves behind; the flock is not.
+
+    For two hours on 7 September 2026, `status` read the leftover file as a run
+    in progress, and the search for the silence went the wrong way.
+    """
+    with _state_home() as state_home:
+        state_home.mkdir(parents=True)
+        (state_home / "run.lock").write_text("4242 2026-09-07T11:57:17+00:00\n")
+        assert state.running() == "", "a file nobody holds is not a run"
+        with state.lock():
+            assert state.running().startswith(str(os.getpid())), "a held lock is one"
+        assert state.running() == ""
+
+
+@case
+def a_timer_with_no_next_run_is_stalled_rather_than_enabled():
+    """What the incident's timer answered, and what a healthy one answers."""
+    starved = systemd.describe(
+        "enabled",
+        "SubState=elapsed\nNextElapseUSecRealtime=\nNextElapseUSecMonotonic=infinity\n",
+        "NEXT LEFT LAST PASSED UNIT ACTIVATES\n- - Mon 2026-09-07 13:57:17 CEST 2h ago ticket-runner.timer ticket-runner.service\n",
+    )
+    assert starved.stalled and starved.label == "stalled"
+    assert starved.row.startswith("- -"), "the list-timers line travels with the verdict"
+
+    armed = systemd.describe(
+        "enabled", "SubState=waiting\nNextElapseUSecRealtime=\nNextElapseUSecMonotonic=18h 48min\n"
+    )
+    assert armed.armed and not armed.stalled and armed.label == "enabled"
+
+    busy = systemd.describe(
+        "enabled", "SubState=running\nNextElapseUSecRealtime=\nNextElapseUSecMonotonic=\n"
+    )
+    assert busy.running and not busy.stalled, "no next run while the service runs is a run"
+
+    off = systemd.describe("disabled", "SubState=dead\nNextElapseUSecRealtime=\nNextElapseUSecMonotonic=\n")
+    assert not off.stalled and off.label == "disabled", "only an enabled timer can lie"
+    assert systemd.describe("", "").label == "", "and what is not installed says so as it did"
+
+
+@case
+def the_timer_counts_from_its_own_start():
+    """OnBootSec serves once; OnUnitActiveSec needs a service that ran. A timer
+    restarted after a failed run had neither, and never fired again."""
+    previous = os.environ.get("HOME")
+    os.environ["HOME"] = tempfile.mkdtemp()
+    try:
+        units = update.write_units(600, ROOT)
+    finally:
+        os.environ["HOME"] = previous
+    timer = (units / "ticket-runner.timer").read_text()
+    for directive in ("OnActiveSec=600s", "OnBootSec=600s", "OnUnitActiveSec=600s"):
+        assert directive in timer, directive
+    assert "@" not in timer, "a placeholder left in the unit"
 
 
 # -- runner ------------------------------------------------------------------

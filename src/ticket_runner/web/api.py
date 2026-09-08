@@ -13,15 +13,13 @@ changes), the project index, and the tickets database ID.
 
 from __future__ import annotations
 
-import shutil
-import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .. import config as config_module
-from .. import conversation, notion, session, state
+from .. import conversation, notion, session, state, systemd
 from .. import update as update_module
 from ..config import Config
 from ..runner import Runner, scheduled_for, short_id
@@ -225,12 +223,12 @@ class Api:
     def state(self) -> dict:
         """Everything the header shows: the timer, the lock, the version, the spend."""
         configuration = self.config
-        lock = config_module.state_dir() / "run.lock"
+        held = state.running()
         entries = state.history(10_000)
         return {
-            "timer": _timer_state(),
-            "running": lock.exists(),
-            "lock": lock.read_text(encoding="utf-8").strip() if lock.exists() else "",
+            "timer": systemd.read().label,
+            "running": bool(held),
+            "lock": held,
             "workspace_root": str(configuration.runner.workspace_root),
             "interval_seconds": configuration.runner.interval_seconds,
             "model": configuration.runner.model or "default",
@@ -500,21 +498,6 @@ def _update_available() -> str:
     """
     status = update_module.remembered()
     return status.latest[:8] if status.stale else ""
-
-
-def _timer_state() -> str:
-    if not shutil.which("systemctl"):
-        return "no systemd"
-    try:
-        result = subprocess.run(
-            ["systemctl", "--user", "is-enabled", "ticket-runner.timer"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return "unknown"
-    return result.stdout.strip() or "not installed"
 
 
 def _subcommands() -> tuple[str, ...]:
