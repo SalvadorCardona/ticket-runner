@@ -359,8 +359,13 @@ def command_init(args: argparse.Namespace) -> int:
             client, configuration.notion, page, demo=not args.no_demo
         )
     except notion.NotionError as error:
-        bad(str(error).splitlines()[0])
-        warn("nothing is half-built: run the same command again once it is fixed")
+        # The API's validation errors say what is wrong on the lines after the
+        # first one; cutting them off leaves “body failed validation. Fix one:”.
+        first, *rest = str(error).splitlines()
+        bad(first)
+        for line in rest:
+            print(f"    {DIM}{line}{RESET}")
+        warn("what was built is kept: run the same command again once it is fixed")
         return 1
     for verb, what in report.steps:
         if verb == "created":

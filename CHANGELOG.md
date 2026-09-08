@@ -44,6 +44,15 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Fixed
 
+- `ticket-runner init` can build the Tickets database on a bare page again. It
+  declared the *Project* and *Agent* relations in a shape the Notion API
+  rejects, so on 8 September 2026 a fresh page stopped at `POST /databases:
+  400 body failed validation. Fix one:` — and said nothing after the colon,
+  since only the first line of the error was shown, then claimed nothing was
+  half-built when the workspace and the Projects and Agents databases already
+  were. The relations are now spelled the way the API accepts; when the API
+  refuses something, `init` prints every line of its answer; and the advice
+  says what is true: what was built is kept, run the same command again.
 - The runner no longer goes quiet after a run that failed. On 7 September 2026
   a Notion timeout failed a run, the timer was restarted, and nothing ran for
   the next two hours: the timer counted from the boot and from the service's
