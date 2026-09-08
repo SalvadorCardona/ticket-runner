@@ -1,6 +1,6 @@
 """Building the Notion side of the runner from one page link.
 
-Setting this up by hand means four databases, a dozen properties, two relations
+Setting this up by hand means five databases, a score of properties, four relations
 and six status options spelled *exactly* as the configuration spells them. Get
 one character wrong and the runner finds nothing, for ever, without saying why.
 So the machine does it: you share one page with the integration, and everything
@@ -14,8 +14,10 @@ Two constraints of the API shape everything below.
   always read the same way: the filter is built from the declared type, and
   `_encode` writes both. The column looks slightly different in Notion, and
   nothing else changes.
-- **A relation needs its target to exist.** Projects and Agents are therefore
-  created before Tickets, which is the only ordering rule in this file.
+- **A relation needs its target to exist.** Which gives the two ordering rules
+  of this file, and there are only two: Projects and Agents are created before
+  Tickets, and Schedules after it — a schedule points at the ticket its last
+  occurrence produced.
 
 Everything is *find or create*. Running `init` twice is not an error and does
 not duplicate anything: the second run adds what a previous version did not
@@ -29,6 +31,7 @@ from dataclasses import dataclass, field
 
 from . import notion
 from .config import PRIORITIES, Notion
+from .schedules import CADENCES
 
 # The board, left to right, and the colour that says what a column means.
 _STATUS_COLOURS = {
@@ -73,6 +76,18 @@ back into this page, below this text.
 who has never heard of it.
 
 Delete this page whenever you like.
+"""
+
+DEMO_SCHEDULE = """Whatever is written here is copied into every ticket this schedule
+creates — so it is a brief, not a note: say what to do as if to somebody who
+has never seen the previous occurrence.
+
+**What to do:** list the dependencies of each project that are behind, say
+which of them matter, and open nothing.
+
+`Active` is unticked, so nothing is born yet. Tick it, and a ticket appears in
+**{ready}** at the hour `At` names. Untick it again and everything stops,
+without a single row being deleted.
 """
 
 
@@ -166,6 +181,43 @@ def tickets_schema(settings: Notion, projects: str = "", agents: str = "") -> di
         schema[settings.prop("project")] = _relation(projects)
     if agents:
         schema[settings.prop("role")] = _relation(agents)
+    return schema
+
+
+def cadence_options() -> list[dict]:
+    """The cadences a schedule may carry. A select, not a status.
+
+    A status property cannot be created through the API at all — and here that
+    costs nothing, because a cadence is not a status: nothing moves through it.
+    """
+    return [{"name": name, "color": "default"} for name in CADENCES]
+
+
+def schedules_schema(settings: Notion, tickets: str = "", projects: str = "") -> dict:
+    """A schedule is the recipe for a ticket, and how often it is born.
+
+    Ten columns beside the title: the seven you fill in — cadence, hour, day,
+    the tick that turns it on, and the three the ticket inherits — and the three
+    a pass writes back, which are how the runner knows an occurrence has been
+    taken and whether the last one is finished.
+    """
+    schema: dict = {
+        "Name": {"title": {}},
+        settings.prop("cadence"): {"select": {"options": cadence_options()}},
+        settings.prop("at"): {"rich_text": {}},
+        settings.prop("day"): {"rich_text": {}},
+        settings.prop("active"): {"checkbox": {}},
+        settings.prop("next_run"): {"date": {}},
+        settings.prop("last_run"): {"date": {}},
+        settings.prop("model"): _select(MODELS),
+        settings.prop("priority"): _select(PRIORITIES, _PRIORITY_COLOURS),
+    }
+    # The tickets database is the one relation that could not exist yet when the
+    # other schemas were built: a schedule points at what it last produced.
+    if tickets:
+        schema[settings.prop("last_ticket")] = _relation(tickets)
+    if projects:
+        schema[settings.prop("project")] = _relation(projects)
     return schema
 
 
@@ -290,8 +342,9 @@ def provision(
         report.note("created", f"“{directory}” workspace")
     report.workspace = workspace
 
-    # Order matters exactly once: a relation cannot name a database that does
-    # not exist yet, so the two targets are built before the tickets.
+    # Order matters twice, and both times for the same reason: a relation cannot
+    # name a database that does not exist yet. Projects and Agents are built
+    # before the tickets, and Schedules after them.
     projects = _database_in(
         client, _row(client, workspace, settings, "projects", report),
         settings.page("projects"), projects_schema(), report,
@@ -328,6 +381,20 @@ def provision(
                 f"add in Notion: {', '.join(sorted(absent))}",
             )
 
+    schedules = _database_in(
+        client, _row(client, workspace, settings, "schedules", report),
+        settings.page("schedules"), schedules_schema(settings, tickets, projects), report,
+    )
+    # A cadence added by a later version reaches a database built by an earlier
+    # one, and the cadences already there keep their place — the same merge the
+    # status column gets, for the same reason.
+    cadences = missing_options(
+        client.database(schedules), settings.prop("cadence"), cadence_options()
+    )
+    if cadences:
+        client.add_properties(schedules, cadences)
+        report.note("completed", f"“{settings.prop('cadence')}” — cadences added")
+
     context = _row(client, workspace, settings, "context", report)
     if not client.blocks_text(context).strip():
         client.append_markdown(context, CONTEXT_SEED)
@@ -339,5 +406,21 @@ def provision(
         ticket = client.create_row(tickets, "Introduce ticket-runner")
         client.append_markdown(ticket, DEMO_TICKET.format(ready=settings.state("ready")))
         report.note("created", "a demonstration ticket, waiting for you to start it")
+
+    if demo and not client.query(schedules):
+        # Unticked, the same guard as the demonstration ticket: an `init` run
+        # again must not stack up examples, and nothing must start on its own.
+        row = client.create_row(
+            schedules,
+            "Weekly dependency review",
+            {
+                settings.prop("cadence"): "Weekly",
+                settings.prop("at"): "09:00",
+                settings.prop("day"): "Monday",
+                settings.prop("active"): False,
+            },
+        )
+        client.append_markdown(row, DEMO_SCHEDULE.format(ready=settings.state("ready")))
+        report.note("created", "an example schedule, left unticked")
 
     return report

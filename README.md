@@ -811,6 +811,80 @@ Five things are worth knowing:
 
 ---
 
+## What comes back on its own
+
+A ticket leaves once: you write it, you move it to *Ready*, it runs, it ends in *Done*.
+Everything that **recurs** — Monday's dependency review, the report on the first of the
+month, the weekly digest — is retyped by hand, or is not done at all.
+
+The parti pris is what keeps the rest simple: no second execution engine beside the
+runner, only **one more source of tickets**. A *schedule* is a row in a Notion database
+that describes a ticket and how often it is born. When its moment comes, the runner
+creates that ticket in the ready column — and from there on, everything is the code that
+already existed. Same column, same queue, same session, same pull request. The schedule
+only presses the button for you.
+
+A row is the recipe. `Cadence` (Hourly, Daily, Weekly, Monthly), `At` (the hour, written
+`09:00`), `Day` (Monday, or 1 to 31), and the `Active` tick that turns it on. Whatever
+`Project`, `Model` and `Priority` it carries, the ticket it makes carries too — and the
+**body of the schedule's page is the brief**, copied into each ticket, so the ticket reads
+on its own and its history shows what was asked for that day. Three columns are the
+runner's to write: `Next`, `Last`, and `Last ticket`.
+
+```
+Schedules                 ticket-runner                       Tickets
+
+Active ✓, Next ≤ now ────▶ recur()
+                            │
+                            ├─ the last occurrence is still open? ──▶ skipped, and said
+                            │
+                            ├─ writes Next and Last          ──▶ the occurrence is taken
+                            │
+                            └─ creates the ticket            ──▶ Ready — body copied,
+                                                                 Project / Model / Priority
+                                                                 │
+                                 the queue of the same pass  ◀────┘
+```
+
+`recur` sits between the validated column and the queue — before the queue on purpose, so
+a ticket born at 09:00 is claimed by that very pass rather than by the next one.
+
+**Two rules surprise people, and both of them are the point:**
+
+- **catching up creates one occurrence, never the missed ones.** Machine off for three
+  days, timer stopped, laptop shut: waking up gives you one ticket for the occurrence
+  that is due, not twelve. `Next` is recomputed *from now*, never by stacking up what was
+  lost. This is anacron, not cron — turning a laptop back on must not set off an
+  avalanche of sessions;
+- **an occurrence that is still open blocks the next one, and the pass says so.** While
+  the ticket in `Last ticket` is neither *Done* nor *Failed* — so still ready, running, in
+  review, validated, or blocked on a question nobody has answered — no second ticket is
+  made. `Next` moves on regardless. Without that, one schedule stuck on a question fills
+  the board with twenty copies of itself.
+
+Three smaller ones, in the same spirit. **A schedule written this minute does not fire
+this minute:** an empty `Next` is computed and written, and nothing is born — creating a
+"Weekly / Monday" row on a Tuesday should not start a session on the spot. **The
+occurrence is taken before it is acted on:** `Next` and `Last` are written first and the
+ticket second, so a crash between the two loses one occurrence rather than making two —
+and a second runner on another machine reads a `Next` that has already moved and does
+nothing. **A schedule nobody can read holds nobody up:** an unknown cadence, an
+unreadable hour, an absurd day, and that row is skipped while the others go on;
+`ticket-runner doctor` is where it is named.
+
+```bash
+ticket-runner schedules                          # what repeats, and when it next happens
+ticket-runner schedules --run "Revue des dépendances"   # now, without waiting for Monday
+ticket-runner list                               # the whole calendar: tickets and births
+```
+
+Everything here is optional. A workspace with no schedules page has nothing that repeats,
+`doctor` is green on it, and nothing about it runs differently — `ticket-runner init`
+builds the database on a board that predates it, and `runner.schedule = false` turns the
+whole thing off without a single row being unticked.
+
+---
+
 ## Being told, and answering with one word
 
 A desktop notification names its ticket, and clicking it opens that ticket's Notion page
@@ -1175,6 +1249,8 @@ ticket-runner logs -f      # follow the running session
 ticket-runner status       # timer, console, current run, recent tickets
 ticket-runner history      # what has been handled, with the pull requests
 ticket-runner projects     # Notion project → local repository mapping
+ticket-runner schedules    # what comes back on its own, and when it next does
+ticket-runner schedules --run <name>  # make its ticket now, without waiting for the hour
 ticket-runner doctor       # full diagnostics
 ticket-runner clean --force          # remove worktrees, their branches, and scratch dirs
 ticket-runner update       # move the installation to the newest version

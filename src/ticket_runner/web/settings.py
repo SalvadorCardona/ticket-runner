@@ -192,6 +192,21 @@ SECTIONS: tuple[Section, ...] = (
         ),
     ),
     Section(
+        key="schedules",
+        title="What comes back on its own",
+        blurb=(
+            "The Schedules database, read in the same pass that reads the board. A row "
+            "there describes a ticket and how often it is born; everything after that is "
+            "an ordinary ticket. Catching up creates one occurrence, never the twelve a "
+            "machine that was off has missed."
+        ),
+        fields=(
+            Field("runner", "schedule", "bool", "Let schedules make tickets",
+                  "Off: the database is read by nobody, and no row has to be unticked. "
+                  "A workspace with no schedules page never had any of this anyway."),
+        ),
+    ),
+    Section(
         key="live",
         title="While it runs",
         blurb=(
@@ -359,6 +374,13 @@ SECTIONS: tuple[Section, ...] = (
                 "progress": "what the session is doing right now",
                 "due": "a date here holds the ticket until that moment",
                 "role": "relation to the agents database",
+                "cadence": "schedules: Hourly, Daily, Weekly or Monthly",
+                "at": "schedules: the hour, written 09:00",
+                "day": "schedules: Monday, or 1 to 31",
+                "active": "schedules: unticked stops it, deleting nothing",
+                "next_run": "schedules: written back — the next birth",
+                "last_run": "schedules: written back — the last one",
+                "last_ticket": "schedules: written back — what the last occurrence made",
             },
         ),
     ),
@@ -376,6 +398,7 @@ SECTIONS: tuple[Section, ...] = (
                 "projects": "a ticket's repository is found through it",
                 "agents": "the crafts a ticket can be handled by",
                 "context": "who the work is for, read into every prompt",
+                "schedules": "what repeats — absent means nothing does",
             },
         ),
     ),

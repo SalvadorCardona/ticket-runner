@@ -52,6 +52,24 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Added
 
+- Tickets that come back on their own. A fifth database, *Schedules*, where one
+  row describes a ticket and how often it is born — `Cadence` (Hourly, Daily,
+  Weekly, Monthly), `At`, `Day`, and the `Active` tick that turns it on — with
+  the body of its page as the brief, copied into every ticket it makes. When the
+  moment comes, the runner writes the ticket into the ready column and steps
+  back: same column, same queue, same session, same pull request. Monday's
+  dependency review is written once instead of being retyped every Monday.
+  Two rules are the whole point of it: **catching up creates one occurrence, not
+  the missed ones** — a machine off for three days wakes up owing one ticket and
+  not twelve — and **an occurrence still open blocks the next one**, so a
+  schedule stuck on a question does not fill the board with copies of itself.
+  `ticket-runner init` builds the database, on a bare page or on a board that
+  predates it; `ticket-runner schedules` says what repeats and when it next
+  does; `ticket-runner schedules --run "<name>"` makes its ticket on the spot;
+  `ticket-runner list` now shows the whole calendar, the tickets waiting for a
+  date and the ones not written yet. Optional throughout: a workspace with no
+  schedules page has nothing that repeats, `doctor` is green on it, and
+  `runner.schedule = false` turns everything off without a row being unticked.
 - `GET /api/tickets/<id>`: one ticket, with the page under it flattened the way
   the runner reads it before a run.
 - The official `shadcn` skill, vendored under `.claude/skills/shadcn`, so a
