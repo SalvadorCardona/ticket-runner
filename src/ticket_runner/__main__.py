@@ -19,7 +19,7 @@ from datetime import datetime
 
 from . import __version__, channels, config as config_module, conversation, git, notion
 from . import provision
-from . import session, state
+from . import session, state, systemd
 from . import update as update_module
 from . import workspace as workspace_module
 from .projects import Resolver
@@ -196,17 +196,7 @@ def command_status(args: argparse.Namespace) -> int:
 
     title("Services")
     if shutil.which("systemctl"):
-        active = subprocess.run(
-            ["systemctl", "--user", "is-enabled", "ticket-runner.timer"],
-            capture_output=True, text=True,
-        ).stdout.strip()
-        timers = subprocess.run(
-            ["systemctl", "--user", "list-timers", "ticket-runner.timer", "--no-pager"],
-            capture_output=True, text=True,
-        ).stdout.strip().splitlines()
-        (ok if active == "enabled" else warn)(f"ticket-runner.timer: {active or 'not installed'}")
-        for line in timers[1:2]:
-            print(f"    {DIM}{line.strip()}{RESET}")
+        _timer_line(systemd.read())
         # The console runs by default, so its absence is worth a line: nothing
         # about a ticket goes wrong when it is down, you simply have no board.
         console = subprocess.run(
@@ -223,9 +213,9 @@ def command_status(args: argparse.Namespace) -> int:
     else:
         warn("no systemd — the runner only runs on demand")
 
-    lock_file = config_module.state_dir() / "run.lock"
-    if lock_file.exists():
-        warn(f"a run is in progress ({lock_file.read_text().strip()})")
+    held = state.running()
+    if held:
+        warn(f"a run is in progress ({held})")
     else:
         ok("no run in progress")
 
@@ -407,6 +397,24 @@ def command_init(args: argparse.Namespace) -> int:
 def _kept(message: str) -> None:
     """Already there, and left alone. Worth one dim line, not a green tick."""
     print(f"  {DIM}·{RESET} {message}")
+
+
+def _timer_line(timer: systemd.Timer) -> None:
+    """One line for the timer, and it is red when the timer will never fire.
+
+    `enabled` is what `is-enabled` says, and it stayed true for the two hours the
+    runner was silent: the timer was loaded, active, and had no next run. That
+    state is the fault, and it is the only visible sign of it.
+    """
+    if timer.stalled:
+        bad("ticket-runner.timer: enabled, but no next run — it will never fire again")
+        print(f"    {DIM}ticket-runner enable   to restart it{RESET}")
+    elif timer.enabled == "enabled":
+        ok("ticket-runner.timer: enabled" + (" — a run is in progress" if timer.running else ""))
+    else:
+        warn(f"ticket-runner.timer: {timer.enabled}")
+    if timer.row:
+        print(f"    {DIM}{timer.row}{RESET}")
 
 
 def command_doctor(args: argparse.Namespace) -> int:
@@ -646,6 +654,10 @@ def command_doctor(args: argparse.Namespace) -> int:
     ok(f"claude: {session.available() or 'missing'}")
     interval = configuration.runner.interval_seconds
     print(f"  {DIM}one run every {interval}s (ticket-runner enable to apply a change){RESET}")
+    if shutil.which("systemctl"):
+        timer = systemd.read()
+        _timer_line(timer)
+        problems += 1 if timer.stalled else 0
     print(f"  {DIM}permission_mode = {configuration.runner.permission_mode}{RESET}")
     if configuration.runner.progress:
         every = configuration.runner.progress_interval_seconds
@@ -920,9 +932,14 @@ def command_timer(args: argparse.Namespace) -> int:
     interval = configuration.runner.interval_seconds
     update_module.write_units(interval)
     subprocess.call(["systemctl", "--user", "daemon-reload"])
-    code = subprocess.call(
-        ["systemctl", "--user", "enable", "--now", "ticket-runner.timer"]
-    )
+    # Enabled, then restarted rather than `--now`: a timer that is already
+    # active is left alone by `--now`, and a timer left alone keeps the next
+    # run it had — which, after the fault this exists to cure, is none. A
+    # restart gives OnActiveSec its starting point; the service, if one is
+    # running, is not the timer's to stop and carries on.
+    code = subprocess.call(["systemctl", "--user", "enable", "ticket-runner.timer"])
+    if code == 0:
+        code = subprocess.call(["systemctl", "--user", "restart", "ticket-runner.timer"])
     if code == 0:
         every = f"{interval}s" if interval < 120 else f"{interval // 60} min"
         ok(f"timer enabled — one run every {every}")
