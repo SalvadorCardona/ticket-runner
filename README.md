@@ -275,7 +275,7 @@ for reading rather than for filling in.
 | `runner.open_pull_request` | `true` | `false`: the branch is pushed, without a PR |
 | `runner.merge_method` | `"squash"` | how a **validated** pull request is merged — `squash`, `merge`, `rebase` |
 | `runner.keep_worktree_on_failure` | `true` | keep enough around to understand a failure |
-| `runner.notify` | `true` | one desktop notification per finished ticket — `[notify]` carries it to your phone |
+| `runner.notify` | `true` | one desktop notification per finished ticket, clicked to open its Notion page — `[notify]` carries it to your phone |
 | `runner.auto_update` | `true` | a run keeps the installation on the latest version |
 | `runner.update_interval_seconds` | `3600` | how often a run asks; one minute is the floor |
 | `runner.log_retention_days` | `14` | drop older session logs; `0` keeps everything |
@@ -813,8 +813,10 @@ Five things are worth knowing:
 
 ## Being told, and answering with one word
 
-A desktop notification only works if you are in front of that desktop, and the two
-moments that need you are exactly the two you are least likely to be there for: the agent
+A desktop notification names its ticket, and clicking it opens that ticket's Notion page
+— the notification is where you act from, not a title you then go and look for on the
+board. But it only works if you are in front of that desktop, and the two moments that
+need you are exactly the two you are least likely to be there for: the agent
 asked a question, and a pull request is waiting. So the runner can also write to
 **Telegram** or **Slack** — and this is the half that matters: **what you answer there
 lands on the ticket.**
@@ -1286,6 +1288,7 @@ board is shared with people you would not hand those credentials to, leave the c
 | a ticket ran before and its branch is still there | it is picked up, not refused: the branch is checked out again and rebased onto the base branch, and the session continues from what it already holds. The ticket's comment says so, and says when the rebase conflicted. `ticket-runner clean --force` is what starts it over instead |
 | `branch … is checked out in …` | two attempts at the same ticket at once, or a worktree kept somewhere else — the one case that still stops it. `git worktree remove <path>`, once you are done with what is in there |
 | no desktop notification | `notify-send` is missing, or the service has no session bus. `runner.notify = false` silences the attempt |
+| a desktop notification that does not open its ticket | the click needs `gdbus`, `dbus-monitor` and `xdg-open`, and a desktop that says it supports notification actions. Without them the notification is shown as it always was |
 | nothing arrives in Telegram or Slack | `ticket-runner notify` says which end refused — a revoked token, a chat id that is not yours, a bot not invited to the channel |
 | an answer typed in Slack changes nothing | the bot cannot read the channel: add `channels:history` (or `groups:history`, `im:history`) and reinstall the app |
 | an answer lands on the wrong ticket | a bare “oui” answers the last question asked. Reply *to* the message, or paste the ticket's link, when two are waiting |
