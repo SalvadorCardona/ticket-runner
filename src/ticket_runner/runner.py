@@ -26,11 +26,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import agents, channels, conversation, git, naming, notion, notify, progress
-from . import prompt as prompt_module, session, state
+from . import prompt as prompt_module, schedules as schedules_module, session, state
 from . import update as update_module
 from . import workspace as workspace_module
 from .config import PRIORITIES, Config, state_dir
 from .projects import Project, Resolver
+# The one reading of a Notion date in the project. It lives beside the calendar
+# because a date on a ticket and a date on a schedule mean the same thing, and
+# two readings of them that drift apart is a bug nobody would ever find.
+from .schedules import scheduled_for
 
 
 @dataclass
@@ -66,24 +70,6 @@ class Job:
     comments: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     resumed: bool = False
-
-
-def scheduled_for(value: object) -> datetime | None:
-    """When a ticket may start, from its Notion date property.
-
-    A bare date means the start of that day, read in this machine's timezone: a
-    ticket due "30 August" becomes eligible at midnight, not at noon UTC. A date
-    with a time is taken as written, offset included. Anything unparseable is
-    treated as no date at all — a ticket is never held back by a value the
-    runner failed to read.
-    """
-    if not value:
-        return None
-    try:
-        moment = datetime.fromisoformat(str(value))
-    except ValueError:
-        return None
-    return moment.astimezone() if moment.tzinfo is None else moment
 
 
 def short_id(page_id: str) -> str:
@@ -881,6 +867,182 @@ class Runner:
             "seconds": round(outcome.seconds, 1),
             "cost_usd": outcome.cost_usd,
         }
+
+    # -- what comes back on its own -------------------------------------------
+
+    def schedules(self) -> list[schedules_module.Schedule]:
+        """Every row of the Schedules database, or none where there is no such
+        database. Read rather than acted on: `list` and `doctor` want it too."""
+        database = self.workspace.schedules
+        if not database:
+            return []
+        settings = self.config.notion
+        return [schedules_module.read(page, settings) for page in self.client.query(database)]
+
+    def recur(self) -> list[dict]:
+        """The schedules whose moment has come, turned into tickets.
+
+        A pass of its own, between `deliver` and the queue — before the queue on
+        purpose, so a ticket born at 09:00 is claimed by the very pass that made
+        it rather than by the next one. What it produces is an ordinary ticket:
+        same ready column, same file, same session, same pull request. The
+        schedule only presses the button for you.
+
+        Four rules, and they are the whole of it.
+
+        - **Catching up: one occurrence, and the missed ones are dropped.**
+          Machine off for three days, timer stopped, laptop shut: waking up
+          gives you one ticket for the occurrence that is due, not twelve. The
+          next moment is computed *from now*, never by stacking up what was
+          lost. This is anacron, not cron — turning a laptop back on must not
+          set off an avalanche of sessions.
+        - **Overlapping: skipped, and said out loud.** While the ticket of the
+          previous occurrence is neither done nor failed, no new one is made.
+          The next moment moves on regardless. Without that, one schedule stuck
+          on a question fills the board with twenty identical tickets.
+        - **Idempotence: the occurrence is taken before it is acted on.** `Next`
+          and `Last` are written first, the ticket second. A crash in between
+          loses one occurrence; the other order would create two, which costs a
+          session and dirties the board. A second runner on another machine
+          reads a `Next` that has already moved, and does nothing.
+        - **The timezone is this machine's**, the same reading `scheduled_for`
+          gives a date on a ticket.
+        """
+        if not self.config.runner.schedule:
+            return []
+        born: list[dict] = []
+        now = datetime.now().astimezone()
+        for schedule in self.schedules():
+            if not schedule.active or schedule.problem:
+                # A schedule nobody can read holds nobody up: `doctor` names it,
+                # and the others go on being born.
+                continue
+            upcoming = schedules_module.next_occurrence(
+                schedule.cadence, schedule.at, schedule.day, after=now
+            )
+            if schedule.next is None:
+                # A new schedule does not fire the second it is written: writing
+                # “Weekly / Monday” on a Tuesday must not produce a ticket now.
+                if upcoming:
+                    self._mark(schedule, {self.config.notion.prop("next_run"): upcoming})
+                    self.say(
+                        f"  ⧗ {schedule.name} — first occurrence "
+                        f"{upcoming.strftime('%Y-%m-%d %H:%M')}"
+                    )
+                continue
+            if schedule.next > now or upcoming is None:
+                # `problem` already caught everything that makes a cadence
+                # uncomputable; taking an occurrence without knowing when the
+                # next one falls would have this fire on every single pass.
+                continue
+            if self.dry_run:
+                self.say(f"  (dry run) {schedule.name} — due: would create a ticket")
+                born.append({"ticket": schedule.name, "status": "dry-run"})
+                continue
+            # Taken before it is done: see the third rule above.
+            self._mark(
+                schedule,
+                {
+                    self.config.notion.prop("next_run"): upcoming,
+                    self.config.notion.prop("last_run"): now,
+                },
+            )
+            if self._busy(schedule):
+                self.say(
+                    f"  · {schedule.name} — its last ticket is still open, "
+                    "no second one made"
+                )
+                continue
+            entry = self._born(schedule)
+            if entry:
+                born.append(entry)
+        return born
+
+    def _busy(self, schedule: schedules_module.Schedule) -> bool:
+        """Is the previous occurrence still going?
+
+        Anywhere but done or failed — so still ready, in progress, in review,
+        validated, or blocked on a question nobody has answered — means yes. A
+        ticket the integration can no longer read is not one of those: a page
+        somebody deleted would otherwise wedge its schedule for good.
+        """
+        if not schedule.last_ticket:
+            return False
+        settings = self.config.notion
+        try:
+            page = self.client.page(schedule.last_ticket)
+        except notion.NotionError:
+            return False
+        status = str(notion.read(page, settings.prop("status")) or "")
+        return status not in (settings.state("done"), settings.state("failed"))
+
+    def _born(self, schedule: schedules_module.Schedule) -> dict | None:
+        """One schedule, one ticket, in the ready column.
+
+        The body is a line saying where it came from, then the schedule page's
+        own body copied under it — the same road a report travels. Copied rather
+        than linked, so the ticket reads on its own and its history shows what
+        was actually asked for that day.
+
+        A schedule that fails takes only itself down: the pass says so and moves
+        on to the next one.
+        """
+        settings = self.config.notion
+        moment = datetime.now().astimezone()
+        stamp = moment.strftime("%Y-%m-%d %H:%M" if schedule.cadence == "Hourly" else "%Y-%m-%d")
+        title = f"{schedule.name} — {stamp}"
+        values: dict[str, object] = {settings.prop("status"): settings.state("ready")}
+        for key, value in (
+            ("project", schedule.project),
+            ("model", schedule.model),
+            ("priority", schedule.priority),
+        ):
+            if value:
+                values[settings.prop(key)] = value
+        # The brief is read before anything is written: the page it comes from is
+        # the likeliest thing to be unreadable, and a ticket that is all title
+        # would run on nothing at all.
+        try:
+            brief = self.client.blocks_text(schedule.page.id)
+            page_id = self.client.create_row(self.database, title, values)
+        except notion.NotionError as error:
+            self.say(f"  ! {schedule.name} — the ticket could not be created: {_line(error)}")
+            return None
+        # Linked first, so that a body Notion refuses still leaves the schedule
+        # knowing what it produced — otherwise the next occurrence makes a twin.
+        self._mark(schedule, {settings.prop("last_ticket"): page_id})
+        try:
+            self.client.append_markdown(
+                page_id,
+                f"*Born of the “{schedule.name}” schedule, {stamp}* — {schedule.page.url}\n"
+                + (f"\n{brief}\n" if brief.strip() else ""),
+            )
+        except notion.NotionError as error:
+            self.say(f"  ! {title} — created, but its body was refused: {_line(error)}")
+        self.say(f"  ✳ {title} — created by a schedule, ready")
+        return {
+            "ticket": title,
+            "id": page_id.replace("-", ""),
+            "status": "scheduled",
+            "from": schedule.name,
+        }
+
+    def _mark(self, schedule: schedules_module.Schedule, values: dict[str, object]) -> None:
+        """Write back onto a schedule. Never a reason to fail a pass.
+
+        Dates go over as ISO 8601 rather than as `str(datetime)`, which spells
+        the separator as a space and is not what Notion accepts.
+        """
+        if self.dry_run or not self.workspace.schedules:
+            return
+        written = {
+            name: value.isoformat() if isinstance(value, datetime) else value
+            for name, value in values.items()
+        }
+        try:
+            self.client.update(self.workspace.schedules, schedule.page.id, written)
+        except notion.NotionError as error:
+            self.say(f"  ! {schedule.name} — Notion refused the write: {_line(error)}")
 
     def fetch_one(self, reference: str) -> Ticket:
         page_id = reference.strip()
@@ -1832,6 +1994,13 @@ class Runner:
             for done in delivered:
                 if done.get("status") != "dry-run":
                     state.record(done)
+            # Before the queue, so a ticket born at 09:00 is claimed by this
+            # very pass rather than by the next one. A birth is an entry of its
+            # own kind — `ticket-runner history` shows it as it shows a merge.
+            for newborn in self.recur():
+                if newborn.get("status") != "dry-run":
+                    state.record(newborn)
+                    delivered.append(newborn)
             tickets, waiting = self.queue()
             # Every ticket the queue wants, and not only the ones that will fit
             # in this pass: a ticket queued for the next run — or held until
