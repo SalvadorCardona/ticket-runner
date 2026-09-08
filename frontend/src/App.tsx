@@ -26,10 +26,11 @@ import { cn } from "@/lib/utils"
  * a ticket's discussion sits under its page. Below 768px the menu is a drawer.
  */
 
-const TITLE: Record<Page, string> = {
-  console: "Console",
-  live: "Sessions",
-  settings: "Settings",
+/** What each pane is called in the bar's path. Lower case: it is a segment, not a title. */
+const CRUMB: Record<Page, string> = {
+  console: "console",
+  live: "live",
+  settings: "settings",
 }
 
 const ASIDE = "ticket-runner-aside"
@@ -78,8 +79,15 @@ function Console() {
     void runCommand(verb)
   }
 
-  const title =
-    route.kind === "page" ? TITLE[route.page] : ticketId ? (ticket?.title ?? "Ticket") : "Board"
+  // The bar says the path, not the title: `workspace / board / #3f2a1c`. The
+  // page under it opens with the heading, so a ticket is named here by its id
+  // — the short thing that fits a breadcrumb — rather than by its sentence.
+  const crumbs =
+    route.kind === "page"
+      ? ["workspace", CRUMB[route.page]]
+      : ticketId
+        ? ["workspace", "board", `#${ticket?.short ?? String(ticketId).slice(-8)}`]
+        : ["workspace", "board"]
 
   // Each pane keeps its place while another is shown, so a ticket half-read
   // and a setting half-typed survive a trip through the menu.
@@ -107,7 +115,7 @@ function Console() {
       <SidebarInset className="min-h-0 overflow-hidden">
         <div className="flex h-full min-h-0 flex-col">
           <Header
-            title={title}
+            crumbs={crumbs}
             aside={aside}
             asideLabel={ticketId ? "discussion" : "console"}
             onToggleAside={toggleAside}

@@ -6,6 +6,7 @@ import { useConsole } from "@/hooks/use-console"
 import { why } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
+import { Eyebrow } from "./frame"
 import { Steps } from "./steps"
 import { Line, Transcript } from "./transcript"
 import { Turn } from "./turn"
@@ -57,11 +58,18 @@ export function TicketTalk({
 
   return (
     <div className={cn("flex min-h-0 flex-col", bounded ? "h-[70svh]" : "h-full", className)}>
-      <div className="border-b px-3.5 py-2">
-        <h3 className="text-sm font-semibold">
-          {ticket ? `Talking to #${ticket.short}` : "No ticket open"}
+      <div className="border-b px-3.5 py-2.5">
+        <Eyebrow>the ticket</Eyebrow>
+        <h3 className="mt-1 text-base leading-tight font-semibold tracking-[-0.01em]">
+          {ticket ? (
+            <>
+              Talking to <span className="text-primary font-mono">#{ticket.short}</span>
+            </>
+          ) : (
+            "No ticket open"
+          )}
         </h3>
-        <p className="text-muted-foreground mt-0.5 text-xs">
+        <p className="text-muted-foreground mt-1 text-xs">
           {ticket
             ? "Everything said on the ticket, oldest first. What you type is a comment on it."
             : "Open a ticket from the board."}

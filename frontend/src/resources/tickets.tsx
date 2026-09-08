@@ -1,5 +1,5 @@
 import * as React from "react"
-import { LayoutGrid, MessageSquare } from "lucide-react"
+import { LayoutGrid } from "lucide-react"
 import {
   ActionList,
   BooleanInputController,
@@ -20,7 +20,16 @@ import {
   type RowComponentPropsInterface,
 } from "react-resource-view"
 
-import { EDGE, LABEL, TicketActions, TicketBadges, TicketLinks } from "@/components/console/ticket-bits"
+import { PageHead } from "@/components/console/frame"
+import {
+  EDGE,
+  LABEL,
+  SEED,
+  TicketActions,
+  TicketFoot,
+  TicketTags,
+  ago,
+} from "@/components/console/ticket-bits"
 import { TicketPage } from "@/components/console/ticket-page"
 import { api } from "@/lib/api"
 import { addTicket, boardOnce, currentBoard, patchTicket, subscribeBoard, useBoard } from "@/lib/board-store"
@@ -77,12 +86,15 @@ const createForm: FormInterface = {
   label: { submit: "Create" },
   inputs: {
     title: {
-      label: "What has to be done, in one line",
+      label: "Title",
+      description: "What has to be done, in one line. It is what the board shows.",
       required: true,
       placeholder: "Retirer le bandeau du dashboard",
     },
     body: {
       label: "The brief",
+      description:
+        "The whole of what the runner is told. Written on the ticket's page, and read from there.",
       placeholder: "What must change, where, and how you will know it is done.",
       controller: TextAreaInputController,
     },
@@ -125,7 +137,16 @@ const rowForm: FormInterface = {
 
 /* -- one card ------------------------------------------------------------- */
 
-/** How a ticket is drawn on the board. The card is the way into the ticket's page. */
+/* How a ticket is drawn on the board. The card is the way into the ticket's
+ * page — its title is the link, and so is the id over it.
+ *
+ * Read top to bottom it answers, in order: which one is this, how long has it
+ * been sitting there, what is it, what is said about it, what is it doing,
+ * where does the work go and what has it cost. The `-m-4` is the frame
+ * react-resource-view draws around every record being pushed back out of the
+ * way: the coloured edge has to be the card's own edge, not a stripe inside a
+ * second border.
+ */
 function TicketCard({ row }: RowComponentPropsInterface) {
   const ticket = row?.data as TicketItem | undefined
   const { resource } = useCurrentViewResourceContext()
@@ -133,42 +154,73 @@ function TicketCard({ row }: RowComponentPropsInterface) {
   const href = generateLinkByResource({ resource, resourceAction: ActionList.read, id: ticket.id })
 
   return (
-    <div className={cn("-m-4 flex flex-col gap-2 rounded-2xl border-l-3 p-3", EDGE[ticket.column] ?? "border-l-border")}>
+    <div
+      className={cn(
+        "-m-4 flex flex-col gap-2.5 rounded-2xl border-l-3 p-3.5",
+        EDGE[ticket.column] ?? "border-l-border"
+      )}
+    >
+      <div className="flex items-center gap-2 font-mono text-[0.7rem]">
+        <Link to={href} className="font-medium tracking-wide hover:underline">
+          #{ticket.short}
+        </Link>
+        <span className="flex-1" />
+        <span className="text-muted-foreground">{ago(ticket.created)}</span>
+      </div>
+
       <Link to={href} className="text-[0.93rem] leading-snug font-semibold hover:underline">
         {ticket.title}
       </Link>
-      <TicketBadges ticket={ticket} />
+
+      <TicketTags ticket={ticket} />
+
       {ticket.progress ? (
-        <p className="text-muted-foreground line-clamp-3 text-xs leading-relaxed">{ticket.progress}</p>
+        <p className="text-muted-foreground line-clamp-3 text-xs leading-relaxed">
+          {ticket.progress}
+        </p>
       ) : null}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <Link
-          to={href}
-          className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs"
-        >
-          <MessageSquare className="size-3" />
-          open
-        </Link>
-        <TicketLinks ticket={ticket} />
-        <TicketActions ticket={ticket} className="-ml-1" />
-      </div>
+
+      <TicketActions ticket={ticket} className="-mx-1" />
+      <TicketFoot ticket={ticket} />
     </div>
   )
 }
 
 /* -- the board ------------------------------------------------------------ */
 
-/** Nothing on screen: it asks the list to reread the store whenever the stream moves the board. */
-function FollowsTheStream() {
-  const { fetchData } = useCurrentViewResourceContext()
+/* What sits above whatever react-resource-view is drawing.
+ *
+ * Two jobs, because the package offers one slot: it asks the list to reread the
+ * store whenever the stream moves the board, and — on the board itself, never
+ * on a ticket's page — it draws the heading the board opens with.
+ */
+function BoardTop() {
+  const context = useCurrentViewResourceContext()
+  const { fetchData, resourceAction } = context
   const latest = React.useRef(fetchData)
   latest.current = fetchData
   React.useEffect(() => subscribeBoard(() => latest.current()), [])
-  return null
+
+  if (resourceAction !== ActionList.list) return null
+  return (
+    <PageHead
+      crumbs={["operations", "board"]}
+      title="Keep the work moving."
+      blurb="Notion holds the board; this is it, live. Drop a card in another column and the runner is told."
+    />
+  )
 }
 
-/** A column's name as a heading: the board's own word, with a capital. */
-const heading = (name: string) => name.charAt(0).toUpperCase() + name.slice(1)
+/** A column's name as a heading: the board's own word, with a capital, under its colour. */
+function heading(key: string, name: string) {
+  const said = name.charAt(0).toUpperCase() + name.slice(1)
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span className={cn("size-1.5 shrink-0 rounded-full", SEED[key] ?? "bg-muted-foreground")} />
+      {said}
+    </span>
+  )
+}
 
 /** The board's columns, in the board's order and words, each a drop target. */
 function BoardColumns({ rows = [] }: ListComponentPropsInterface) {
@@ -189,7 +241,10 @@ function BoardColumns({ rows = [] }: ListComponentPropsInterface) {
         <RowWrapperColumnComponent
           key={column.key}
           identifierKey="column"
-          valueIdentifier={{ value: column.key, label: heading(column.name || LABEL[column.key]) }}
+          valueIdentifier={{
+            value: column.key,
+            label: heading(column.key, column.name || LABEL[column.key]),
+          }}
           isDragging={dragging}
           handleDragging={setDragging}
           rows={rows}
@@ -283,7 +338,7 @@ export const tickets = createViewResource<TicketItem, TicketItem, TicketWrite>(T
       }),
       tableViewOptionFactory({ name: "table", behavior: { rowActions: [ActionList.read] } }),
     ],
-    components: { top: FollowsTheStream },
+    components: { top: BoardTop },
   },
   views: {
     [ActionList.list]: { name: "Board" },

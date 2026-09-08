@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { useConsole } from "@/hooks/use-console"
 
+import { Eyebrow } from "./frame"
 import { Flow } from "./text"
 import { Steps } from "./steps"
 import { Line, Transcript } from "./transcript"
@@ -31,6 +32,17 @@ export function ConsolePane() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      <div className="border-b px-3.5 py-2.5">
+        <Eyebrow>the workspace</Eyebrow>
+        <h3 className="mt-1 text-base leading-tight font-semibold tracking-[-0.01em]">
+          Talking to your machine
+        </h3>
+        <p className="text-muted-foreground mt-1 text-xs">
+          A sentence reaches your repositories and the board; a line that starts with{" "}
+          <code className="bg-muted rounded px-1 py-0.5 font-mono">&gt;</code> reaches the CLI.
+        </p>
+      </div>
+
       <Transcript>
         {transcript.map((entry) => {
           const id = String(entry.id)

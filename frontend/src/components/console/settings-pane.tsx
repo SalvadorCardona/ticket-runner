@@ -1,5 +1,5 @@
 import * as React from "react"
-import { ChevronRight } from "lucide-react"
+import { ChevronRight, X } from "lucide-react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -23,6 +23,7 @@ import { api, why } from "@/lib/api"
 import type { ProjectPath, SettingField, Settings, SettingValue } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
+import { Eyebrow, PageHead } from "./frame"
 import { Rich } from "./text"
 
 /* The settings tab.
@@ -37,6 +38,10 @@ import { Rich } from "./text"
  * writing an empty one. So `edited` holds only what you actually touched: a
  * field left alone is a line the file keeps, comment and all — and a token you
  * did not retype is a token that never left the machine.
+ *
+ * Down the left is the list of sections, which is how a page of seventy fields
+ * stops being a file: it says what is in here, which parts are open, and how
+ * many of your unsaved changes are hiding in a part you have folded away.
  */
 
 /** Radix has no empty-string value, and "the file says nothing" needs one. */
@@ -71,6 +76,7 @@ function Field({
 }) {
   const [forgotten, setForgotten] = React.useState(false)
   const touched = edited.has(field.name)
+  const id = `setting-${field.name}`
 
   const control = () => {
     if (field.kind === "bool") {
@@ -88,7 +94,7 @@ function Field({
             )
           }
         >
-          <SelectTrigger className="w-full">
+          <SelectTrigger id={id} className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -110,7 +116,7 @@ function Field({
             remember(field.name, value === UNSET ? null : value, initial)
           }
         >
-          <SelectTrigger className="w-full">
+          <SelectTrigger id={id} className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -132,9 +138,20 @@ function Field({
         touched ? ((edited.get(field.name) as string[]) ?? []) : (initial ?? fallback)
       )
       return (
-        <div className="flex flex-wrap gap-x-4 gap-y-2">
+        <div className="flex flex-wrap gap-2">
           {field.choices.map((choice) => (
-            <Label key={choice} className="text-muted-foreground cursor-pointer font-normal">
+            // A checkbox in a box of its own, because a row of bare checkboxes
+            // is a row where the thing you can click is the word and the word
+            // does not look clickable.
+            <Label
+              key={choice}
+              className={cn(
+                "cursor-pointer rounded-lg border px-2.5 py-1.5 text-xs font-normal transition-colors",
+                chosen.has(choice)
+                  ? "border-primary/40 bg-primary/10 text-foreground"
+                  : "bg-field text-muted-foreground hover:text-foreground"
+              )}
+            >
               <Checkbox
                 checked={chosen.has(choice)}
                 onCheckedChange={(value) => {
@@ -160,6 +177,7 @@ function Field({
       return (
         <div className="flex items-center gap-2">
           <Input
+            id={id}
             type="password"
             autoComplete="off"
             spellCheck={false}
@@ -195,6 +213,7 @@ function Field({
     const held = touched ? edited.get(field.name) : field.value
     return (
       <Input
+        id={id}
         type={field.kind === "int" ? "number" : "text"}
         autoComplete="off"
         spellCheck={false}
@@ -215,16 +234,27 @@ function Field({
   }
 
   return (
-    <div className={cn("space-y-1.5", field.kind === "events" && "col-span-full")}>
-      <span className="text-sm font-medium">{field.label}</span>
+    <div className={cn("min-w-0", field.kind === "events" && "col-span-full")}>
+      <div className="mb-1.5 flex items-center gap-1.5">
+        <Label htmlFor={id} className="text-sm font-medium">
+          {field.label}
+        </Label>
+        {/* Where you changed something, said where you changed it: on a page
+            this long, a diff you have to hunt for is a diff you distrust. */}
+        {touched ? (
+          <span className="bg-primary/15 text-primary rounded px-1.5 py-0.5 font-mono text-[0.6rem] font-semibold tracking-wide uppercase">
+            edited
+          </span>
+        ) : null}
+      </div>
       {control()}
       {field.help ? (
-        <p className="text-muted-foreground text-xs leading-relaxed">
+        <p className="text-muted-foreground mt-1.5 text-xs leading-relaxed">
           <Rich text={field.help} />
         </p>
       ) : null}
       {field.after ? (
-        <p className="text-muted-foreground text-xs">
+        <p className="text-muted-foreground mt-1 text-xs">
           takes effect once <Rich text={field.after} />
         </p>
       ) : null}
@@ -244,6 +274,13 @@ function ProjectRows({
 
   return (
     <div className="space-y-2">
+      {rows.length ? (
+        <div className="text-muted-foreground hidden gap-2 px-1 sm:flex">
+          <Eyebrow className="flex-1">the project, as Notion names it</Eyebrow>
+          <Eyebrow className="flex-1">where it is on this machine</Eyebrow>
+          <span className="w-8" />
+        </div>
+      ) : null}
       {rows.map((row, index) => (
         <div key={index} className="flex flex-wrap items-center gap-2">
           <Input
@@ -253,22 +290,24 @@ function ProjectRows({
             onChange={(event) => change(index, { name: event.target.value })}
           />
           <Input
-            className="min-w-40 flex-1"
+            className="min-w-40 flex-1 font-mono text-xs"
             value={row.path}
             placeholder="~/workspace/that-repository"
             onChange={(event) => change(index, { path: event.target.value })}
           />
           <Button
             variant="ghost"
-            size="sm"
+            size="icon-sm"
+            className="text-muted-foreground hover:text-destructive shrink-0"
+            aria-label={`remove ${row.name || "this project"}`}
             onClick={() => setRows(rows.filter((_, at) => at !== index))}
           >
-            remove
+            <X />
           </Button>
         </div>
       ))}
       {!rows.length ? (
-        <p className="text-muted-foreground text-sm">
+        <p className="text-muted-foreground rounded-lg border border-dashed px-3 py-6 text-center text-sm">
           No mapping here — the project pages carry it.
         </p>
       ) : null}
@@ -290,6 +329,7 @@ export function SettingsPane({ onCheck }: { onCheck: (verb: string) => void }) {
   const [rows, setRows] = React.useState<ProjectPath[] | null>(null)
   const [note, setNote] = React.useState<{ text: string; bad: boolean } | null>(null)
   const [saving, setSaving] = React.useState(false)
+  const [open, setOpen] = React.useState<Set<string>>(OPEN)
 
   const load = React.useCallback(async () => {
     try {
@@ -338,6 +378,23 @@ export function SettingsPane({ onCheck }: { onCheck: (verb: string) => void }) {
     []
   )
 
+  const toggle = (key: string, shown: boolean) =>
+    setOpen((current) => {
+      const next = new Set(current)
+      if (shown) next.add(key)
+      else next.delete(key)
+      return next
+    })
+
+  // From the rail: a section you asked for is a section you want open and in
+  // front of you, whether or not it was folded when you asked.
+  const jump = (key: string) => {
+    toggle(key, true)
+    window.requestAnimationFrame(() =>
+      document.getElementById(`section-${key}`)?.scrollIntoView({ block: "start" })
+    )
+  }
+
   const save = async () => {
     if (!drawn) return
     setSaving(true)
@@ -374,18 +431,23 @@ export function SettingsPane({ onCheck }: { onCheck: (verb: string) => void }) {
   if (!drawn)
     return <p className="text-muted-foreground p-3.5 text-sm">Reading the configuration…</p>
 
+  /** How many of your unsaved changes are in this section. */
+  const changed = (key: string) => {
+    const section = drawn.sections.find((item) => item.key === key)
+    if (!section) return 0
+    if (section.pairs === "projects") return rows ? 1 : 0
+    return section.fields.filter((field) => edited.has(field.name)).length
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-3.5">
-        <div className="mb-4">
-          <h2 className="text-base font-semibold">Settings</h2>
-          <p className="text-muted-foreground mt-0.5 font-mono text-xs">{drawn.path}</p>
-          <p className="text-muted-foreground mt-1 text-xs leading-relaxed">
-            A field left blank says nothing, and the runner&rsquo;s own default answers &mdash;
-            shown greyed beside it. Your tokens stay on the machine: they are never sent to this
-            page.
-          </p>
-        </div>
+      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-3.5 sm:p-5">
+        <PageHead
+          crumbs={["workspace", "settings"]}
+          title="Configure the runner."
+          blurb="A field left blank says nothing, and the runner’s own default answers — shown greyed beside it. Your tokens stay on the machine: they are never sent to this page."
+          action={<span className="text-muted-foreground font-mono text-xs">{drawn.path}</span>}
+        />
 
         {drawn.problem ? (
           <Alert variant="destructive" className="mb-3">
@@ -401,61 +463,112 @@ export function SettingsPane({ onCheck }: { onCheck: (verb: string) => void }) {
           </Alert>
         ) : null}
 
-        <div className="space-y-2.5">
-          {drawn.sections.map((section) => {
-            const check = CHECKS[section.key]
-            return (
-              <Collapsible
-                key={section.key}
-                defaultOpen={OPEN.has(section.key)}
-                className="bg-card rounded-xl border"
-              >
-                <div className="flex items-center gap-2 px-3 py-2.5">
-                  <CollapsibleTrigger className="group flex flex-1 cursor-pointer items-center gap-2 text-left">
-                    <ChevronRight className="text-muted-foreground size-4 transition-transform group-data-[state=open]:rotate-90" />
-                    <span className="text-sm font-semibold">{section.title}</span>
-                  </CollapsibleTrigger>
-                  {check ? (
-                    <Button
-                      variant="outline"
-                      size="xs"
-                      title={check[1]}
-                      onClick={() => onCheck(check[0])}
-                    >
-                      &gt; {check[0]}
-                    </Button>
-                  ) : null}
-                </div>
-                <CollapsibleContent className="space-y-3 px-3 pb-3.5">
-                  <p className="text-muted-foreground text-xs leading-relaxed">
-                    <Rich text={section.blurb} />
-                  </p>
-                  {section.pairs === "projects" ? (
-                    <ProjectRows
-                      rows={rows ?? drawn.projects.map((item) => ({ ...item }))}
-                      setRows={setRows}
-                    />
-                  ) : (
-                    <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fill,minmax(17rem,1fr))]">
-                      {section.fields.map((field) => (
-                        <Field
-                          key={field.name}
-                          field={field}
-                          edited={edited}
-                          remember={remember}
-                        />
-                      ))}
-                    </div>
+        <div className="grid items-start gap-5 lg:grid-cols-[13rem_minmax(0,1fr)]">
+          {/* The rail: what this file holds, in one screen. Hidden where there
+              is no column to spare for it — the sections themselves are the
+              same list, only taller. */}
+          <nav className="sticky top-0 hidden flex-col gap-0.5 lg:flex">
+            <Eyebrow className="mb-2 px-2">sections</Eyebrow>
+            {drawn.sections.map((section) => {
+              const count = changed(section.key)
+              return (
+                <button
+                  key={section.key}
+                  type="button"
+                  onClick={() => jump(section.key)}
+                  className={cn(
+                    "flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors",
+                    open.has(section.key)
+                      ? "bg-sidebar-accent text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
                   )}
-                </CollapsibleContent>
-              </Collapsible>
-            )
-          })}
+                >
+                  <span className="min-w-0 flex-1 truncate">{section.title}</span>
+                  {count ? (
+                    <span className="bg-primary/15 text-primary rounded px-1.5 font-mono text-[0.65rem] font-semibold tabular-nums">
+                      {count}
+                    </span>
+                  ) : null}
+                </button>
+              )
+            })}
+          </nav>
+
+          <div className="min-w-0 space-y-3">
+            {drawn.sections.map((section) => {
+              const check = CHECKS[section.key]
+              const count = changed(section.key)
+              return (
+                <Collapsible
+                  key={section.key}
+                  id={`section-${section.key}`}
+                  open={open.has(section.key)}
+                  onOpenChange={(shown) => toggle(section.key, shown)}
+                  className="bg-card scroll-mt-3 rounded-xl border"
+                >
+                  <div className="flex items-start gap-2 px-4 pt-3.5 pb-3">
+                    <CollapsibleTrigger className="group flex min-w-0 flex-1 cursor-pointer items-start gap-2 text-left">
+                      <ChevronRight className="text-muted-foreground mt-0.5 size-4 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
+                      <span className="min-w-0">
+                        {/* The key over the title, unless the key *is* the
+                            title said twice — "NOTION / Notion" is a heading
+                            that has nothing to add. */}
+                        {section.key.toLowerCase() !== section.title.toLowerCase() ? (
+                          <Eyebrow className="mb-1 block">{section.key}</Eyebrow>
+                        ) : null}
+                        <span className="block text-base leading-tight font-semibold tracking-[-0.01em]">
+                          {section.title}
+                        </span>
+                      </span>
+                    </CollapsibleTrigger>
+                    {count ? (
+                      <span className="bg-primary/15 text-primary mt-0.5 shrink-0 rounded px-1.5 py-0.5 font-mono text-[0.65rem] font-semibold tabular-nums">
+                        {count}
+                      </span>
+                    ) : null}
+                    {check ? (
+                      <Button
+                        variant="outline"
+                        size="xs"
+                        className="mt-0.5 shrink-0 font-mono"
+                        title={check[1]}
+                        onClick={() => onCheck(check[0])}
+                      >
+                        &gt; {check[0]}
+                      </Button>
+                    ) : null}
+                  </div>
+                  <CollapsibleContent className="space-y-4 px-4 pb-4">
+                    <p className="text-muted-foreground max-w-prose text-xs leading-relaxed">
+                      <Rich text={section.blurb} />
+                    </p>
+                    {section.pairs === "projects" ? (
+                      <ProjectRows
+                        rows={rows ?? drawn.projects.map((item) => ({ ...item }))}
+                        setRows={setRows}
+                      />
+                    ) : (
+                      <div className="grid gap-x-4 gap-y-5 [grid-template-columns:repeat(auto-fill,minmax(17rem,1fr))]">
+                        {section.fields.map((field) => (
+                          <Field
+                            key={field.name}
+                            field={field}
+                            edited={edited}
+                            remember={remember}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </CollapsibleContent>
+                </Collapsible>
+              )
+            })}
+          </div>
         </div>
       </div>
 
       {dirty ? (
-        <div className="bg-card flex items-center gap-2 border-t px-3.5 py-2.5">
+        <div className="bg-card flex items-center gap-2 border-t px-3.5 py-2.5 sm:px-5">
           <span className="text-muted-foreground text-xs">
             {dirty === 1 ? "one change, unsaved" : `${dirty} changes, unsaved`}
           </span>
