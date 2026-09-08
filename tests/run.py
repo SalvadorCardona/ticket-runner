@@ -19,6 +19,8 @@ import io
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -31,7 +33,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ticket_runner import config as C  # noqa: E402
 from ticket_runner import agents, channels, conversation, markdown, naming, notion  # noqa: E402
-from ticket_runner import progress, projects, prompt, provision, session, state, systemd  # noqa: E402
+from ticket_runner import notify, progress, projects, prompt, provision  # noqa: E402
+from ticket_runner import session, state, systemd  # noqa: E402
 from ticket_runner.channels import slack as slack_channel, telegram as telegram_channel  # noqa: E402
 from ticket_runner import update, workspace  # noqa: E402
 from ticket_runner import runner as runner_module  # noqa: E402
@@ -3551,6 +3554,134 @@ def nothing_is_sent_anywhere_during_a_dry_run():
     finally:
         channels.announce = original
     assert sent == []
+
+
+@contextmanager
+def _notifying(*, missing: str = ""):
+    """The tools a notification uses, replaced by a note of what they were asked.
+
+    One of them can be taken away, because on a real machine one of them is: a
+    box with no `gdbus`, a session with no `xdg-open`. None of that is allowed
+    to cost the notification itself.
+    """
+    launched: list[list[str]] = []
+    tools = ("notify-send", "gdbus", "dbus-monitor", "xdg-open")
+    found = {name: f"/usr/bin/{name}" for name in tools if name != missing}
+
+    def run(command, **rest):
+        launched.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    originals = (shutil.which, subprocess.run, subprocess.Popen)
+    shutil.which = lambda name: found.get(name)
+    subprocess.run = run
+    subprocess.Popen = lambda command, **rest: launched.append(command)
+    try:
+        yield launched
+    finally:
+        shutil.which, subprocess.run, subprocess.Popen = originals
+
+
+@case
+def a_desktop_notification_takes_you_to_the_ticket_it_names():
+    """A line on screen you cannot follow is a title you then go and hunt for."""
+    with _notifying() as launched:
+        assert notify.send(
+            "Blocked · Le header", "Which header?", link="https://notion.so/t"
+        )
+    assert len(launched) == 1, "the plain notification is not sent on top of the clickable one"
+    command = launched[0]
+    assert command[1:3] == ["-m", "ticket_runner.notify"], (
+        "the click is waited for beside the run, never inside it"
+    )
+    assert command[3:] == [
+        "https://notion.so/t", "Blocked · Le header", "Which header?", "normal"
+    ]
+
+
+@case
+def a_notification_with_nowhere_to_go_is_a_notification_all_the_same():
+    for tool in ("gdbus", "dbus-monitor", "xdg-open"):
+        with _notifying(missing=tool) as launched:
+            assert notify.send("Ready to review · t", "branch", link="https://notion.so/t")
+        assert launched[0][0] == "/usr/bin/notify-send", f"sent anyway, without {tool}"
+
+    with _notifying() as launched:
+        assert notify.send("ticket-runner updated", "0.4.0")
+    assert launched[0][0] == "/usr/bin/notify-send", "nothing to open, so nothing to follow"
+
+    with _notifying(missing="notify-send") as launched:
+        assert notify.send("ticket-runner updated", "0.4.0") is False
+    assert launched == []
+
+
+@case
+def the_notification_posted_over_dbus_is_the_one_notify_send_would_have_sent():
+    posted: list[list[str]] = []
+    original = subprocess.run
+    subprocess.run = lambda command, **rest: (
+        posted.append(command) or subprocess.CompletedProcess(command, 0, "(uint32 42,)\n", "")
+    )
+    try:
+        assert notify._post("Blocked · t", '42 "why"', urgent=True) == "42"
+    finally:
+        subprocess.run = original
+    command = posted[0]
+    assert "--" in command, "`-1` is an expiry, and gdbus would read it as an option"
+    assert command[command.index("--") + 1:] == [
+        '"ticket-runner"', "0", '"dialog-warning"', '"Blocked · t"', '"42 \\"why\\""',
+        '["default", "Open the ticket"]', "{'urgency': <byte 2>}", "-1",
+    ], "a body is a string, even when it reads like a number"
+
+
+@case
+def only_a_click_opens_the_page_and_a_dismissal_never_does():
+    """`dbus-monitor` says it over several lines, and about every notification."""
+    def watching(*lines):
+        return type("W", (), {"stdout": iter(lines)})()
+
+    clicked = watching(
+        "signal ... interface=org.freedesktop.Notifications; member=ActionInvoked\n",
+        "   uint32 7\n",
+        '   string "default"\n',
+    )
+    assert notify._clicked(clicked, "7")
+
+    dismissed = watching(
+        "signal ... interface=org.freedesktop.Notifications; member=NotificationClosed\n",
+        "   uint32 7\n",
+        "   uint32 2\n",
+    )
+    assert not notify._clicked(dismissed, "7")
+
+    somebody_else = watching(
+        "signal ... interface=org.freedesktop.Notifications; member=ActionInvoked\n",
+        "   uint32 9\n",
+        '   string "default"\n',
+    )
+    assert not notify._clicked(somebody_else, "7"), "another application's notification"
+
+
+@case
+def a_ticket_notification_carries_its_page_to_the_screen_too():
+    seen: list[dict] = []
+    runner = Runner.__new__(Runner)
+    runner.config = _config("")
+    runner.dry_run = False
+    runner.quiet = True
+    ticket = type("T", (), {
+        "page": notion.Page(id=TICKET, url="https://notion.so/t", title="t"),
+        "title": "t",
+        "url": "https://notion.so/t",
+    })()
+    original = notify.send
+    notify.send = lambda title, body, **rest: seen.append({"title": title, **rest})
+    try:
+        runner._tell("done", ticket, "Ready to review · t", "branch")
+    finally:
+        notify.send = original
+    assert seen == [{"title": "Ready to review · t", "urgent": False,
+                     "link": "https://notion.so/t"}]
 
 
 # -- clean, and the branch a failure leaves behind ----------------------------

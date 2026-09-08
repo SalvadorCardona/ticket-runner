@@ -44,6 +44,15 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Fixed
 
+- A desktop notification now takes you to the ticket it names: clicking it
+  opens that ticket's Notion page, where before a click did nothing and you
+  had to go and find the title on the board. `notify-send` cannot do it — it
+  never hands back the identifier a desktop answers a click with, and on GNOME
+  it refuses `--action` outright — so a notification with a page behind it is
+  posted over D-Bus and followed by a detached process, which waits for the
+  click and then goes quiet. A machine missing `gdbus`, `dbus-monitor` or
+  `xdg-open`, or a desktop that does not do notification actions, gets exactly
+  the notification it got before.
 - `ticket-runner init` can build the Tickets database on a bare page again. It
   declared the *Project* and *Agent* relations in a shape the Notion API
   rejects, so on 8 September 2026 a fresh page stopped at `POST /databases:

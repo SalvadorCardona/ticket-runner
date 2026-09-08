@@ -201,9 +201,11 @@ class Runner:
         if not self.quiet:
             print(message, flush=True)
 
-    def _notify(self, title: str, body: str, *, urgent: bool = False) -> None:
+    def _notify(
+        self, title: str, body: str, *, urgent: bool = False, link: str = ""
+    ) -> None:
         if self.config.notify.desktop and not self.dry_run:
-            notify.send(title, body, urgent=urgent)
+            notify.send(title, body, urgent=urgent, link=link)
 
     def _tell(
         self,
@@ -219,11 +221,12 @@ class Runner:
 
         The screen of the machine the runner sits on, and the messaging app you
         actually have on you. Same sentence in both, one line longer in the
-        second because a message you can answer has to say so — and because a
-        notification without the ticket's link is a notification you then have
-        to go and find.
+        second because a message you can answer has to say so — and both carry
+        the ticket's page, because a notification you then have to go and find
+        is a notification you do not act on: written out in the message, and
+        opened by a click on the notification.
         """
-        self._notify(headline, body, urgent=urgent)
+        self._notify(headline, body, urgent=urgent, link=ticket.url)
         settings = self.config.notify
         if self.dry_run or not settings.remote or not settings.wants(event):
             return
