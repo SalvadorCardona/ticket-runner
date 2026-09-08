@@ -1,4 +1,4 @@
-import { Message, MessageContent, MessageFooter, MessageHeader } from "@/components/ui/message"
+import { Message, MessageContent, MessageHeader } from "@/components/ui/message"
 import type { Role } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -15,7 +15,11 @@ const WHO: Record<Role, string> = {
  *
  * shadcn's `Message` lays it out — yours against the right edge, theirs
  * against the left — and the bubble inside is the console's own, because the
- * palette is: a problem reads red, the workspace reads as a card.
+ * palette is: a problem reads red, the workspace reads as a card, and what you
+ * said carries the accent so a transcript can be skimmed for your own turns.
+ *
+ * Who said it and when are one line, set in the mono face: they are a stamp on
+ * the message, not a sentence in it.
  */
 export function Turn({
   role,
@@ -35,9 +39,13 @@ export function Turn({
     <Message align={mine ? "end" : "start"} className={className}>
       <MessageContent className="max-w-[92%]">
         <MessageHeader
-          className={cn("uppercase tracking-wide", role === "error" && "text-destructive")}
+          className={cn(
+            "font-mono text-[0.65rem] font-semibold tracking-[0.14em] uppercase",
+            role === "error" && "text-destructive"
+          )}
         >
           {who ?? WHO[role] ?? role}
+          {when ? <span className="font-normal normal-case">{` · ${when}`}</span> : null}
         </MessageHeader>
         <div
           className={cn(
@@ -49,7 +57,6 @@ export function Turn({
         >
           <Flow text={text} />
         </div>
-        {when ? <MessageFooter>{when}</MessageFooter> : null}
       </MessageContent>
     </Message>
   )

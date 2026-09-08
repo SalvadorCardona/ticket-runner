@@ -5,6 +5,7 @@ import {
   type ViewResourceContextParams,
 } from "react-resource-view"
 
+import { cn } from "@/lib/utils"
 import { TICKETS, tickets } from "@/resources/tickets"
 
 /* Where react-resource-view draws.
@@ -30,7 +31,10 @@ export function ResourcePane({ params }: { params: ViewResourceContextParams }) 
     return <p className="text-muted-foreground p-3.5 text-sm">No such page.</p>
   }
   return (
-    <div className="p-3.5">
+    // A ticket's page is a pane of its own — its own bar, its own scroller,
+    // its own margins — so the room around a view is given to the views that
+    // want it and withheld from the one that does not.
+    <div className={cn("h-full", action !== ActionList.read && "p-3.5 sm:p-5")}>
       <ViewResourceContextProvider
         key={`${action}:${String(resolved.id ?? "")}`}
         {...resolved}

@@ -18,6 +18,21 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Changed
 
+- The web console has been redrawn. Every page opens the same way — where you
+  are, said as a path; a heading you can read from across the room; and the one
+  line that says what the page is for — and the accent is a lime, so the button
+  worth pressing is the only thing on the screen wearing it. A ticket's card
+  says its id and its age before it says anything else, and states its project
+  and its cost along the bottom; a ticket's page states its metadata as a ruled
+  grid instead of a row of pills. Sessions open on the three numbers you came
+  for: how many are writing, how often the timer comes round, what has been
+  spent.
+- Forms read as forms. Every field the console draws — its own on the settings
+  tab, and the ones react-data-form builds for a new ticket — sits in a filled
+  box with its label against it and its explanation under it. The settings tab
+  gains a list of its sections down the left, which says what the file holds,
+  which parts are open, and how many of your unsaved changes are hiding in a
+  part you folded away; a field you have touched says so.
 - The web console's board is now the board: the columns your Notion board has,
   under its own names, and a card dragged into one moves the ticket. The
   *table* tab shows the same tickets as rows. A new ticket is written in a form

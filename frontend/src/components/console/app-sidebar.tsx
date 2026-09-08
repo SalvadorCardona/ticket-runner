@@ -93,20 +93,25 @@ export function AppSidebar({ route }: { route: Route }) {
       <SidebarHeader>
         <div
           className={cn(
-            "flex items-center gap-2 px-2 py-1.5",
+            "flex items-center gap-2.5 px-2 py-1.5",
             collapsed && "justify-center px-0"
           )}
         >
-          <span aria-hidden className="text-base leading-none">
+          {/* The one place the accent is spent on something that is not a
+              button: the mark, so the eye has somewhere to start. */}
+          <span
+            aria-hidden
+            className="bg-primary flex size-7 shrink-0 items-center justify-center rounded-lg text-sm leading-none"
+          >
             🎫
           </span>
           {!collapsed ? (
             <div className="min-w-0">
-              <div className="truncate text-sm font-semibold">
+              <div className="truncate text-sm font-semibold tracking-[-0.01em]">
                 ticket<span className="text-muted-foreground">-runner</span>
               </div>
               {runner?.version ? (
-                <div className="text-muted-foreground truncate font-mono text-[0.7rem]">
+                <div className="text-muted-foreground truncate font-mono text-[0.65rem]">
                   v{runner.version}
                   {runner.update ? ` · ${runner.update} waiting` : ""}
                 </div>
@@ -120,7 +125,9 @@ export function AppSidebar({ route }: { route: Route }) {
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>The workspace</SidebarGroupLabel>
+          <SidebarGroupLabel className="font-mono text-[0.65rem] font-semibold tracking-[0.14em] uppercase">
+            workspace
+          </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {visible(items).map((item) => {
@@ -153,7 +160,7 @@ export function AppSidebar({ route }: { route: Route }) {
                         <span className="flex min-w-0 flex-col group-data-[collapsible=icon]:hidden">
                           <span className="truncate">{item.name}</span>
                           {item.detail ? (
-                            <span className="text-muted-foreground truncate text-[0.7rem] font-normal">
+                            <span className="text-muted-foreground truncate font-mono text-[0.65rem] font-normal">
                               {item.detail}
                             </span>
                           ) : null}
@@ -161,7 +168,9 @@ export function AppSidebar({ route }: { route: Route }) {
                       </Link>
                     </SidebarMenuButton>
                     {item.badge !== undefined ? (
-                      <SidebarMenuBadge>{item.badge}</SidebarMenuBadge>
+                      <SidebarMenuBadge className="font-mono text-[0.7rem] tabular-nums">
+                        {item.badge}
+                      </SidebarMenuBadge>
                     ) : null}
                   </SidebarMenuItem>
                 )
