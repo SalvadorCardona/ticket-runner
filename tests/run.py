@@ -446,6 +446,11 @@ def a_bare_page_becomes_the_whole_board():
     # The relations point at databases that existed before the tickets did.
     assert schema["Project"]["relation"]["database_id"] == "db-projects"
     assert schema["Agent"]["relation"]["database_id"] == "db-agents"
+    # …and are spelled the way the API accepts: the kind is named *and* given
+    # its empty object, or the request is rejected as `undefined`.
+    for name in ("Project", "Agent"):
+        assert schema[name]["relation"]["type"] == "single_property"
+        assert schema[name]["relation"]["single_property"] == {}
 
     # A status property cannot be created through the API; a select can, and the
     # runner reads both. Every column must be there, validated included.

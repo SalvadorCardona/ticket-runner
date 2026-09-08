@@ -163,14 +163,26 @@ def tickets_schema(settings: Notion, projects: str = "", agents: str = "") -> di
     # Single-property relations: the ticket points at its project, and the
     # projects database is not given a back-reference it would never read.
     if projects:
-        schema[settings.prop("project")] = {
-            "relation": {"database_id": projects, "type": "single_property"}
-        }
+        schema[settings.prop("project")] = _relation(projects)
     if agents:
-        schema[settings.prop("role")] = {
-            "relation": {"database_id": agents, "type": "single_property"}
-        }
+        schema[settings.prop("role")] = _relation(agents)
     return schema
+
+
+def _relation(database: str) -> dict:
+    """A one-way relation, in the shape the API insists on.
+
+    Naming the kind under `type` is not enough: the API also wants the empty
+    object of that kind (`single_property: {}`) beside it, and answers
+    “should be defined, instead was `undefined`” when it is missing.
+    """
+    return {
+        "relation": {
+            "database_id": database,
+            "type": "single_property",
+            "single_property": {},
+        }
+    }
 
 
 def missing_properties(existing: dict[str, str], wanted: dict) -> dict:
