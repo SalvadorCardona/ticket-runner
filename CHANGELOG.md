@@ -16,6 +16,18 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ## [Unreleased]
 
+### Added
+
+- `runner.language`, and the runner answers in it. `"fr"` — or `"FR"`, or
+  `"fr-FR"`, or `"français"` — and every report under a ticket, every question a
+  blocked one asks and every line that reaches Telegram or Slack comes back in
+  French. The setting also travels into every prompt, so the summary at the top
+  of a report, the document a ticket with no repository produces and the answers
+  given in the comments follow it too; commit messages and code keep the
+  language the repository already uses. Empty stays English *and* keeps meaning
+  "nobody decided": each session goes on answering in the language of the ticket
+  it was given, exactly as before.
+
 ### Changed
 
 - The web console has been redrawn. Every page opens the same way — where you
@@ -33,6 +45,12 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
   gains a list of its sections down the left, which says what the file holds,
   which parts are open, and how many of your unsaved changes are hiding in a
   part you folded away; a field you have touched says so.
+- Reports read like sentences rather than like a row of fields. What used to be
+  `Branch \`x\` · 3 commit(s) · <url>` followed by three lines of session
+  machinery is now “3 commits on \`x\`, and the pull request is waiting to be
+  read: <url>”, a line saying what the run took and cost, and the resume command
+  last — where you look on the rare day something went wrong, rather than first.
+  Durations are rounded to the minute, prices to the cent.
 - The web console's board is now the board: the columns your Notion board has,
   under its own names, and a card dragged into one moves the ticket. The
   *table* tab shows the same tickets as rows. A new ticket is written in a form

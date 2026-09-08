@@ -23,6 +23,12 @@ A fourth one publishes what a ticket already holds, once a human has validated
 it, and its rule is the third of the family: **it publishes, it does not
 produce.** What goes out is what was read and accepted, unimproved — a session
 that rewrote it on the way would be publishing something nobody validated.
+
+Each of them carries a `{language}` line, and it is empty on purpose whenever
+nobody asked for one: every template already says which language to write in —
+the ticket's, the message's — and a runner nobody configured must keep saying
+exactly that. `runner.language` is what replaces that rule with a decision, and
+`voice.Voice.instruction` is the sentence it becomes.
 """
 
 from __future__ import annotations
@@ -57,7 +63,7 @@ repository already uses. **Do not push** and do not open a pull request: that is
 the runner's job.
 5. If the request is too ambiguous to settle alone, or if the ticket does not \
 match this repository, do not guess: commit nothing and explain what is missing.
-
+{language}
 End with a final line, exactly one of these two:
 
 RESULT: ok — <what you changed, in one sentence>
@@ -103,7 +109,7 @@ them and cite the source. Say what could not be verified rather than filling \
 the gap.
 7. If the request is too ambiguous to answer usefully, do not pad: write no \
 `ANSWER.md` and explain what is missing.
-
+{language}
 End with a final line, exactly one of these two:
 
 RESULT: ok — <what you produced, in one sentence>
@@ -142,7 +148,7 @@ interrupted may have got there — and if it is, say where rather than doing it 
 again.
 4. Nothing else. No file to fix, no adjacent improvement, no follow-up you \
 thought of: those are other tickets.
-
+{language}
 End with a final line, exactly one of these two:
 
 RESULT: ok — <what you published and where, with the link if there is one>
@@ -186,14 +192,14 @@ read on a phone.
 needs rendering to mean anything.
 5. No RESULT line and no report — everything you write is posted as the reply, \
 exactly as you write it.
-"""
+{language}"""
 
 
 FOLLOW_UP = """\
 A new message in the same thread, on the same ticket. Same rules: you are \
 talking, not working — answer it, change nothing, stay in its language, keep it \
 to a comment.
-
+{language}
 {message}
 """
 
@@ -214,6 +220,7 @@ def build(
     agent_brief: str = "",
     comments: list[str] | None = None,
     resumed: str = "",
+    language: str = "",
 ) -> str:
     scope, frame, heading, role, discussion = _frames(
         project, context, brief, agent_name, agent_brief, comments
@@ -225,6 +232,7 @@ def build(
         brief=heading,
         agent=role,
         comments=discussion,
+        language=_language(language),
         title=title,
         body=body.strip() or "(the ticket has no description: everything is in the title)",
         repo=repo,
@@ -250,6 +258,7 @@ def conversation(
     agent_name: str = "",
     agent_brief: str = "",
     comments: list[str] | None = None,
+    language: str = "",
 ) -> str:
     """The prompt that answers one comment.
 
@@ -278,6 +287,7 @@ def conversation(
         brief=heading,
         agent=role,
         comments=discussion,
+        language=_language(language),
         thread=said,
         title=title,
         body=body.strip() or "(the ticket has no description: everything is in the title)",
@@ -285,6 +295,30 @@ def conversation(
         url=url,
         message=message.strip(),
     )
+
+
+def follow_up(message: str, language: str = "") -> str:
+    """The next turn of a conversation the session already has the frame for.
+
+    Its own function rather than a `.format` at the call site, because the two
+    things it fills in are the two things every other template here fills in the
+    same way, and a follow-up that forgot the language would be a thread that
+    answers in French once and in English from then on.
+    """
+    return FOLLOW_UP.format(message=message, language=_language(language))
+
+
+def _language(instruction: str) -> str:
+    """The language a session is asked to write in, as a paragraph of its own.
+
+    Empty when nothing was configured, and empty means *exactly* nothing: the
+    templates then read as they always did, and each one keeps the rule it
+    already carried — the language of the ticket, of the message, of whoever is
+    being answered. A runner nobody told anything is a runner that changed
+    nothing.
+    """
+    instruction = instruction.strip()
+    return f"\n{instruction}\n" if instruction else ""
 
 
 def _frames(
