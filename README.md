@@ -270,6 +270,7 @@ for reading rather than for filling in.
 | `runner.max_concurrent` | `2` | tickets handled side by side in one run |
 | `runner.timeout_minutes` | `30` | past this, the session is killed and the ticket fails |
 | `runner.model` | `""` | `"opus"`, `"sonnet"`… empty = the CLI's default |
+| `runner.language` | `""` | `"fr"` to be answered in French — see *The language it answers in* below |
 | `runner.permission_mode` | `"bypassPermissions"` | see *What protects your code* below |
 | `runner.branch_prefix` | `"ticket/"` | prefix of the created branches |
 | `runner.base_branch` | `""` | empty = each repository's default branch |
@@ -456,6 +457,40 @@ integration does not get by default: **notion.so/my-integrations → your integr
 Capabilities → Insert comments**. Without it the run still succeeds, and the log says the
 comment was refused with a 403.
 
+#### The language it answers in
+
+That comment is the runner talking, and `runner.language` is what decides which language
+it talks in. `"fr"` — or `"FR"`, or `"fr-FR"`, or `"français"` — and every report, every
+question a blocked ticket asks, every line that reaches your phone comes back in French:
+
+```
+ticket-runner@laptop — c'est fait.
+Le header du tableau de bord a été retiré, les tests passent.
+
+3 commits sur `ticket/retirer-le-header-1a2b3c4d`, et la pull request attend une
+relecture : https://github.com/you/site/pull/12
+
+Ça a pris 18 minutes et 42 échanges, pour 1,20 $.
+
+Pour reprendre la session : `claude --resume 4f2e…`, ou depuis `claude` dans
+`~/workspace/site`. Son journal est `~/.local/state/ticket-runner/logs/…jsonl`.
+```
+
+The same line also travels into every prompt, so the summary at the top of a report, the
+document a ticket with no repository produces and the answers given in the comments are
+written in it too. What it does *not* touch is the repository: commit messages, code and
+identifiers keep the language the repository already uses, because a branch is read by
+whoever works on it and not by whoever asked for it.
+
+**Empty — the default — is English, and it is more than that: it means nobody decided.**
+Each session then keeps the rule its prompt already carries — answer in the language the
+ticket is written in, reply in the language you were written to — so a ticket written in
+French comes back in French, under a report written in English. That is the runner as it
+has always behaved, and naming a language here is what replaces it with a decision.
+
+Two languages are spelled out today, `en` and `fr`; a third is a column in
+`voice.py`.
+
 ### The projects database
 
 One row per project, and **the project decides what kind of work its tickets are.**
@@ -616,7 +651,9 @@ So a comment can also simply be **answered**. Reply under one of its reports and
 replies, in the same thread, in the language you wrote in:
 
 > **ticket-runner@laptop — done.** Removed the header from the dashboard.
-> Branch `ticket/supprimer-l-entete-9d2cb790` · 2 commit(s) · <https://github.com/…/pull/12>
+>
+> 2 commits on `ticket/supprimer-l-entete-9d2cb790`, and the pull request is waiting to
+> be read: <https://github.com/…/pull/12>
 >
 > > **you** — pourquoi une nouvelle branche plutôt que celle d'hier ?
 > >
@@ -914,7 +951,7 @@ lands on the ticket.**
 ```
    the runner                  your phone                   the ticket
 
-   blocked ────────▶  🙋 Blocked · Le header
+   blocked ────────▶  🙋 Stuck · Le header
                       Which header — the dashboard
                       one or the public site?
                       notion.so/…

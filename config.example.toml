@@ -208,6 +208,18 @@ timeout_minutes = 30
 # Empty = the CLI's default model. Otherwise "opus", "sonnet", "haiku"…
 model = ""
 
+# The language the runner answers in: its reports under a ticket, the question a
+# blocked one asks, the line that reaches your phone — and what it asks a session
+# to write, which is the summary at the top of every report.
+#   en | fr        "FR", "fr-FR" and "français" all say the same thing
+#
+# Empty is English, and it is more than that: it means nobody decided. Each
+# session then keeps the rule its prompt already carries — answer in the language
+# the ticket is written in, reply in the language you were written to — so a
+# French ticket comes back in French, under an English report. Naming a language
+# here is what replaces that rule with a decision.
+language = ""
+
 # A session with nobody to answer cannot ask for permission. The work happens in
 # a disposable worktree, never in your working copy. Use "acceptEdits" to forbid
 # unapproved shell commands — at the cost of sessions that stall as soon as a

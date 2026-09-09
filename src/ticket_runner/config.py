@@ -103,6 +103,11 @@ class Runner:
     max_concurrent: int = 2
     timeout_minutes: int = 30
     model: str = ""
+    # The language the runner writes its reports in, and the one it asks a
+    # session to answer in. Empty is English, and it is more than that: a file
+    # that says nothing leaves each session with the rule its prompt already
+    # carries — answer in the language you were written to. See voice.py.
+    language: str = ""
     permission_mode: str = "bypassPermissions"
     branch_prefix: str = "ticket/"
     base_branch: str = ""
@@ -573,6 +578,10 @@ def load(path: Path | None = None) -> Config:
         max_concurrent=max(1, int(runner_raw.get("max_concurrent", defaults.max_concurrent))),
         timeout_minutes=max(1, int(runner_raw.get("timeout_minutes", defaults.timeout_minutes))),
         model=str(runner_raw.get("model", defaults.model)).strip(),
+        # Kept as the file wrote it: `voice` reads it down to a language it
+        # speaks, and the difference between "nothing was said" and "English was
+        # asked for" is one the loader must not flatten.
+        language=str(runner_raw.get("language", defaults.language)).strip(),
         permission_mode=str(runner_raw.get("permission_mode", defaults.permission_mode)).strip(),
         branch_prefix=str(runner_raw.get("branch_prefix", defaults.branch_prefix)),
         base_branch=str(runner_raw.get("base_branch", defaults.base_branch)).strip(),

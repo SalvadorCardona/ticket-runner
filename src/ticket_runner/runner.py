@@ -28,6 +28,7 @@ from pathlib import Path
 from . import agents, channels, conversation, git, naming, notion, notify, progress
 from . import prompt as prompt_module, schedules as schedules_module, session, state
 from . import update as update_module
+from . import voice as voice_module
 from . import workspace as workspace_module
 from .config import PRIORITIES, Config, state_dir
 from .projects import Project, Resolver
@@ -181,6 +182,16 @@ class Runner:
         """The tickets database ID, resolved once for the whole session."""
         return self.workspace.tickets
 
+    @property
+    def voice(self) -> voice_module.Voice:
+        """Everything the runner says on a ticket, in the configured language.
+
+        Read off the configuration each time rather than kept, so that a file
+        edited in the console — where `runner.language` is one field of a form —
+        is heard on the next run without the service being restarted.
+        """
+        return voice_module.Voice(self.config.runner.language)
+
     # -- output --------------------------------------------------------------
 
     def say(self, message: str) -> None:
@@ -216,11 +227,7 @@ class Runner:
         settings = self.config.notify
         if self.dry_run or not settings.remote or not settings.wants(event):
             return
-        invitation = (
-            "\n\nAnswer here — yes, no, or a sentence — and it runs again on the next pass."
-            if ask
-            else ""
-        )
+        invitation = self.voice.say("invitation") if ask else ""
         mark = {"blocked": "🙋", "failed": "⚠️", "done": "✅"}.get(event, "•")
         channels.announce(
             settings,
@@ -260,22 +267,18 @@ class Runner:
                     # plain "yes" that landed nowhere is the exception: that one
                     # was meant for us and deserves to be told it missed.
                     if channels.decide(reply.text):
-                        channel.acknowledge(
-                            reply,
-                            "Nothing here is waiting on an answer — reply under the "
-                            "question itself, or name the ticket.",
-                        )
+                        channel.acknowledge(reply, self.voice.say("nothing-waiting"))
                     continue
                 try:
                     self.client.comment(reply.ticket, channels.answer(reply))
                 except notion.NotionError as error:
                     self.say(f"    ! the answer could not be written to Notion: {error}")
-                    channel.acknowledge(reply, f"Notion refused that answer: {error}")
+                    channel.acknowledge(reply, self.voice.say("notion-refused", error=error))
                     continue
                 answered += 1
                 label = reply.title or reply.ticket
                 self.say(f"  ↩ {label} — answered from {channel.name}, back in the queue")
-                channel.acknowledge(reply, f"✓ noted on “{label}” — it runs again in a moment.")
+                channel.acknowledge(reply, self.voice.say("noted", title=label))
         return answered
 
     # -- reading -------------------------------------------------------------
@@ -499,11 +502,8 @@ class Runner:
                 continue
             ticket = Ticket(page)
             origin = state.claims().get(ticket.id, "")
-            stopped = (
-                f"This ticket was still claimed while no run was in flight, "
-                f"{age.total_seconds() / 60:.0f} min after it was last touched: "
-                "its runner was stopped or died mid-session."
-            )
+            said = self.voice
+            stopped = said.say("abandoned", minutes=said.minutes(age.total_seconds()))
             if origin and origin != self.config.notion.state("ready"):
                 self.say(
                     f"  ↺ {ticket.title} — publication interrupted, asking rather than redoing"
@@ -511,17 +511,18 @@ class Runner:
                 self._set(ticket, **{status_property: self.config.notion.state("blocked")})
                 self._comment(
                     ticket,
-                    f"{self.agent_label} — blocked.\n{stopped}\n\n"
-                    f"It was being published, having been validated, so it is not being "
-                    f"tried again on its own: it may have gone out just before the run "
-                    f"died. Check, and move it back to “{origin}” if it did not.",
+                    said.report(
+                        self.agent_label,
+                        "blocked",
+                        stopped,
+                        said.say("abandoned-publishing", origin=origin),
+                    ),
                 )
                 self._tell(
                     "blocked",
                     ticket,
-                    f"Blocked · {ticket.title}",
-                    "Its publication was interrupted. Did it go out? "
-                    f"If not, move it back to “{origin}”.",
+                    said.say("headline-blocked", title=ticket.title),
+                    said.say("publication-interrupted", origin=origin),
                     ask=True,
                 )
                 state.release(ticket.id)
@@ -531,8 +532,9 @@ class Runner:
             self._set(ticket, **{status_property: self.config.notion.state("ready")})
             self._comment(
                 ticket,
-                f"{self.agent_label} — put back in the queue.\n"
-                f"{stopped} It will be picked up again.",
+                said.report(
+                    self.agent_label, "requeued", stopped, said.say("abandoned-requeued")
+                ),
             )
             state.release(ticket.id)
             recovered += 1
@@ -572,7 +574,9 @@ class Runner:
             self._set(ticket, **{status_property: self.config.notion.state("done")})
             self._comment(
                 ticket,
-                f"{self.agent_label} — done.\nIts pull request has been merged: {url}",
+                self.voice.report(
+                    self.agent_label, "done", self.voice.say("merged-elsewhere", url=url)
+                ),
             )
             closed += 1
         return closed
@@ -653,14 +657,14 @@ class Runner:
                 # A ticket on a repository carries a pull request or it carries
                 # nothing: there is no text on the page to publish, and starting
                 # a session to look for one would be guessing.
+                said = self.voice
                 results.append(
                     self._fail(
                         ticket,
-                        "validated, but there is no pull request to merge",
-                        f"Its project — {project.name} — is a repository, so there is "
-                        "nothing to publish either. Was the pull request opened?",
+                        said.say("no-pull-request"),
+                        said.say("no-pull-request-detail", project=project.name),
                         blocked=True,
-                        question="This ticket was validated but carries no pull request.",
+                        question=said.say("no-pull-request-question"),
                     )
                 )
                 continue
@@ -723,28 +727,29 @@ class Runner:
             # answer GitHub did not give. The next run asks again.
             self.say(f"  · {ticket.title} — GitHub did not answer about {url}, left validated")
             return None
+        said = self.voice
         if state_of == "CLOSED":
             return self._fail(
                 ticket,
-                "validated, but its pull request was closed without being merged",
-                f"{url}\n\nReopen it, or take the ticket back to the ready column.",
+                said.say("pull-request-closed"),
+                said.say("pull-request-closed-detail", url=url),
                 blocked=True,
-                question=f"Its pull request was closed rather than merged: {url}",
+                question=said.say("pull-request-closed-question", url=url),
             )
         method = self.config.runner.merge_method
-        note = "It had already been merged."
+        note = said.say("merged-already")
         if state_of != "MERGED":
             try:
-                said = git.merge_pull_request(url, method)
+                merged = git.merge_pull_request(url, method)
             except git.GitError as error:
                 return self._fail(
                     ticket,
-                    "the pull request could not be merged",
+                    said.say("merge-refused"),
                     f"{url}\n\n{error}",
                     blocked=True,
-                    question=f"GitHub refused the merge: {_line(error)}",
+                    question=said.say("merge-refused-question", error=_line(error)),
                 )
-            note = f"Merged by the runner ({method}).\n{said}"
+            note = said.say("merged-now", method=method, said=merged)
         self.say(f"  ✓ {ticket.title} — pull request merged, moved to done")
         self._set(
             ticket,
@@ -752,8 +757,7 @@ class Runner:
         )
         self._comment(
             ticket,
-            f"{self.agent_label} — done.\nYou validated this ticket, so its "
-            f"pull request went in: {url}\n{note}",
+            said.report(self.agent_label, "done", said.say("after-merge", url=url), note),
         )
         return {"ticket": ticket.title, "id": ticket.id, "status": "done", "merged": url}
 
@@ -818,10 +822,11 @@ class Runner:
             ))
         except (OSError, FileNotFoundError) as error:
             state.release(ticket.id)
-            return self._fail(ticket, "Claude session could not be started", str(error))
+            return self._fail(ticket, self.voice.say("no-session"), str(error))
         # Every road from here writes a status that is not "in progress", so the
         # note about where it came from has done its work.
         state.release(ticket.id)
+        said = self.voice
         trace = self._trace(job, outcome)
 
         if not outcome.ok:
@@ -829,9 +834,12 @@ class Runner:
             # somebody is going to want to read before trying again.
             return self._fail(
                 ticket,
-                "the ticket was validated but could not be published",
-                f"{outcome.summary or outcome.error}\n\n{trace}\n"
-                f"Working directory kept: `{job.workdir}`",
+                said.say("not-published"),
+                said.paragraphs(
+                    outcome.summary or outcome.error,
+                    trace,
+                    said.say("workdir-kept", path=job.workdir),
+                ),
                 blocked=outcome.blocked,
                 question=outcome.summary,
             )
@@ -848,15 +856,23 @@ class Runner:
                 **self._measures(outcome),
             },
         )
-        cost = f" · ${outcome.cost_usd:.3f}" if outcome.cost_usd else ""
         self._comment(
             ticket,
-            f"{self.agent_label} — done.\nValidated, so it was published: "
-            f"{outcome.summary}\n\n{trace}\n"
-            f"{outcome.turns} turns · {outcome.seconds / 60:.1f} min{cost}",
+            said.report(
+                self.agent_label,
+                "done",
+                said.say("after-publication", summary=outcome.summary),
+                said.spent(outcome.turns, outcome.seconds, outcome.cost_usd),
+                trace,
+            ),
         )
         self.say(f"    ✓ {ticket.title} — published")
-        self._tell("done", ticket, f"Published · {ticket.title}", outcome.summary)
+        self._tell(
+            "done",
+            ticket,
+            said.say("headline-published", title=ticket.title),
+            outcome.summary,
+        )
         return {
             "ticket": ticket.title,
             "id": ticket.id,
@@ -1208,6 +1224,7 @@ class Runner:
         question: str = "",
     ) -> dict:
         outcome = "blocked" if blocked else "failed"
+        said = self.voice
         self.say(f"    ✗ {ticket.title} — {reason}")
         # A blocked ticket is a question, and a question is the one thing worth
         # waking somebody for — so it travels with what the agent actually
@@ -1215,15 +1232,14 @@ class Runner:
         self._tell(
             outcome,
             ticket,
-            f"{'Blocked' if blocked else 'Failed'} · {ticket.title}",
-            (question.strip() if blocked and question.strip() else reason),
+            said.say(f"headline-{outcome}", title=ticket.title),
+            (question.strip() if blocked and question.strip() else said.sentence(reason)),
             urgent=not blocked,
             ask=blocked,
         )
         self._set(ticket, **{self.config.notion.prop("status"): self.config.notion.state(outcome)})
         self._comment(
-            ticket,
-            f"{self.agent_label} — {outcome}.\n{reason}" + (f"\n\n{detail}" if detail else ""),
+            ticket, said.report(self.agent_label, outcome, said.sentence(reason), detail)
         )
         return {"ticket": ticket.title, "id": ticket.id, "status": outcome, "reason": reason}
 
@@ -1242,23 +1258,22 @@ class Runner:
             try:
                 project = self.resolver.resolve(self.client, relation[0])
             except (LookupError, notion.NotionError) as error:
-                self._fail(ticket, "project not found on disk", str(error), blocked=True)
+                self._fail(ticket, self.voice.say("no-project"), str(error), blocked=True)
                 return None
 
         short = short_id(ticket.id)
         try:
             body = self.client.blocks_text(ticket.page.id)
         except notion.NotionError as error:
-            self._fail(ticket, "ticket content unreadable", str(error))
+            self._fail(ticket, self.voice.say("unreadable"), str(error))
             return None
         if is_blank(body):
             body = ""
             if not ticket.page.title.strip():
                 self._fail(
                     ticket,
-                    "nothing to work from: the ticket has neither a title nor a description",
-                    "Give it a title, or fill in the template headings, then move it back "
-                    "to the ready column.",
+                    self.voice.say("empty-ticket"),
+                    self.voice.say("empty-ticket-detail"),
                     blocked=True,
                 )
                 return None
@@ -1404,6 +1419,7 @@ class Runner:
             agent_name=job.agent.name,
             agent_brief=job.agent.brief,
             comments=job.comments,
+            language=self.voice.instruction(),
             # A branch picked up from an earlier attempt: the session is told,
             # because a worktree that opens on somebody's half-done work and
             # reads as empty is how the same thing gets written twice.
@@ -1477,11 +1493,13 @@ class Runner:
         )
 
     def _trace(self, job: Job, outcome: session.Outcome) -> str:
-        picker = f", or pick it from `claude` in `{job.session_home}`" if job.session_home else ""
-        return (
-            f"Session: `{outcome.session_id}` — `{outcome.resume_command}`{picker}\n"
-            f"Log: `{outcome.log}`"
-        )
+        """Where to look when the report was not enough. Last, and in one line.
+
+        It used to open with the session id on a line of its own, which put the
+        least interesting fact of the run in the most visible place a comment
+        has.
+        """
+        return self.voice.trace(outcome.resume_command, outcome.log, job.session_home)
 
     def _execute_document(self, job: Job) -> dict:
         """A ticket with no repository: the deliverable is the Notion page."""
@@ -1492,8 +1510,9 @@ class Runner:
                 self.config.runner.document_prompt_file, prompt_module.DOCUMENT
             ))
         except (OSError, FileNotFoundError) as error:
-            return self._fail(ticket, "Claude session could not be started", str(error))
+            return self._fail(ticket, self.voice.say("no-session"), str(error))
 
+        said = self.voice
         trace = self._trace(job, outcome)
         answer_file = job.workdir / "ANSWER.md"
         content = ""
@@ -1501,23 +1520,21 @@ class Runner:
             content = answer_file.read_text(encoding="utf-8", errors="replace").strip()
 
         if not outcome.ok or not content:
-            reason = (
-                "the agent stopped without answering"
-                if outcome.blocked or not content
-                else "the session failed"
+            reason = said.say(
+                "no-answer" if outcome.blocked or not content else "session-failed"
             )
             detail = (outcome.summary if outcome.blocked else outcome.error) or ""
             if not content and outcome.ok:
-                detail = f"{outcome.summary}\n\nNo ANSWER.md was written."
+                detail = said.say("no-answer-detail", summary=outcome.summary)
             kept = ""
             if self.config.runner.keep_worktree_on_failure:
-                kept = f"\nWorking directory kept: `{job.workdir}`"
+                kept = said.say("workdir-kept", path=job.workdir)
             else:
                 shutil.rmtree(job.workdir, ignore_errors=True)
             return self._fail(
                 ticket,
                 reason,
-                f"{detail}\n\n{trace}{kept}",
+                said.paragraphs(detail, trace, kept),
                 blocked=outcome.blocked or not content,
                 question=detail,
             )
@@ -1531,8 +1548,8 @@ class Runner:
         except notion.NotionError as error:
             return self._fail(
                 ticket,
-                "the answer could not be written to the ticket",
-                f"{error}\n\nIt is still on disk: `{answer_file}`\n{trace}",
+                said.say("answer-not-written"),
+                said.paragraphs(error, said.say("answer-on-disk", path=answer_file), trace),
             )
 
         shutil.rmtree(job.workdir, ignore_errors=True)
@@ -1547,19 +1564,23 @@ class Runner:
                 **self._measures(outcome),
             },
         )
-        cost = f" · ${outcome.cost_usd:.3f}" if outcome.cost_usd else ""
         self._comment(
             ticket,
-            f"{self.agent_label} — done.\n{outcome.summary}\n\n"
-            f"Written into this page: {blocks} block(s).\n{trace}\n"
-            f"{outcome.turns} turns · {outcome.seconds / 60:.1f} min{cost}",
+            said.report(
+                self.agent_label,
+                "done",
+                outcome.summary,
+                said.say("after-document", blocks=said.count(blocks, "block")),
+                said.spent(outcome.turns, outcome.seconds, outcome.cost_usd),
+                trace,
+            ),
         )
         self.say(f"    ✓ {ticket.title} — {blocks} block(s) written to the ticket")
         self._tell(
             "done",
             ticket,
-            f"Ready to review · {ticket.title}",
-            "Written into the Notion ticket.",
+            said.say("headline-review", title=ticket.title),
+            said.say("written-into-notion"),
         )
         return {
             "ticket": ticket.title,
@@ -1581,7 +1602,7 @@ class Runner:
         try:
             worktree = git.add_worktree(project.path, job.workdir, job.branch, job.base)
         except git.GitError as error:
-            return self._fail(ticket, "worktree could not be created", str(error))
+            return self._fail(ticket, self.voice.say("no-worktree"), str(error))
         if worktree.note:
             # A ticket that has run before: said out loud, because the session
             # about to start is continuing somebody's work rather than opening
@@ -1596,25 +1617,26 @@ class Runner:
             )
         except (OSError, FileNotFoundError) as error:
             git.remove_worktree(project.path, job.workdir)
-            return self._fail(ticket, "Claude session could not be started", str(error))
+            return self._fail(ticket, self.voice.say("no-session"), str(error))
 
+        said = self.voice
         trace = self._trace(job, outcome)
 
         if not outcome.ok:
-            reason = "the agent stopped without deciding" if outcome.blocked else "the session failed"
+            reason = said.say("asked-something" if outcome.blocked else "session-failed")
             # An agent that asked a question is waiting for you; a session that
             # crashed is waiting for someone to look at the log. Different rows
             # on the board, when the board has somewhere to put them.
             detail = (outcome.summary if outcome.blocked else outcome.error) or ""
             kept = ""
             if self.config.runner.keep_worktree_on_failure:
-                kept = f"\nWorktree kept: `{job.workdir}` (branch `{job.branch}`)"
+                kept = said.say("worktree-kept", path=job.workdir, branch=job.branch)
             else:
                 git.remove_worktree(project.path, job.workdir)
             return self._fail(
                 ticket,
                 reason,
-                f"{detail}\n\n{trace}{kept}",
+                said.paragraphs(detail, trace, kept),
                 blocked=outcome.blocked,
                 question=detail if outcome.blocked else "",
             )
@@ -1625,8 +1647,8 @@ class Runner:
                 git.remove_worktree(project.path, job.workdir)
             return self._fail(
                 ticket,
-                "the session declared itself done without a single commit",
-                f"{outcome.summary}\n\n{trace}",
+                said.say("nothing-committed"),
+                said.paragraphs(outcome.summary, trace),
                 blocked=True,
                 question=outcome.summary,
             )
@@ -1637,8 +1659,12 @@ class Runner:
             if not pushed.ok:
                 return self._fail(
                     ticket,
-                    "commits made but the push was refused",
-                    f"{pushed.err or pushed.out}\n\nLocal branch `{job.branch}` kept.\n{trace}",
+                    said.say("push-refused"),
+                    said.paragraphs(
+                        pushed.err or pushed.out,
+                        said.say("push-refused-detail", branch=job.branch),
+                        trace,
+                    ),
                 )
             if self.config.runner.open_pull_request:
                 body = (
@@ -1651,7 +1677,7 @@ class Runner:
                     pull_request = git.open_pull_request(job.workdir, ticket.title, body, job.base)
                 except git.GitError as error:
                     self.say(f"    ! pull request not opened: {error}")
-                    job.notes.append(f"Pull request not opened: {error}")
+                    job.notes.append(said.say("no-pull-request-opened", error=error))
 
         git.remove_worktree(project.path, job.workdir)
 
@@ -1673,22 +1699,30 @@ class Runner:
         values.update(self._measures(outcome))
         self._set(ticket, **values)
 
-        cost = f" · ${outcome.cost_usd:.3f}" if outcome.cost_usd else ""
-        notes = ("\n" + "\n".join(job.notes)) if job.notes else ""
+        counted = said.count(commits, "commit")
         self._comment(
             ticket,
-            f"{self.agent_label} — done.\n{outcome.summary}\n\n"
-            f"Branch `{job.branch}` · {commits} commit(s)"
-            + (f" · {pull_request}" if pull_request else " · no pull request")
-            + notes
-            + f"\n{trace}\n{outcome.turns} turns · {outcome.seconds / 60:.1f} min{cost}",
+            said.report(
+                self.agent_label,
+                "done",
+                outcome.summary,
+                said.say(
+                    "after-code" if pull_request else "after-code-alone",
+                    commits=counted,
+                    branch=job.branch,
+                    url=pull_request,
+                ),
+                *job.notes,
+                said.spent(outcome.turns, outcome.seconds, outcome.cost_usd),
+                trace,
+            ),
         )
         self.say(f"    ✓ {ticket.title} — {pull_request or job.branch}")
         self._tell(
             "done",
             ticket,
-            f"Ready to review · {ticket.title}",
-            pull_request or f"Branch {job.branch}, {commits} commit(s)",
+            said.say("headline-review", title=ticket.title),
+            pull_request or said.say("branch-only", commits=counted, branch=job.branch),
         )
         return {
             "ticket": ticket.title,
@@ -1838,6 +1872,7 @@ class Runner:
             agent_name=agent.name,
             agent_brief=agent.brief,
             comments=self.discussion(ticket),
+            language=self.voice.instruction(reply=True),
         )
 
         discussion = thread.last.discussion_id
@@ -1859,10 +1894,11 @@ class Runner:
 
         answer = conversation.trim(outcome.answer if outcome.ok else "")
         if not answer:
-            answer = (
-                "I could not answer this one: "
-                f"{_line(outcome.error) or 'the session ended without saying anything'}.\n"
-                f"Log: `{outcome.log}`"
+            said = self.voice
+            answer = said.say(
+                "no-reply",
+                error=_line(outcome.error) or said.say("said-nothing"),
+                log=outcome.log,
             )
         self._comment(ticket, answer, discussion)
         with self._ledger_lock:
@@ -1904,7 +1940,9 @@ class Runner:
         # A resumed session already carries the frame; what it has not seen is
         # the new message, which is the last section of the prompt we built.
         prompt_text = (
-            prompt_module.FOLLOW_UP.format(message=_message_of(text)) if resume else text
+            prompt_module.follow_up(_message_of(text), self.voice.instruction(reply=True))
+            if resume
+            else text
         )
         chosen = (
             str(notion.read(ticket.page, self.config.notion.prop("model")) or "")

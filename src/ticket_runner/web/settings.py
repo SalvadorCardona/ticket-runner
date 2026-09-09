@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import config as config_module
+from .. import voice
 from ..config import EVENTS, MERGE_METHODS, Config
 
 # What Claude Code accepts, and what each of them means for a runner nobody is
@@ -151,6 +152,13 @@ SECTIONS: tuple[Section, ...] = (
                 "runner", "model", "text", "Model",
                 "Empty: whatever Claude Code is set to. A ticket's own Model column wins "
                 "over this one.",
+            ),
+            Field(
+                "runner", "language", "choice", "Answer in",
+                "The language the runner writes its reports in, and the one a session is "
+                "asked to answer in. Empty: it reports in English, and each session keeps "
+                "writing in the language it was written to.",
+                choices=voice.LANGUAGES,
             ),
             Field(
                 "runner", "permission_mode", "choice", "Permission mode",

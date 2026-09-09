@@ -37,7 +37,7 @@ from ticket_runner import agents, channels, conversation, markdown, naming, noti
 from ticket_runner import notify, progress, projects, prompt, provision  # noqa: E402
 from ticket_runner import schedules, session, state, systemd  # noqa: E402
 from ticket_runner.channels import slack as slack_channel, telegram as telegram_channel  # noqa: E402
-from ticket_runner import update, workspace  # noqa: E402
+from ticket_runner import update, voice, workspace  # noqa: E402
 from ticket_runner import runner as runner_module  # noqa: E402
 from ticket_runner.runner import Runner  # noqa: E402
 from ticket_runner import __version__  # noqa: E402
@@ -775,6 +775,120 @@ def a_workspace_without_a_context_page_changes_nothing():
     ), "whitespace is not a context"
 
 
+# -- the language it answers in ----------------------------------------------
+
+
+@case
+def a_language_is_read_down_to_one_the_runner_speaks():
+    """A locale, a capital, a language written out: all one answer."""
+    for spelling in ("fr", "FR", "fr-FR", "fr_CA", " Français ", "french"):
+        assert voice.understood(spelling) == "fr", spelling
+    for spelling in ("en", "English", "en-GB", "anglais"):
+        assert voice.understood(spelling) == "en", spelling
+    # Not a failure: a typo in a language name must not be the reason a ticket
+    # comes back unreported.
+    assert voice.understood("") == voice.understood("klingon") == "en"
+
+
+@case
+def a_runner_nobody_told_a_language_says_exactly_what_it_used_to():
+    """Empty is not “English”: it is “nobody decided”, and the prompts say so.
+
+    Every template already carries its own rule — write in the language of the
+    ticket, of the message — and a default that overrode it would answer a
+    French ticket in English on the day this shipped.
+    """
+    common = dict(
+        project="Animalink", title="t", body="b", repo="/r", branch="br", base="main", url="u"
+    )
+    assert prompt.build(prompt.DEFAULT, **common) == prompt.build(
+        prompt.DEFAULT, **common, language=voice.Voice().instruction()
+    )
+    assert voice.Voice("").instruction() == ""
+    assert voice.Voice("en").instruction(), "asking for English is still asking"
+
+    asked = prompt.build(prompt.DEFAULT, **common, language=voice.Voice("fr").instruction())
+    assert "Write in French" in asked
+    assert asked.index("Write in French") < asked.index("End with a final line")
+    assert "commit messages" in asked, "and the repository keeps its own language"
+
+
+@case
+def a_conversation_is_told_the_language_too_and_so_is_its_next_turn():
+    """A thread that answers in French once and in English after is worse than
+    a thread that never switched."""
+    said = voice.Voice("fr")
+    first = prompt.conversation(
+        prompt.CONVERSATION,
+        project="Animalink", title="t", body="b", where="w", url="u", message="et le footer ?",
+        language=said.instruction(reply=True),
+    )
+    assert "Answer in French" in first
+    assert "Answer in French" in prompt.follow_up("et le header ?", said.instruction(reply=True))
+    assert prompt.follow_up("et le header ?") == prompt.FOLLOW_UP.format(
+        message="et le header ?", language=""
+    ), "and nothing at all when nothing was asked for"
+
+
+@case
+def a_report_says_what_happened_rather_than_listing_what_ran():
+    """The facts are the same in both languages; what changed is that they read."""
+    for language, expected in (
+        ("", "3 commits on `ticket/x`"),
+        ("fr", "3 commits sur `ticket/x`"),
+    ):
+        said = voice.Voice(language)
+        report = said.report(
+            "ticket-runner@laptop",
+            "done",
+            "Le header est parti.",
+            said.say(
+                "after-code",
+                commits=said.count(3, "commit"),
+                branch="ticket/x",
+                url="https://github.com/x/y/pull/1",
+            ),
+            said.spent(182, 1092.0, 6.405),
+            said.trace("claude --resume s-1", "/logs/x.jsonl"),
+        )
+        assert report.startswith("ticket-runner@laptop — "), "the signature is never translated"
+        assert expected in report
+        assert "https://github.com/x/y/pull/1" in report
+        # Last, and in one sentence: it is what you need on the rare day
+        # something went wrong, not what you came to the ticket to read.
+        assert report.rindex("claude --resume s-1") > report.rindex("Le header est parti.")
+
+    assert "$6.41" in voice.Voice().spent(182, 1092.0, 6.405)
+    assert "6,41 $" in voice.Voice("fr").spent(182, 1092.0, 6.405)
+    assert "cost" not in voice.Voice().spent(4, 90.0, 0.0), "no price, nothing to say about one"
+
+
+@case
+def a_measurement_is_rounded_to_something_a_person_would_say():
+    """Nobody reports their afternoon to the tenth of a minute."""
+    said = voice.Voice()
+    assert said.minutes(1092.0) == "18 minutes"
+    assert said.minutes(90.0) == "2 minutes"
+    assert said.minutes(20.0) == "under a minute"
+    assert voice.Voice("fr").minutes(20.0) == "moins d'une minute"
+    assert said.count(1, "commit") == "1 commit" and said.count(3, "commit") == "3 commits"
+    assert voice.Voice("fr").count(1, "turn") == "1 échange"
+
+
+@case
+def every_phrase_exists_in_every_language_it_claims_to_speak():
+    """A key nobody translated is a sentence that fails the day it is said.
+
+    Which is the whole risk of a table like this: the missing one is always the
+    failure path, and the failure path is what nobody exercises before shipping.
+    """
+    for key, spellings in voice._SAID.items():
+        assert set(spellings) == set(voice.LANGUAGES), key
+        for language, text in spellings.items():
+            assert text.strip(), f"{key}/{language}"
+    assert voice.DEFAULT in voice.LANGUAGES
+
+
 # -- the role a ticket is handled by -----------------------------------------
 
 
@@ -1353,7 +1467,7 @@ def a_session_that_says_nothing_is_still_answered_for():
 
     assert len(calls) == 1, "nothing to resume, so nothing to retry"
     assert "could not answer" in runner.client.posted[0][1]
-    assert "Log:" in runner.client.posted[0][1], "and where to go and look"
+    assert "log is" in runner.client.posted[0][1], "and where to go and look"
 
 
 @case
@@ -2312,6 +2426,25 @@ def a_merged_pull_request_moves_its_ticket_to_done():
 
 
 @case
+def a_board_told_to_answer_in_french_is_answered_in_french():
+    """The whole point of the setting, checked where it is actually read.
+
+    `runner.language` is a line of a file; what it has to change is the sentence
+    written under a ticket, and nothing in between is worth checking on its own.
+    """
+    runner = _board_runner(
+        [_reviewed("p-merged", "In review", "https://github.com/x/y/pull/1")],
+        {"review": "In review", "done": "Done"},
+    )
+    runner.config.runner.language = "FR"
+    with _github({"https://github.com/x/y/pull/1": "MERGED"}):
+        assert runner.close_merged() == 1
+    said = runner.client.comments_written[0]
+    assert said.startswith("ticket-runner@laptop — c'est fait.")
+    assert "a été fusionnée" in said and "https://github.com/x/y/pull/1" in said
+
+
+@case
 def a_ticket_is_never_closed_on_an_answer_github_did_not_give():
     """No pull request, or no `gh` to ask: the ticket stays where it is."""
     client, closed = _closing(
@@ -2380,7 +2513,7 @@ def validating_a_ticket_is_what_merges_its_pull_request():
     assert merges == [("https://github.com/x/y/pull/1", "squash")]
     assert client.written == [("p-validated", {"Status": "Done"})]
     assert results and results[0]["status"] == "done"
-    assert "validated" in client.comments_written[0]
+    assert "Validated, so the pull request went in" in client.comments_written[0]
 
 
 @case
@@ -2627,7 +2760,7 @@ def a_publication_a_crash_interrupted_comes_back_as_a_question():
     assert recovered == 1
     assert runner.client.written == [("ppost", {"Status": "Blocked"})]
     said = runner.client.comments_written[0]
-    assert "may have gone out" in said and "“Validated”" in said
+    assert "may well have gone out" in said and "“Validated”" in said
 
 
 @case
@@ -2646,7 +2779,7 @@ def a_ticket_claimed_from_ready_is_still_put_back_in_the_queue():
     with _state_home():
         assert runner.sweep() == 1
     assert runner.client.written == [("p-work", {"Status": "Ready"})]
-    assert "picked up again" in runner.client.comments_written[0]
+    assert "picking it up again" in runner.client.comments_written[0]
 
 
 @case
@@ -4124,7 +4257,7 @@ def a_blocked_ticket_travels_with_its_question_and_its_link():
     message = sent[0]
     assert "Which header" in message["text"], "the agent's question, not the runner's summary"
     assert "https://notion.so/t" in message["text"], "a notification you have to go and find"
-    assert "Answer here" in message["text"]
+    assert "An answer here" in message["text"]
     assert message["ask"] is True and message["ticket"] == TICKET
 
 
