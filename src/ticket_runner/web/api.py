@@ -20,6 +20,7 @@ from typing import Any
 
 from .. import config as config_module
 from .. import conversation, notion, session, state, systemd
+from .. import schedules as schedules_module
 from .. import update as update_module
 from ..config import Config
 from ..runner import Runner, scheduled_for, short_id
@@ -219,6 +220,58 @@ class Api:
         self._projects = index
         self._projects_at = time.time()
         return index
+
+    def schedules(self) -> dict:
+        """What comes back on its own, as `ticket-runner schedules` says it.
+
+        Read when the page is opened rather than watched like the board: a
+        schedule moves four times a day at the very most, and a console polling
+        that database would be asking Notion a question whose answer has not
+        changed since breakfast.
+
+        Two facts travel with the rows, because a list of schedules that all
+        look fine explains nothing on an installation where none of them fire:
+        whether the workspace has the database at all, and whether
+        `runner.schedule` is on.
+        """
+        try:
+            rows = self.runner.schedules()
+            database = bool(self.runner.workspace.schedules)
+        except notion.NotionError:
+            self.forget()
+            raise
+        projects = self.projects()
+        return {
+            "enabled": self.config.runner.schedule,
+            "database": database,
+            "page": self.config.notion.page("schedules"),
+            "schedules": [self._schedule(row, projects) for row in rows],
+        }
+
+    def _schedule(self, schedule: schedules_module.Schedule, projects: dict) -> dict:
+        """One row of the Schedules database, as the pane reads it.
+
+        Left in the order Notion hands them over — that order is somebody's, and
+        a console that sorted it would be rearranging their page for them.
+        """
+        return {
+            "id": schedule.page.id.replace("-", ""),
+            "name": schedule.name,
+            "url": schedule.page.url,
+            "cadence": schedule.cadence,
+            "at": schedule.at,
+            "day": schedule.day,
+            "active": schedule.active,
+            "next": schedule.next.isoformat(timespec="minutes") if schedule.next else "",
+            "last": schedule.last.isoformat(timespec="minutes") if schedule.last else "",
+            # The ticket the last occurrence made, addressed the way the board
+            # addresses one: the console links to its page, not to Notion's.
+            "ticket": schedule.last_ticket.replace("-", ""),
+            "project": (projects.get(schedule.project) or {}).get("name", ""),
+            "model": schedule.model,
+            "priority": schedule.priority,
+            "problem": schedule.problem,
+        }
 
     def state(self) -> dict:
         """Everything the header shows: the timer, the lock, the version, the spend."""

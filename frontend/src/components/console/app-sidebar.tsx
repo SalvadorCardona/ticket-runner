@@ -1,4 +1,13 @@
-import { Activity, LayoutGrid, Moon, RefreshCw, Settings2, Sun, Terminal } from "lucide-react"
+import {
+  Activity,
+  CalendarClock,
+  LayoutGrid,
+  Moon,
+  RefreshCw,
+  Settings2,
+  Sun,
+  Terminal,
+} from "lucide-react"
 import { Link } from "react-resource-view"
 
 import {
@@ -27,7 +36,7 @@ import { boardHref } from "@/resources/tickets"
 
 /* The left menu.
  *
- * Four addresses, and it says more than the addresses could: how many tickets
+ * Five addresses, and it says more than the addresses could: how many tickets
  * are on the board and how many are ready, how many sessions are writing right
  * now, whether the timer is on. A menu that only navigates is a menu you read
  * once.
@@ -71,6 +80,16 @@ export function AppSidebar({ route }: { route: Route }) {
       priority: 20,
       badge: sessions.length || undefined,
       detail: running ? `${running} running` : "",
+    },
+    {
+      name: "Schedules",
+      href: pageHref("schedules"),
+      page: "schedules",
+      icon: CalendarClock,
+      priority: 15,
+      // No count and no badge: the only way to know is to ask Notion, and this
+      // menu is redrawn every time the board moves.
+      detail: "what comes back on its own",
     },
     {
       name: "Settings",

@@ -226,6 +226,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"projects": sorted(
                     self.api.projects().values(), key=lambda item: item["name"].lower()
                 )})
+            if route == "/api/schedules":
+                return self._json(self.api.schedules())
             if route == "/api/history":
                 return self._json(self.api.history())
             if route == "/api/chat":
