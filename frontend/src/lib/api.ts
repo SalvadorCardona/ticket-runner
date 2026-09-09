@@ -5,9 +5,11 @@ import type {
   Project,
   RunnerState,
   Saved,
+  Schedules,
   Settings,
   SettingValue,
   Talk,
+  TicketDetail,
 } from "./types"
 
 /* Talking to the server.
@@ -55,8 +57,10 @@ export const api = {
   state: () => request<RunnerState>("/api/state"),
   board: () => request<Board>("/api/board"),
   projects: () => request<{ projects: Project[] }>("/api/projects"),
+  schedules: () => request<Schedules>("/api/schedules"),
   chat: () => request<{ messages: Message[] } & ChatState & { busy?: boolean }>("/api/chat"),
   settings: () => request<Settings>("/api/settings"),
+  ticket: (id: string) => request<TicketDetail>(`/api/tickets/${id}`),
   talk: (id: string) => request<Talk>(`/api/tickets/${id}/talk`),
 
   createTicket: (ticket: {

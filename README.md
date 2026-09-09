@@ -1,3 +1,5 @@
+![ticket-runner](https://raw.githubusercontent.com/SalvadorCardona/brand-assets/main/projects/ticket-runner/banner.png)
+
 # ticket-runner
 
 **Your Notion tickets, played by Claude Code.** You write a ticket, you move it to
@@ -275,7 +277,7 @@ for reading rather than for filling in.
 | `runner.open_pull_request` | `true` | `false`: the branch is pushed, without a PR |
 | `runner.merge_method` | `"squash"` | how a **validated** pull request is merged — `squash`, `merge`, `rebase` |
 | `runner.keep_worktree_on_failure` | `true` | keep enough around to understand a failure |
-| `runner.notify` | `true` | one desktop notification per finished ticket — `[notify]` carries it to your phone |
+| `runner.notify` | `true` | one desktop notification per finished ticket, clicked to open its Notion page — `[notify]` carries it to your phone |
 | `runner.auto_update` | `true` | a run keeps the installation on the latest version |
 | `runner.update_interval_seconds` | `3600` | how often a run asks; one minute is the floor |
 | `runner.log_retention_days` | `14` | drop older session logs; `0` keeps everything |
@@ -822,10 +824,89 @@ Five things are worth knowing:
 
 ---
 
+## What comes back on its own
+
+A ticket leaves once: you write it, you move it to *Ready*, it runs, it ends in *Done*.
+Everything that **recurs** — Monday's dependency review, the report on the first of the
+month, the weekly digest — is retyped by hand, or is not done at all.
+
+The parti pris is what keeps the rest simple: no second execution engine beside the
+runner, only **one more source of tickets**. A *schedule* is a row in a Notion database
+that describes a ticket and how often it is born. When its moment comes, the runner
+creates that ticket in the ready column — and from there on, everything is the code that
+already existed. Same column, same queue, same session, same pull request. The schedule
+only presses the button for you.
+
+A row is the recipe. `Cadence` (Hourly, Daily, Weekly, Monthly), `At` (the hour, written
+`09:00`), `Day` (Monday, or 1 to 31), and the `Active` tick that turns it on. Whatever
+`Project`, `Model` and `Priority` it carries, the ticket it makes carries too — and the
+**body of the schedule's page is the brief**, copied into each ticket, so the ticket reads
+on its own and its history shows what was asked for that day. Three columns are the
+runner's to write: `Next`, `Last`, and `Last ticket`.
+
+```
+Schedules                 ticket-runner                       Tickets
+
+Active ✓, Next ≤ now ────▶ recur()
+                            │
+                            ├─ the last occurrence is still open? ──▶ skipped, and said
+                            │
+                            ├─ writes Next and Last          ──▶ the occurrence is taken
+                            │
+                            └─ creates the ticket            ──▶ Ready — body copied,
+                                                                 Project / Model / Priority
+                                                                 │
+                                 the queue of the same pass  ◀────┘
+```
+
+`recur` sits between the validated column and the queue — before the queue on purpose, so
+a ticket born at 09:00 is claimed by that very pass rather than by the next one.
+
+**Two rules surprise people, and both of them are the point:**
+
+- **catching up creates one occurrence, never the missed ones.** Machine off for three
+  days, timer stopped, laptop shut: waking up gives you one ticket for the occurrence
+  that is due, not twelve. `Next` is recomputed *from now*, never by stacking up what was
+  lost. This is anacron, not cron — turning a laptop back on must not set off an
+  avalanche of sessions;
+- **an occurrence that is still open blocks the next one, and the pass says so.** While
+  the ticket in `Last ticket` is neither *Done* nor *Failed* — so still ready, running, in
+  review, validated, or blocked on a question nobody has answered — no second ticket is
+  made. `Next` moves on regardless. Without that, one schedule stuck on a question fills
+  the board with twenty copies of itself.
+
+Three smaller ones, in the same spirit. **A schedule written this minute does not fire
+this minute:** an empty `Next` is computed and written, and nothing is born — creating a
+"Weekly / Monday" row on a Tuesday should not start a session on the spot. **The
+occurrence is taken before it is acted on:** `Next` and `Last` are written first and the
+ticket second, so a crash between the two loses one occurrence rather than making two —
+and a second runner on another machine reads a `Next` that has already moved and does
+nothing. **A schedule nobody can read holds nobody up:** an unknown cadence, an
+unreadable hour, an absurd day, and that row is skipped while the others go on;
+`ticket-runner doctor` is where it is named.
+
+```bash
+ticket-runner schedules                          # what repeats, and when it next happens
+ticket-runner schedules --run "Revue des dépendances"   # now, without waiting for Monday
+ticket-runner list                               # the whole calendar: tickets and births
+```
+
+The same calendar is a page of the web console — *Schedules* in the menu, `/?page=schedules`
+— which is where you look at it from a phone. See [The web console](#the-web-console).
+
+Everything here is optional. A workspace with no schedules page has nothing that repeats,
+`doctor` is green on it, and nothing about it runs differently — `ticket-runner init`
+builds the database on a board that predates it, and `runner.schedule = false` turns the
+whole thing off without a single row being unticked.
+
+---
+
 ## Being told, and answering with one word
 
-A desktop notification only works if you are in front of that desktop, and the two
-moments that need you are exactly the two you are least likely to be there for: the agent
+A desktop notification names its ticket, and clicking it opens that ticket's Notion page
+— the notification is where you act from, not a title you then go and look for on the
+board. But it only works if you are in front of that desktop, and the two moments that
+need you are exactly the two you are least likely to be there for: the agent
 asked a question, and a pull request is waiting. So the runner can also write to
 **Telegram** or **Slack** — and this is the half that matters: **what you answer there
 lands on the ticket.**
@@ -943,49 +1024,57 @@ already: the installer starts it and prints the address, token included.
 ticket-runner serve --print-token   # the token, if you lost the URL
 ```
 
-Open `http://127.0.0.1:8787` and you get one page, five things:
+Open `http://127.0.0.1:8787` and you get one page, four things:
 
 ```
 ┌───────────────┬──────────────────────────────┬─────────────────────────────┐
-│ ticket-runner │  Ready                    2  │  you                        │
-│  v0.9.2       │  ┌────────────────────────┐  │  Where is the SQLite ticket │
-│               │  │ Retirer le bandeau     │  │                             │
-│ ▸ Board    4  │  │ Site vitrine · High    │  │  workspace                  │
-│   1 ready     │  └────────────────────────┘  │  Six minutes in, on Trader  │
-│   Ticket      │                              │  IA. It has rewritten       │
-│   #1a2b3c     │  In progress              1  │  src/storage.py and is on   │
-│   Console     │  ┌────────────────────────┐  │  pytest. Nothing committed. │
-│   Live     1  │  │ Migrer vers SQLite     │  │                             │
-│   Settings    │  │ Bash · pytest -q       │  │  > status                   │
-│ ● live        │  └────────────────────────┘  │  timer on · 30 min          │
+│ ticket-runner │ + New ticket   board · table │  you                        │
+│  v0.9.2       │                              │  Where is the SQLite ticket │
+│               │  Ready     1   In progress 1 │                             │
+│ ▸ Board    4  │  ┌──────────┐  ┌──────────┐  │  workspace                  │
+│   1 ready     │  │ Retirer  │  │ Migrer   │  │  Six minutes in, on Trader  │
+│   Live     1  │  │ le       │  │ vers     │  │  IA. It has rewritten       │
+│   Schedules   │  │ bandeau  │  │ SQLite   │  │  src/storage.py and is on   │
+│   Settings    │  │ High     │  │ pytest   │  │  pytest. Nothing committed. │
+│               │  └──────────┘  └──────────┘  │                             │
+│               │                              │  > status                   │
+│ ● live        │                    ───▶      │  timer on · 30 min          │
 └───────────────┴──────────────────────────────┴─────────────────────────────┘
      the menu           the board, live                the console
 ```
 
-**The menu** down the left is where the five live, and it says more than a row of
-tabs could: how many tickets are ready and how many are in review, which ticket the
-Ticket pane is holding, how many sessions are writing right now, whether the timer
-is on. `⌘B` — `Ctrl-B` — folds it to a rail of icons, each keeping its name in a
-tooltip; on a phone it is a drawer, and choosing something closes it. The fold is
-remembered in a cookie, so it opens the way you left it.
+**The menu** down the left is where the pages live, and it says more than a row of
+tabs could: how many tickets are on the board and how many are ready, how many sessions
+are writing right now, whether the timer is on. `⌘B` — `Ctrl-B` — folds it to a rail of
+icons, each keeping its name in a tooltip; on a phone it is a drawer, and choosing
+something closes it. The fold is remembered in a cookie, so it opens the way you left it.
+Every page has an address — `/?view=console/tickets/list`, `/?page=live` — so a reload,
+a bookmark or a link pasted into a chat lands where you were.
 
-**The board** is the Notion board, read from Notion and written back to it. Nothing here
-is a second database: moving a card moves the ticket, and the new ticket you type at the
-top is a page in the same database, with its brief as real Notion blocks. What the console
-adds is the part Notion cannot do — the running session's steps, live, read straight from
-the session log on disk rather than from the `Progress` column. A card in review carries a
-**validate** button, where the board has that column: one click and the next pass merges
-its pull request, or publishes what it holds.
+**The board** is the Notion board, read from Notion and written back to it, drawn as
+the columns the board has — *Ready*, *In progress*, *In review*, *Validated* where the
+board offers it, *Blocked*, *Failed*, *Done* — under the board's own names. Nothing here
+is a second database: **drag a card into a column and the ticket moves**, and the ticket
+you write behind *New ticket* is a page in the same database, with its brief as real
+Notion blocks. What the console adds is the part Notion cannot do — the running session's
+steps, live, read straight from the session log on disk rather than from the `Progress`
+column. A card in review carries a **validate** button, where the board has that column:
+one click and the next pass merges its pull request, or publishes what it holds. The
+*table* tab shows the same tickets as rows, one column per property.
 
-**A card is a way in.** Click one and the **Ticket** pane becomes that ticket's terminal:
-everything said on it, oldest first — the runner's reports, your answers, the answers you
-gave from Telegram — and a field to say the next thing. What you type is a *comment on the
-ticket*, written into the thread the runner last spoke in, which is the gesture the runner
-already knows: an answer under the question a run asked puts the ticket back in the queue,
-and one that names it — `@claude`, or whatever `notion.mention` says — asks it for words
-instead. Nothing is kept on the side; the same sentence typed into Notion does the same
-thing. While the ticket is running, its session's steps scroll underneath, so reading a
-ticket and watching it work are one place rather than two.
+**A card is a way in.** Click one and the ticket becomes a page: the brief you wrote, the
+report a run appended, the notes in between — the page under the card, as the runner
+reads it — with its links out (Notion, the pull request, the session) and the gestures it
+offers where it stands. Beside it, in place of the workspace console, is the ticket's own
+terminal: everything said on it, oldest first — the runner's reports, your answers, the
+answers you gave from Telegram — and a field to say the next thing. What you type is a
+*comment on the ticket*, written into the thread the runner last spoke in, which is the
+gesture the runner already knows: an answer under the question a run asked puts the ticket
+back in the queue, and one that names it — `@claude`, or whatever `notion.mention` says —
+asks it for words instead. Nothing is kept on the side; the same sentence typed into Notion
+does the same thing. While the ticket is running, its session's steps scroll underneath,
+so reading a ticket and watching it work are one place rather than two. On a phone the
+terminal sits under the page.
 
 The comment is written with the runner's own Notion token, because that is the only token
 the console has — and it opens the same way an answer relayed from Telegram does, so the
@@ -1010,6 +1099,16 @@ terminal opens the very same one, and it survives the browser, the server and th
 An address written anywhere the console shows text — an answer, the output of a command, a
 step of a session, a comment on a ticket — is a link you can click. A pull request the
 runner just opened is one click away, not a URL to read out loud into another tab.
+
+**Schedules** is the calendar of [what comes back on its own](#what-comes-back-on-its-own),
+read the way `ticket-runner schedules` reads it: what repeats, at what rhythm, when the next
+ticket is due and when the last one was made — with a way through to the ticket that
+occurrence produced. A row nobody can read says what is wrong with it instead of a date it
+does not have, and `runner.schedule = false` is said at the foot of the page, because a
+browser is the one place that switch would otherwise be invisible. Nothing is written from
+here: a schedule is a Notion page, and its name is the link to it. The page asks Notion
+when you open it rather than living on the event stream — a schedule moves four times a day
+at the very most, and a tab left open on the board has no business polling that database.
 
 **Settings** is `config.toml` drawn as a page — the same file, the same keys, and every one
 of them, from the Notion token down to what your board calls its *Blocked* column. It is
@@ -1084,16 +1183,19 @@ style-aware URL and quietly break `add`; leaving the key present but empty is wh
 the MCP server announce the registry — without it, `get_project_registries` answers that
 none is configured and `list_items_in_registries` refuses to look.
 
-**Where the menu's shape comes from.** `frontend/src/lib/menu.ts` writes out
-`MenuItemInterface` from
-[react-resource-view](https://github.com/SalvadorCardona/react-resource-view) rather than
-importing it. That package's menu module is that type plus two "is this the current entry"
-helpers, and the helpers answer by comparing `href` against the location their routing port
-reports — this console has no router and no addresses, a pane being React state. Taking the
-dependency would mean installing `react-data-form`, `resource-registry`, `react-mini-i18n`
-and a router in order to re-implement `isActive` anyway. So the vocabulary is shared and the
-machinery is not: `href` is kept in the shape, and the day the console grows real addresses
-or mounts a `ResourceView` screen, the menu it already has is the one that package expects.
+**Where the board comes from.** The board, the ticket page and the *New ticket* form are
+one declaration for
+[react-resource-view](https://github.com/SalvadorCardona/react-resource-view) —
+`frontend/src/resources/tickets.tsx` — which renders the column layout, the table, the
+popup and the addresses from it, with the forms drawn by
+[react-data-form](https://github.com/SalvadorCardona/react-data-form). The package knows
+neither this router nor this API: it asks for four navigation primitives and a *dialect*,
+and both are written in `frontend/src/lib/` — the primitives over the History API, in the
+package's `query` routing mode, because the one page the Python server serves is `/`; the
+dialect in twenty lines, because every read and write of the resource is its own (the rows
+come off the stream, a ticket off `/api/tickets/<id>`, a drop is `POST …/status`). The
+two transcripts — the workspace's and a ticket's — are shadcn's `message` and
+`message-scroller`.
 
 Two rules the console keeps, and they predate React:
 
@@ -1173,6 +1275,8 @@ ticket-runner logs -f      # follow the running session
 ticket-runner status       # timer, console, current run, recent tickets
 ticket-runner history      # what has been handled, with the pull requests
 ticket-runner projects     # Notion project → local repository mapping
+ticket-runner schedules    # what comes back on its own, and when it next does
+ticket-runner schedules --run <name>  # make its ticket now, without waiting for the hour
 ticket-runner doctor       # full diagnostics
 ticket-runner clean --force          # remove worktrees, their branches, and scratch dirs
 ticket-runner update       # move the installation to the newest version
@@ -1287,11 +1391,13 @@ board is shared with people you would not hand those credentials to, leave the c
 | a ticket ran before and its branch is still there | it is picked up, not refused: the branch is checked out again and rebased onto the base branch, and the session continues from what it already holds. The ticket's comment says so, and says when the rebase conflicted. `ticket-runner clean --force` is what starts it over instead |
 | `branch … is checked out in …` | two attempts at the same ticket at once, or a worktree kept somewhere else — the one case that still stops it. `git worktree remove <path>`, once you are done with what is in there |
 | no desktop notification | `notify-send` is missing, or the service has no session bus. `runner.notify = false` silences the attempt |
+| a desktop notification that does not open its ticket | the click needs `gdbus`, `dbus-monitor` and `xdg-open`, and a desktop that says it supports notification actions. Without them the notification is shown as it always was |
 | nothing arrives in Telegram or Slack | `ticket-runner notify` says which end refused — a revoked token, a chat id that is not yours, a bot not invited to the channel |
 | an answer typed in Slack changes nothing | the bot cannot read the channel: add `channels:history` (or `groups:history`, `im:history`) and reinstall the app |
 | an answer lands on the wrong ticket | a bare “oui” answers the last question asked. Reply *to* the message, or paste the ticket's link, when two are waiting |
 | the runner talks but never listens | `notify.replies = false`, or the run is a `--dry-run`: answers are only read at the top of a real run |
 | the timer does not fire with no session open | `sudo loginctl enable-linger $USER` |
+| `status` says the timer has no next run | it was restarted, with a unit written before this fix, after a run that failed — and will never fire again: `ticket-runner enable` rewrites the unit and restarts it |
 | the version never moves | the install directory is a copy, not a clone: an installation older than self-updating, or one made with `TR_SRC`. `doctor` says which — run `install.sh` again |
 | branch pushed, no pull request | `gh` cannot reach its credentials from a systemd service — locked keyring. Use `gh auth login` with a token, or set `GH_TOKEN` in the unit |
 | `claude: command not found` in the journal | the PATH baked into the unit predates a node version change: run `install.sh` again |

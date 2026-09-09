@@ -7,7 +7,7 @@
 <meta name="description" content="Write a ticket in Notion, move it to Ready, and a few minutes later a pull request is waiting — or the page itself is written. One Claude Code session per ticket, on your machine, in the background.">
 <meta name="theme-color" content="#0b0d12">
 <link rel="canonical" href="https://cardona.digital/ticket-runner/">
-<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='%233b82f6'%3E%3Crect%20x='2.5'%20y='3'%20width='5.5'%20height='18'%20rx='1.6'/%3E%3Crect%20x='9.25'%20y='3'%20width='5.5'%20height='11'%20rx='1.6'/%3E%3Crect%20x='16'%20y='3'%20width='5.5'%20height='14'%20rx='1.6'/%3E%3C/svg%3E">
+<link rel="icon" type="image/png" href="icon.png">
 <meta property="og:type" content="website">
 <meta property="og:title" content="ticket-runner — your Notion tickets, played by Claude Code">
 <meta property="og:description" content="Move a ticket to Ready. A few minutes later, a pull request — or the page itself, written. One session per ticket, on your machine.">
@@ -378,6 +378,7 @@
     .board{padding:14px;gap:10px}
   }
 </style>
+<script src="https://umami.cardona.digital/nx.js" defer data-website-id="121083aa-1f81-4636-82b1-11bebfb1b0e7" data-domains="cardona.digital"></script>
 </head>
 <body>
 
@@ -761,17 +762,17 @@ events = [<span class="s">"blocked"</span>, <span class="s">"failed"</span>, <sp
 
     <div class="diagram">
 <pre>┌───────────────┬──────────────────────────────┬─────────────────────────────┐
-│ <span class="hl">ticket-runner</span> │  Ready                    2  │  <span class="wn">you</span>                        │
-│  v0.9.2       │  ┌────────────────────────┐  │  Where is the SQLite ticket │
-│               │  │ Retirer le bandeau     │  │                             │
-│ ▸ Board    4  │  │ Site vitrine · High    │  │  <span class="hl">workspace</span>                  │
-│   1 ready     │  └────────────────────────┘  │  Six minutes in, on Trader  │
-│   Ticket      │                              │  IA. It has rewritten       │
-│   #1a2b3c     │  In progress              1  │  src/storage.py and is on   │
-│   Console     │  ┌────────────────────────┐  │  pytest. Nothing committed. │
-│   Live     1  │  │ Migrer vers SQLite     │  │                             │
-│   Settings    │  │ Bash · pytest -q       │  │  <span class="hl">&gt;</span> status                   │
-│ <span class="ok">●</span> live        │  └────────────────────────┘  │  timer on · 30 min          │
+│ <span class="hl">ticket-runner</span> │ + New ticket   board · table │  <span class="wn">you</span>                        │
+│  v0.9.2       │                              │  Where is the SQLite ticket │
+│               │  Ready     1   In progress 1 │                             │
+│ ▸ Board    4  │  ┌──────────┐  ┌──────────┐  │  <span class="hl">workspace</span>                  │
+│   1 ready     │  │ Retirer  │  │ Migrer   │  │  Six minutes in, on Trader  │
+│   Live     1  │  │ le       │  │ vers     │  │  IA. It has rewritten       │
+│   Settings    │  │ bandeau  │  │ SQLite   │  │  src/storage.py and is on   │
+│               │  │ High     │  │ pytest   │  │  pytest. Nothing committed. │
+│               │  └──────────┘  └──────────┘  │                             │
+│               │                              │  <span class="hl">&gt;</span> status                   │
+│ <span class="ok">●</span> live        │                    ───▶      │  timer on · 30 min          │
 └───────────────┴──────────────────────────────┴─────────────────────────────┘
      the menu           the board, live                the console</pre>
     </div>
@@ -779,11 +780,11 @@ events = [<span class="s">"blocked"</span>, <span class="s">"failed"</span>, <sp
     <div class="cards">
       <div class="card">
         <h4>The board</h4>
-        <p>The Notion board, read from Notion and written back to it. Moving a card moves the ticket. What it adds is the running session’s steps, live, and a <b>validate</b> button on every card in review.</p>
+        <p>The Notion board, read from Notion and written back to it, drawn as the columns the board has. Drag a card into a column and the ticket moves. What it adds is the running session’s steps, live, and a <b>validate</b> button on every card in review.</p>
       </div>
       <div class="card">
         <h4>A card is a way in</h4>
-        <p>Click one and the <b>Ticket</b> pane becomes that ticket’s terminal: everything said on it, and a field to say the next thing. What you type is a comment on the ticket — the gesture the runner already knows.</p>
+        <p>Click one and the ticket becomes a page — the brief, the report, the notes under it — with its terminal beside it: everything said on the ticket, and a field to say the next thing. What you type is a comment on the ticket — the gesture the runner already knows.</p>
       </div>
       <div class="card">
         <h4>The console</h4>

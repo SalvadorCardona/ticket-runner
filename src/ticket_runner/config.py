@@ -131,6 +131,10 @@ class Runner:
     # `plan` is the guardrail, not the prompt: a conversation that quietly
     # edited a repository is the one thing nobody would expect of it.
     reply_permission_mode: str = "plan"
+    # What comes back on its own: the Schedules database, read in the same pass
+    # that reads the board. One line to turn every schedule off at once, without
+    # unticking a single row — see schedules.py.
+    schedule: bool = True
     auto_update: bool = True
     update_interval_seconds: int = 3600
     log_retention_days: int = 14
@@ -252,6 +256,16 @@ _DEFAULT_PROPERTIES = {
     # Relation to the Agents database. It carries the same word as the database
     # it points at, because it is the same thing.
     "role": "Agent",
+    # The Schedules database, for what comes back on its own. The first four are
+    # what you fill in; the last three are what a pass writes back. A workspace
+    # without that database never reads any of them.
+    "cadence": "Cadence",          # select: Hourly, Daily, Weekly, Monthly
+    "at": "At",                    # text: "09:00"
+    "day": "Day",                  # text: "Monday", or "1".."31"
+    "active": "Active",            # checkbox: unticked stops everything
+    "next_run": "Next",            # date: when the next ticket is born
+    "last_run": "Last",            # date: when the last one was
+    "last_ticket": "Last ticket",  # relation → the tickets database
 }
 
 # The rows the runner looks for in the workspace database, by their title.
@@ -261,16 +275,19 @@ _DEFAULT_PAGES = {
     "projects": "Projects",
     "agents": "Agents",
     "context": "Context",
+    "schedules": "Schedules",
 }
 
-# What those rows used to be called. A board built before the names were settled
-# keeps working: the row is looked up under its current name first, then under
-# the one it was created with. Nothing to rename, nothing to re-provision.
+# What those rows used to be called, or are called on a board built by hand. A
+# row is looked up under its current name first, then under these — as long as
+# the configuration itself names none, since a title someone typed is a title
+# they meant. Nothing to rename, nothing to re-provision.
 _LEGACY_PAGES = {
     "tickets": ("Master Tickets",),
     "projects": ("Master project", "Master Projects"),
     "agents": ("Master Agents",),
     "context": ("Soul",),
+    "schedules": ("Master Scheduler", "Master Scheluder"),
 }
 
 # Highest first. Anything else — including an empty cell — sorts as normal.
@@ -597,6 +614,7 @@ def load(path: Path | None = None) -> Config:
             runner_raw.get("reply_permission_mode", defaults.reply_permission_mode)
         ).strip()
         or defaults.reply_permission_mode,
+        schedule=bool(runner_raw.get("schedule", defaults.schedule)),
         auto_update=bool(runner_raw.get("auto_update", defaults.auto_update)),
         # A run asks the remote at most once per this interval. The floor is a
         # minute: at a ten-second cadence, an unbounded value would turn into a

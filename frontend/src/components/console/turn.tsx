@@ -1,3 +1,4 @@
+import { Message, MessageContent, MessageHeader } from "@/components/ui/message"
 import type { Role } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -10,39 +11,53 @@ const WHO: Record<Role, string> = {
   command: "command",
 }
 
-/** One thing that was said, by you or by the workspace. */
+/* One thing that was said, by you or by the other side.
+ *
+ * shadcn's `Message` lays it out — yours against the right edge, theirs
+ * against the left — and the bubble inside is the console's own, because the
+ * palette is: a problem reads red, the workspace reads as a card, and what you
+ * said carries the accent so a transcript can be skimmed for your own turns.
+ *
+ * Who said it and when are one line, set in the mono face: they are a stamp on
+ * the message, not a sentence in it.
+ */
 export function Turn({
   role,
   text,
   who,
+  when,
   className,
 }: {
   role: Role
   text: string
   who?: string
+  when?: string
   className?: string
 }) {
+  const mine = role === "you"
   return (
-    <div
-      className={cn(
-        "rounded-lg border px-3 py-2",
-        role === "you" && "bg-primary/10 border-primary/25",
-        role === "workspace" && "bg-card",
-        role === "error" && "bg-destructive/10 border-destructive/30",
-        className
-      )}
-    >
-      <div
-        className={cn(
-          "mb-1 text-[0.7rem] font-medium tracking-wide uppercase",
-          role === "error" ? "text-destructive" : "text-muted-foreground"
-        )}
-      >
-        {who ?? WHO[role] ?? role}
-      </div>
-      <div className="text-sm leading-relaxed whitespace-pre-wrap">
-        <Flow text={text} />
-      </div>
-    </div>
+    <Message align={mine ? "end" : "start"} className={className}>
+      <MessageContent className="max-w-[92%]">
+        <MessageHeader
+          className={cn(
+            "font-mono text-[0.65rem] font-semibold tracking-[0.14em] uppercase",
+            role === "error" && "text-destructive"
+          )}
+        >
+          {who ?? WHO[role] ?? role}
+          {when ? <span className="font-normal normal-case">{` · ${when}`}</span> : null}
+        </MessageHeader>
+        <div
+          className={cn(
+            "rounded-lg border px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap",
+            mine && "bg-primary/10 border-primary/25",
+            role === "workspace" && "bg-card",
+            role === "error" && "bg-destructive/10 border-destructive/30"
+          )}
+        >
+          <Flow text={text} />
+        </div>
+      </MessageContent>
+    </Message>
   )
 }

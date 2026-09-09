@@ -226,12 +226,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"projects": sorted(
                     self.api.projects().values(), key=lambda item: item["name"].lower()
                 )})
+            if route == "/api/schedules":
+                return self._json(self.api.schedules())
             if route == "/api/history":
                 return self._json(self.api.history())
             if route == "/api/chat":
                 return self._json({"messages": self.api.chat.history(), **self.api.chat.state()})
             if route == "/api/settings":
                 return self._json(self.api.settings())
+            if match := re.fullmatch(r"/api/tickets/([0-9a-fA-F-]{32,36})", route):
+                return self._json(self.api.ticket(match.group(1)))
             if match := re.fullmatch(r"/api/tickets/([0-9a-fA-F-]{32,36})/talk", route):
                 return self._json(self.api.talk(match.group(1)))
             if route == "/api/logs":

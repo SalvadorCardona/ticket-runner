@@ -31,6 +31,9 @@ class Workspace:
     tickets: str = ""
     projects: str = ""
     agents: str = ""
+    # What comes back on its own. Absent means nothing repeats here, which is
+    # not a fault: the row is optional exactly as the other two are.
+    schedules: str = ""
     context: str = ""
     rows: dict[str, str] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
@@ -92,7 +95,7 @@ def resolve(client: notion.Client, settings: Notion) -> Workspace:
         )
 
     # From here on, a failure is a missing feature, never a failed run.
-    for key in ("projects", "agents"):
+    for key in ("projects", "agents", "schedules"):
         if page := row(key):
             try:
                 setattr(space, key, client.resolve_database(page))

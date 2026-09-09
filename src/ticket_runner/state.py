@@ -58,6 +58,28 @@ def lock():
         path.unlink(missing_ok=True)
 
 
+def running() -> str:
+    """What the lock says about the run in progress, or "" when there is none.
+
+    The file is not the lock: the flock on it is, and the kernel drops it with
+    the process that took it. A run killed mid-way leaves `run.lock` on disk,
+    holding nobody — for two hours on 7 September 2026, `status` read that
+    leftover as a run in progress and sent the search the wrong way. Asking the
+    flock is asking the kernel, which does not keep stale files.
+    """
+    try:
+        handle = (state_dir() / "run.lock").open("r+")
+    except OSError:
+        return ""
+    with handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return handle.read().strip() or "a run in progress"
+        fcntl.flock(handle, fcntl.LOCK_UN)
+    return ""
+
+
 # Two publications of one pass run side by side, and both write this file at
 # either end of their session. One lock, because a lost entry is a ticket that
 # comes back as ready — which is the whole thing the file exists to prevent.

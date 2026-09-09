@@ -16,6 +16,78 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- The web console has been redrawn. Every page opens the same way — where you
+  are, said as a path; a heading you can read from across the room; and the one
+  line that says what the page is for — and the accent is a lime, so the button
+  worth pressing is the only thing on the screen wearing it. A ticket's card
+  says its id and its age before it says anything else, and states its project
+  and its cost along the bottom; a ticket's page states its metadata as a ruled
+  grid instead of a row of pills. Sessions open on the three numbers you came
+  for: how many are writing, how often the timer comes round, what has been
+  spent.
+- Forms read as forms. Every field the console draws — its own on the settings
+  tab, and the ones react-data-form builds for a new ticket — sits in a filled
+  box with its label against it and its explanation under it. The settings tab
+  gains a list of its sections down the left, which says what the file holds,
+  which parts are open, and how many of your unsaved changes are hiding in a
+  part you folded away; a field you have touched says so.
+- The web console's board is now the board: the columns your Notion board has,
+  under its own names, and a card dragged into one moves the ticket. The
+  *table* tab shows the same tickets as rows. A new ticket is written in a form
+  over the board rather than in a strip above it.
+- A card opens a page of its own — the brief, the report a run appended, the
+  notes in between, read from the Notion page — with the ticket's terminal
+  beside it, in place of the workspace console. The *Ticket* entry of the menu
+  is gone: the page is where the card takes you, and it has an address
+  (`/?view=console/tickets/read/<id>`) a reload or a link comes back to. Every
+  page does — `/?page=live`, `/?page=settings`.
+- The board, the ticket page and the form are one declaration for
+  [react-resource-view](https://github.com/SalvadorCardona/react-resource-view)
+  and [react-data-form](https://github.com/SalvadorCardona/react-data-form);
+  the two transcripts are shadcn's `message` and `message-scroller`. A switch at
+  the right of the header folds the second column away, for a board that wants
+  the width.
+
+### Added
+
+- Tickets that come back on their own. A fifth database, *Schedules*, where one
+  row describes a ticket and how often it is born — `Cadence` (Hourly, Daily,
+  Weekly, Monthly), `At`, `Day`, and the `Active` tick that turns it on — with
+  the body of its page as the brief, copied into every ticket it makes. When the
+  moment comes, the runner writes the ticket into the ready column and steps
+  back: same column, same queue, same session, same pull request. Monday's
+  dependency review is written once instead of being retyped every Monday.
+  Two rules are the whole point of it: **catching up creates one occurrence, not
+  the missed ones** — a machine off for three days wakes up owing one ticket and
+  not twelve — and **an occurrence still open blocks the next one**, so a
+  schedule stuck on a question does not fill the board with copies of itself.
+  `ticket-runner init` builds the database, on a bare page or on a board that
+  predates it; `ticket-runner schedules` says what repeats and when it next
+  does; `ticket-runner schedules --run "<name>"` makes its ticket on the spot;
+  `ticket-runner list` now shows the whole calendar, the tickets waiting for a
+  date and the ones not written yet. Optional throughout: a workspace with no
+  schedules page has nothing that repeats, `doctor` is green on it, and
+  `runner.schedule = false` turns everything off without a row being unticked.
+- The web console shows what comes back on its own. A *Schedules* page in the
+  menu — `/?page=schedules` — reads the calendar the way `ticket-runner
+  schedules` reads it: what repeats, at what rhythm, when the next ticket is due
+  and when the last one was made, with a way through to the ticket that
+  occurrence produced. A row nobody can read says what is wrong with it rather
+  than showing a date it does not have, and `runner.schedule = false` is said at
+  the foot of the page — a browser was the one place that switch could not be
+  seen, and a calendar of ticked rows that never fire reads as one that works.
+  Nothing is written from here: a schedule is a Notion page, and its name is the
+  link to it. The page asks Notion when you open it rather than living on the
+  event stream, so a tab left open on the board never polls that database.
+- `GET /api/tickets/<id>`: one ticket, with the page under it flattened the way
+  the runner reads it before a run.
+- `GET /api/schedules`: the Schedules database as the console draws it, with
+  what makes each row unreadable spelled out rather than raised.
+- The official `shadcn` skill, vendored under `.claude/skills/shadcn`, so a
+  session working on the console composes from the same kit.
+
 ### Fixed
 
 - A project whose `Path` points nowhere is no longer refused when the same page still
@@ -33,6 +105,38 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
   to is still put back, and the comment now lists every way that was tried and why each
   one failed, instead of the first disappointment alone.
 
+- A desktop notification now takes you to the ticket it names: clicking it
+  opens that ticket's Notion page, where before a click did nothing and you
+  had to go and find the title on the board. `notify-send` cannot do it — it
+  never hands back the identifier a desktop answers a click with, and on GNOME
+  it refuses `--action` outright — so a notification with a page behind it is
+  posted over D-Bus and followed by a detached process, which waits for the
+  click and then goes quiet. A machine missing `gdbus`, `dbus-monitor` or
+  `xdg-open`, or a desktop that does not do notification actions, gets exactly
+  the notification it got before.
+- `ticket-runner init` can build the Tickets database on a bare page again. It
+  declared the *Project* and *Agent* relations in a shape the Notion API
+  rejects, so on 8 September 2026 a fresh page stopped at `POST /databases:
+  400 body failed validation. Fix one:` — and said nothing after the colon,
+  since only the first line of the error was shown, then claimed nothing was
+  half-built when the workspace and the Projects and Agents databases already
+  were. The relations are now spelled the way the API accepts; when the API
+  refuses something, `init` prints every line of its answer; and the advice
+  says what is true: what was built is kept, run the same command again.
+- The runner no longer goes quiet after a run that failed. On 7 September 2026
+  a Notion timeout failed a run, the timer was restarted, and nothing ran for
+  the next two hours: the timer counted from the boot and from the service's
+  last activation, had neither to count from, and sat *enabled* with no next
+  run — `status` showed a green tick the whole time. The timer now also counts
+  from its own start (`OnActiveSec`), so it always has a next run. `status` and
+  `doctor` read that next run rather than `is-enabled`, and a timer that has
+  none is a red line, not a tick; the console's badge says *stalled*. And
+  `status` no longer reports a run in progress on the strength of a `run.lock`
+  a dead process left behind: it asks the lock itself, which the kernel drops
+  with the process. **An existing installation keeps its old unit, and the fault
+  with it, until `ticket-runner enable` is run again** — which now restarts the
+  timer rather than leaving an active one as it was, since a reload alone does
+  not revive a starved timer.
 - A ticket that has run before is picked up instead of being refused. Its branch
   is named after it, so a session that failed, or a pull request nobody merged,
   left a branch that answered `branch ticket/… already exists — ticket already

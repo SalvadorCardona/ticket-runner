@@ -19,19 +19,23 @@ import io
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import threading
 import traceback
 import contextlib
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ticket_runner import config as C  # noqa: E402
 from ticket_runner import agents, channels, conversation, markdown, naming, notion  # noqa: E402
-from ticket_runner import progress, projects, prompt, provision, session, state  # noqa: E402
+from ticket_runner import notify, progress, projects, prompt, provision  # noqa: E402
+from ticket_runner import schedules, session, state, systemd  # noqa: E402
 from ticket_runner.channels import slack as slack_channel, telegram as telegram_channel  # noqa: E402
 from ticket_runner import update, workspace  # noqa: E402
 from ticket_runner import runner as runner_module  # noqa: E402
@@ -607,7 +611,7 @@ def a_bare_page_becomes_the_whole_board():
     assert report.workspace == "db-ticket-runner"
     assert report.tickets == "db-tickets"
     rows = board._rows["db-ticket-runner"]
-    assert set(rows) == {"Tickets", "Projects", "Agents", "Context"}
+    assert set(rows) == {"Tickets", "Projects", "Agents", "Context", "Schedules"}
 
     schema = board._schemas["db-tickets"]
     for expected in ("Status", "Project", "Agent", "Runner", "Session", "Scheduled"):
@@ -616,6 +620,11 @@ def a_bare_page_becomes_the_whole_board():
     # The relations point at databases that existed before the tickets did.
     assert schema["Project"]["relation"]["database_id"] == "db-projects"
     assert schema["Agent"]["relation"]["database_id"] == "db-agents"
+    # …and are spelled the way the API accepts: the kind is named *and* given
+    # its empty object, or the request is rejected as `undefined`.
+    for name in ("Project", "Agent"):
+        assert schema[name]["relation"]["type"] == "single_property"
+        assert schema[name]["relation"]["single_property"] == {}
 
     # A status property cannot be created through the API; a select can, and the
     # runner reads both. Every column must be there, validated included.
@@ -1699,6 +1708,358 @@ def a_date_range_schedules_on_its_end():
     assert notion.read(page, "Empty") is None
 
 
+# -- what comes back on its own ----------------------------------------------
+
+
+def _after(text: str) -> datetime:
+    """A naive local moment to compute the next occurrence from."""
+    return datetime.fromisoformat(text)
+
+
+@case
+def each_cadence_lands_on_the_first_moment_after_now():
+    """The four cadences, read against a Wednesday afternoon."""
+    now = _after("2026-09-09T14:20:00")  # a Wednesday
+
+    hourly = schedules.next_occurrence("Hourly", "09:35", after=now)
+    assert hourly == _after("2026-09-09T14:35:00")
+    # An empty hour means the top of the hour, not nine in the morning.
+    assert schedules.next_occurrence("Hourly", "", after=now) == _after("2026-09-09T15:00:00")
+
+    daily = schedules.next_occurrence("Daily", "09:00", after=now)
+    assert daily == _after("2026-09-10T09:00:00"), "the hour is behind us: tomorrow"
+    assert schedules.next_occurrence("Daily", "18:30", after=now) == _after("2026-09-09T18:30:00")
+
+    weekly = schedules.next_occurrence("Weekly", "09:00", "Monday", after=now)
+    assert weekly == _after("2026-09-14T09:00:00")
+    # No day named: the weekday the schedule is read on, a week from now since
+    # this Wednesday's nine o'clock has already gone.
+    assert schedules.next_occurrence("Weekly", "09:00", after=now) == _after("2026-09-16T09:00:00")
+
+    monthly = schedules.next_occurrence("Monthly", "08:00", "1", after=now)
+    assert monthly == _after("2026-10-01T08:00:00")
+
+
+@case
+def a_monthly_schedule_on_the_31st_lands_on_the_last_day_february_has():
+    """Seven months have a 31st. A schedule set on it does not skip the others."""
+    from_january = schedules.next_occurrence(
+        "Monthly", "07:00", "31", after=_after("2026-01-31T09:00:00")
+    )
+    assert from_january == _after("2026-02-28T07:00:00")
+    leap = schedules.next_occurrence(
+        "Monthly", "07:00", "31", after=_after("2028-01-31T09:00:00")
+    )
+    assert leap == _after("2028-02-29T07:00:00")
+
+
+@case
+def an_occurrence_is_always_strictly_after_the_moment_it_is_computed_from():
+    """Landing *on* `after` would have a pass fire the same occurrence twice."""
+    exactly = _after("2026-09-09T09:00:00")
+    assert schedules.next_occurrence("Daily", "09:00", after=exactly) == _after(
+        "2026-09-10T09:00:00"
+    )
+    assert schedules.next_occurrence("Hourly", "00", after=exactly) == _after(
+        "2026-09-09T10:00:00"
+    )
+
+
+@case
+def a_schedule_nobody_can_read_is_none_rather_than_an_exception():
+    now = _after("2026-09-09T14:20:00")
+    assert schedules.next_occurrence("Fortnightly", "09:00", after=now) is None
+    assert schedules.next_occurrence("", "09:00", after=now) is None
+    assert schedules.next_occurrence("Daily", "bientôt", after=now) is None
+    assert schedules.next_occurrence("Daily", "31:00", after=now) is None
+    assert schedules.next_occurrence("Weekly", "09:00", "Lunedì", after=now) is None
+    assert schedules.next_occurrence("Monthly", "09:00", "quarante", after=now) is None
+    # And an aware moment comes back aware, in this machine's timezone: the same
+    # reading `scheduled_for` gives a date written on a ticket.
+    aware = schedules.next_occurrence("Daily", "09:00", after=now.astimezone())
+    assert aware is not None and aware.tzinfo is not None
+
+
+def _schedule_page(page_id: str, **values) -> notion.Page:
+    """One row of the Schedules database, as Notion hands it over."""
+    last_ticket = values.get("last_ticket", "")
+    return notion.Page(
+        id=page_id,
+        url=f"https://notion.so/{page_id}",
+        title=values.get("name", "Revue des dépendances"),
+        properties={
+            "Cadence": {"type": "select", "select": {"name": values.get("cadence", "Daily")}},
+            "At": {"type": "rich_text",
+                   "rich_text": [{"plain_text": values.get("at", "09:00")}]},
+            "Day": {"type": "rich_text", "rich_text": [{"plain_text": values.get("day", "")}]},
+            "Active": {"type": "checkbox", "checkbox": values.get("active", True)},
+            "Next": {"type": "date",
+                     "date": {"start": values["next"]} if values.get("next") else None},
+            "Last": {"type": "date", "date": None},
+            "Last ticket": {"type": "relation",
+                            "relation": [{"id": last_ticket}] if last_ticket else []},
+            "Project": {"type": "relation", "relation": [{"id": "p-animalink"}]},
+            "Priority": {"type": "select", "select": {"name": "Normal"}},
+        },
+    )
+
+
+class _ScheduleClient:
+    """A schedules database, a tickets database, and nothing that reaches out."""
+
+    def __init__(self, pages, tickets=None, refuses=""):
+        self._pages = pages
+        self._tickets = tickets or {}
+        self._refuses = refuses
+        self.written: list[tuple[str, dict]] = []
+        self.created: list[tuple[str, dict]] = []
+        self.appended: list[tuple[str, str]] = []
+
+    def schema(self, database_id):
+        return {"Status": "status"}
+
+    def query(self, database_id, filter_=None):
+        return list(self._pages)
+
+    def page(self, page_id):
+        if page_id in self._tickets:
+            return self._tickets[page_id]
+        raise notion.NotionError(f"{page_id}: object not found")
+
+    def update(self, database_id, page_id, values):
+        self.written.append((page_id, dict(values)))
+
+    def create_row(self, database_id, title, values=None):
+        if self._refuses:
+            raise notion.NotionError(self._refuses)
+        self.created.append((title, dict(values or {})))
+        return f"t-{len(self.created)}"
+
+    def blocks_text(self, block_id, depth=0):
+        return "Lister les dépendances en retard, et dire lesquelles comptent."
+
+    def append_markdown(self, page_id, markdown):
+        self.appended.append((page_id, markdown))
+        return 1
+
+
+def _recurring(pages, *, tickets=None, refuses="", schedule=True, dry_run=False) -> Runner:
+    """A Runner with nothing underneath it but a schedules database."""
+    runner = Runner.__new__(Runner)
+    runner.client = _ScheduleClient(pages, tickets, refuses)
+    runner.config = C.Config(
+        notion=C.Notion(properties=dict(C._DEFAULT_PROPERTIES), status={}),
+        runner=C.Runner(schedule=schedule),
+        projects={},
+        path=Path("/nowhere"),
+        notify=C.Notify(desktop=False),
+    )
+    runner._workspace = workspace.Workspace(tickets="db-tickets", schedules="db-schedules")
+    runner.agent_label = "ticket-runner@laptop"
+    runner.quiet = True
+    runner.dry_run = dry_run
+    return runner
+
+
+def _ticket_page(page_id: str, status: str) -> notion.Page:
+    return notion.Page(
+        id=page_id, url="", title=page_id,
+        properties={"Status": {"type": "status", "status": {"name": status}}},
+    )
+
+
+def _written(client, name: str) -> object:
+    """The last value written into one column of the schedule, or None."""
+    for _, values in reversed(client.written):
+        if name in values:
+            return values[name]
+    return None
+
+
+@case
+def a_machine_that_was_off_for_three_days_produces_one_ticket_and_not_twelve():
+    """Anacron, not cron: waking up must not set off an avalanche of sessions."""
+    stale = (datetime.now().astimezone() - timedelta(days=3)).isoformat()
+    runner = _recurring([_schedule_page("s-1", next=stale)])
+    born = runner.recur()
+
+    assert len(born) == 1 and born[0]["status"] == "scheduled"
+    assert born[0]["from"] == "Revue des dépendances"
+    assert len(runner.client.created) == 1, "one ticket, not one per day missed"
+    title_, values = runner.client.created[0]
+    assert title_.startswith("Revue des dépendances — ")
+    assert values["Status"] == "Ready"
+    assert values["Project"] == "p-animalink" and values["Priority"] == "Normal"
+
+    # The next moment is computed from now, never by stacking up what was lost.
+    ahead = schedules.scheduled_for(_written(runner.client, "Next"))
+    assert ahead is not None and ahead > datetime.now().astimezone()
+    assert ahead < datetime.now().astimezone() + timedelta(days=1), "the next one, not the fourth"
+
+
+@case
+def the_body_of_the_schedule_is_copied_into_the_ticket_it_makes():
+    """The ticket has to read on its own, and say where it came from."""
+    stale = (datetime.now().astimezone() - timedelta(hours=2)).isoformat()
+    runner = _recurring([_schedule_page("s-1", next=stale)])
+    runner.recur()
+
+    page_id, body = runner.client.appended[0]
+    assert page_id == "t-1"
+    assert "Revue des dépendances" in body and "https://notion.so/s-1" in body
+    assert "Lister les dépendances en retard" in body
+    # And the schedule is told what it produced, which is how the next pass
+    # knows whether this occurrence is over.
+    assert _written(runner.client, "Last ticket") == "t-1"
+
+
+@case
+def an_occurrence_still_open_never_produces_a_second_one():
+    """A schedule stuck on a question must not fill the board with copies."""
+    stale = (datetime.now().astimezone() - timedelta(hours=2)).isoformat()
+    for status in ("Ready", "In progress", "In review", "Blocked"):
+        runner = _recurring(
+            [_schedule_page("s-1", next=stale, last_ticket="t-old")],
+            tickets={"t-old": _ticket_page("t-old", status)},
+        )
+        assert runner.recur() == [], status
+        assert runner.client.created == [], status
+        # Next moves on regardless, or the schedule would keep re-firing.
+        ahead = schedules.scheduled_for(_written(runner.client, "Next"))
+        assert ahead is not None and ahead > datetime.now().astimezone(), status
+
+    for status in ("Done", "Failed"):
+        runner = _recurring(
+            [_schedule_page("s-1", next=stale, last_ticket="t-old")],
+            tickets={"t-old": _ticket_page("t-old", status)},
+        )
+        assert len(runner.recur()) == 1, status
+
+
+@case
+def a_last_ticket_that_no_longer_exists_never_wedges_its_schedule():
+    """A page somebody deleted would otherwise stop it being born for good."""
+    stale = (datetime.now().astimezone() - timedelta(hours=2)).isoformat()
+    runner = _recurring([_schedule_page("s-1", next=stale, last_ticket="t-gone")])
+    assert len(runner.recur()) == 1
+
+
+@case
+def a_schedule_written_this_minute_does_not_fire_this_minute():
+    """“Weekly / Monday” written on a Tuesday must not produce a ticket now."""
+    runner = _recurring([_schedule_page("s-1", cadence="Weekly", day="Monday", next="")])
+    assert runner.recur() == []
+    assert runner.client.created == []
+    ahead = schedules.scheduled_for(_written(runner.client, "Next"))
+    assert ahead is not None and ahead > datetime.now().astimezone()
+    assert _written(runner.client, "Last") is None, "nothing happened, so nothing was the last"
+
+
+@case
+def a_schedule_in_the_future_and_one_that_is_off_both_cost_nothing():
+    later = (datetime.now().astimezone() + timedelta(days=1)).isoformat()
+    stale = (datetime.now().astimezone() - timedelta(hours=2)).isoformat()
+
+    ahead = _recurring([_schedule_page("s-1", next=later)])
+    assert ahead.recur() == [] and ahead.client.written == []
+
+    unticked = _recurring([_schedule_page("s-1", next=stale, active=False)])
+    assert unticked.recur() == [] and unticked.client.written == []
+
+    # One line turns every schedule off, without unticking a single row — and
+    # without the database being read at all.
+    off = _recurring([_schedule_page("s-1", next=stale)], schedule=False)
+    assert off.recur() == [] and off.client.written == []
+
+    # A schedule nobody can read holds nobody up.
+    broken = _recurring([
+        _schedule_page("s-broken", cadence="Fortnightly", next=stale),
+        _schedule_page("s-fine", next=stale),
+    ])
+    assert len(broken.recur()) == 1
+    assert broken.client.created[0][0].startswith("Revue")
+
+
+@case
+def a_dry_run_says_what_would_be_born_and_writes_nowhere():
+    stale = (datetime.now().astimezone() - timedelta(hours=2)).isoformat()
+    runner = _recurring([_schedule_page("s-1", next=stale)], dry_run=True)
+    born = runner.recur()
+    assert len(born) == 1 and born[0]["status"] == "dry-run"
+    assert runner.client.created == [] and runner.client.written == []
+
+
+@case
+def the_occurrence_is_taken_before_it_is_made():
+    """A crash between the two loses one occurrence; the other order makes two.
+
+    So a ticket Notion refuses still leaves `Next` moved on: one lost report
+    beats two identical tickets and the session each of them costs.
+    """
+    stale = (datetime.now().astimezone() - timedelta(hours=2)).isoformat()
+    runner = _recurring([_schedule_page("s-1", next=stale)], refuses="400 body failed validation")
+    assert runner.recur() == []
+    ahead = schedules.scheduled_for(_written(runner.client, "Next"))
+    assert ahead is not None and ahead > datetime.now().astimezone()
+    assert _written(runner.client, "Last ticket") is None, "nothing was made to point at"
+
+
+@case
+def a_workspace_with_nothing_that_repeats_is_a_workspace_that_runs():
+    """The whole feature is optional: no row, no warning, no difference."""
+    client = _FakeClient({"Tickets": "p-tickets", "Context": "p-context"}, text="x")
+    space = workspace.resolve(client, _settings())
+    assert space.schedules == ""
+    assert not space.warnings
+
+    present = _FakeClient(
+        {"Tickets": "p-tickets", "Context": "p-context", "Schedules": "p-schedules"}, text="x"
+    )
+    assert workspace.resolve(present, _settings()).schedules == "db-of-p-schedules"
+
+    # And a Runner reading a workspace without one asks Notion nothing at all.
+    runner = _recurring([])
+    runner._workspace = workspace.Workspace(tickets="db-tickets")
+    assert runner.recur() == [] and runner.schedules() == []
+
+
+@case
+def the_schedules_database_is_built_after_the_tickets_it_points_at():
+    """A relation cannot name a database that does not exist yet."""
+    board = _Board()
+    provision.provision(board, _settings(), "root")
+
+    schema = board._schemas["db-schedules"]
+    for expected in ("Cadence", "At", "Day", "Active", "Next", "Last", "Last ticket"):
+        assert expected in schema, expected
+    assert schema["Last ticket"]["relation"]["database_id"] == "db-tickets"
+    assert schema["Project"]["relation"]["database_id"] == "db-projects"
+    assert board.created.index("db-tickets") < board.created.index("db-schedules")
+
+    cadences = [option["name"] for option in schema["Cadence"]["select"]["options"]]
+    assert cadences == list(schedules.CADENCES)
+
+    # The example schedule is left unticked: an init must start nothing.
+    example = board._rows["db-schedules"]
+    assert len(example) == 1
+    row = provision.schedules_schema(_settings(), "db-tickets", "db-projects")
+    assert len(row) == 11, "ten columns beside the title"
+
+
+@case
+def init_run_again_on_a_board_that_already_schedules_touches_nothing():
+    board = _Board()
+    provision.provision(board, _settings(), "root")
+    before = dict(board._schemas["db-schedules"])
+    board.created.clear()
+
+    second = provision.provision(board, _settings(), "root")
+    assert board.created == [], "no second schedules database, no second example"
+    assert board._schemas["db-schedules"] == before
+    assert any("Schedules" in what for verb, what in second.steps if verb == "kept")
+    assert all(verb == "kept" for verb, _ in second.steps), second.steps
+
+
 # -- staying up to date ------------------------------------------------------
 
 
@@ -1755,6 +2116,67 @@ def a_copy_is_told_apart_from_a_clone_before_anything_is_fetched():
     """An install made with TR_SRC has no remote: a reason, not a failure."""
     status = update._look(Path(tempfile.mkdtemp()))
     assert not status.stale and "copy" in status.reason
+
+
+# -- staying alive -----------------------------------------------------------
+
+
+@case
+def a_lock_left_by_a_dead_run_is_not_a_run():
+    """`run.lock` on disk is what a killed run leaves behind; the flock is not.
+
+    For two hours on 7 September 2026, `status` read the leftover file as a run
+    in progress, and the search for the silence went the wrong way.
+    """
+    with _state_home() as state_home:
+        state_home.mkdir(parents=True)
+        (state_home / "run.lock").write_text("4242 2026-09-07T11:57:17+00:00\n")
+        assert state.running() == "", "a file nobody holds is not a run"
+        with state.lock():
+            assert state.running().startswith(str(os.getpid())), "a held lock is one"
+        assert state.running() == ""
+
+
+@case
+def a_timer_with_no_next_run_is_stalled_rather_than_enabled():
+    """What the incident's timer answered, and what a healthy one answers."""
+    starved = systemd.describe(
+        "enabled",
+        "SubState=elapsed\nNextElapseUSecRealtime=\nNextElapseUSecMonotonic=infinity\n",
+        "NEXT LEFT LAST PASSED UNIT ACTIVATES\n- - Mon 2026-09-07 13:57:17 CEST 2h ago ticket-runner.timer ticket-runner.service\n",
+    )
+    assert starved.stalled and starved.label == "stalled"
+    assert starved.row.startswith("- -"), "the list-timers line travels with the verdict"
+
+    armed = systemd.describe(
+        "enabled", "SubState=waiting\nNextElapseUSecRealtime=\nNextElapseUSecMonotonic=18h 48min\n"
+    )
+    assert armed.armed and not armed.stalled and armed.label == "enabled"
+
+    busy = systemd.describe(
+        "enabled", "SubState=running\nNextElapseUSecRealtime=\nNextElapseUSecMonotonic=\n"
+    )
+    assert busy.running and not busy.stalled, "no next run while the service runs is a run"
+
+    off = systemd.describe("disabled", "SubState=dead\nNextElapseUSecRealtime=\nNextElapseUSecMonotonic=\n")
+    assert not off.stalled and off.label == "disabled", "only an enabled timer can lie"
+    assert systemd.describe("", "").label == "", "and what is not installed says so as it did"
+
+
+@case
+def the_timer_counts_from_its_own_start():
+    """OnBootSec serves once; OnUnitActiveSec needs a service that ran. A timer
+    restarted after a failed run had neither, and never fired again."""
+    previous = os.environ.get("HOME")
+    os.environ["HOME"] = tempfile.mkdtemp()
+    try:
+        units = update.write_units(600, ROOT)
+    finally:
+        os.environ["HOME"] = previous
+    timer = (units / "ticket-runner.timer").read_text()
+    for directive in ("OnActiveSec=600s", "OnBootSec=600s", "OnUnitActiveSec=600s"):
+        assert directive in timer, directive
+    assert "@" not in timer, "a placeholder left in the unit"
 
 
 # -- runner ------------------------------------------------------------------
@@ -2905,6 +3327,8 @@ def _bare_api(client, me: str = "runner-id") -> web_api.Api:
         web=C.Web(),
     )
     api._stamp = 0.0
+    api._projects = {}
+    api._projects_at = 0.0
     return api
 
 
@@ -2992,6 +3416,95 @@ def a_message_written_to_a_ticket_reaches_every_open_console():
     assert event.payload["ticket"] == "p-ticket"
     assert event.payload["role"] == "you"
     assert event.payload["text"] == "on garde le bandeau"
+
+
+@case
+def the_console_draws_what_comes_back_on_its_own():
+    """A schedule the runner reads is one the console shows, problem included.
+
+    And the switch travels with the rows, because a browser is the one place
+    `runner.schedule = false` cannot be seen otherwise: a page of ticked
+    schedules that never fire would read as a calendar that works.
+    """
+    import time as clock
+
+    api = _bare_api(_TalkClient([]))
+    api._runner = _recurring(
+        [
+            _schedule_page(
+                "s-1",
+                next="2026-09-14T09:00:00+02:00",
+                last_ticket="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            ),
+            _schedule_page("s-2", name="Le rapport", cadence="Fortnightly", active=False),
+        ],
+        schedule=False,
+    )
+    api._config = api._runner.config
+    api._projects = {"p-animalink": {"id": "panimalink", "name": "Animalink", "kind": "code"}}
+    api._projects_at = clock.time()
+
+    payload = api.schedules()
+    assert payload["database"], "the workspace has one; the pane must not offer to build it"
+    assert payload["page"] == "Schedules"
+    assert payload["enabled"] is False, "the one switch that turns the whole calendar off"
+
+    first, second = payload["schedules"]
+    assert first["name"] == "Revue des dépendances"
+    assert (first["cadence"], first["at"], first["active"]) == ("Daily", "09:00", True)
+    assert first["next"].startswith("2026-09-14T09:00")
+    assert first["project"] == "Animalink", "the relation is resolved, as it is on a card"
+    assert first["ticket"] == "aaaaaaaabbbbccccddddeeeeeeeeeeee", "addressed as the board does"
+    assert not first["problem"]
+
+    # A cadence nobody knows is stepped over by the pass rather than raised, and
+    # says so here rather than showing a date it does not have.
+    assert second["problem"], "a schedule the runner cannot read has to say why"
+    assert second["next"] == "" and second["active"] is False
+
+
+class _PageClient(_TalkClient):
+    """A ticket page: its row, and the blocks written under it."""
+
+    def __init__(self, content: str, status: str = "Ready") -> None:
+        super().__init__([])
+        self._content = content
+        self._status = status
+
+    def page(self, page_id: str) -> notion.Page:
+        return notion.Page(
+            id="1a2b3c4d-0000-0000-0000-000000000000",
+            url="https://notion.so/p",
+            title="Retirer le bandeau",
+            properties={"Status": {"type": "status", "status": {"name": self._status}}},
+            raw={"created_time": "2026-09-01T09:00:00.000Z"},
+        )
+
+    def blocks_text(self, page_id: str, depth: int = 0) -> str:
+        return self._content
+
+
+@case
+def a_ticket_read_on_its_own_is_the_card_and_the_page_under_it():
+    """The board hands out rows; the ticket's page hands out what was written on it.
+
+    Same shape as the card — the console draws one component for both — plus
+    the page's blocks flattened the way the runner reads them before a run: the
+    brief you wrote, and the report a run appended under it.
+    """
+    api = _bare_api(_PageClient("# Brief\nRetirer le bandeau du dashboard.\n\n- [x] fait"))
+    api._runner._workspace = type("W", (), {"projects": ""})()
+    payload = api.ticket("1a2b3c4d000000000000000000000000")
+    assert payload["id"] == "1a2b3c4d000000000000000000000000", "the id is the one the board uses"
+    assert payload["short"] == "00000000", "the short id is the tail, where the entropy is"
+    assert payload["title"] == "Retirer le bandeau"
+    assert payload["column"] == "ready", "the column is named the way the board names it"
+    assert payload["content"].startswith("# Brief"), "the page's blocks come with the row"
+    assert "- [x] fait" in payload["content"]
+
+    elsewhere = _bare_api(_PageClient("", status="Parked"))
+    elsewhere._runner._workspace = type("W", (), {"projects": ""})()
+    assert elsewhere.ticket("1a2b3c4d000000000000000000000000")["column"] == "other"
 
 
 @case
@@ -3632,6 +4145,134 @@ def nothing_is_sent_anywhere_during_a_dry_run():
     finally:
         channels.announce = original
     assert sent == []
+
+
+@contextmanager
+def _notifying(*, missing: str = ""):
+    """The tools a notification uses, replaced by a note of what they were asked.
+
+    One of them can be taken away, because on a real machine one of them is: a
+    box with no `gdbus`, a session with no `xdg-open`. None of that is allowed
+    to cost the notification itself.
+    """
+    launched: list[list[str]] = []
+    tools = ("notify-send", "gdbus", "dbus-monitor", "xdg-open")
+    found = {name: f"/usr/bin/{name}" for name in tools if name != missing}
+
+    def run(command, **rest):
+        launched.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    originals = (shutil.which, subprocess.run, subprocess.Popen)
+    shutil.which = lambda name: found.get(name)
+    subprocess.run = run
+    subprocess.Popen = lambda command, **rest: launched.append(command)
+    try:
+        yield launched
+    finally:
+        shutil.which, subprocess.run, subprocess.Popen = originals
+
+
+@case
+def a_desktop_notification_takes_you_to_the_ticket_it_names():
+    """A line on screen you cannot follow is a title you then go and hunt for."""
+    with _notifying() as launched:
+        assert notify.send(
+            "Blocked · Le header", "Which header?", link="https://notion.so/t"
+        )
+    assert len(launched) == 1, "the plain notification is not sent on top of the clickable one"
+    command = launched[0]
+    assert command[1:3] == ["-m", "ticket_runner.notify"], (
+        "the click is waited for beside the run, never inside it"
+    )
+    assert command[3:] == [
+        "https://notion.so/t", "Blocked · Le header", "Which header?", "normal"
+    ]
+
+
+@case
+def a_notification_with_nowhere_to_go_is_a_notification_all_the_same():
+    for tool in ("gdbus", "dbus-monitor", "xdg-open"):
+        with _notifying(missing=tool) as launched:
+            assert notify.send("Ready to review · t", "branch", link="https://notion.so/t")
+        assert launched[0][0] == "/usr/bin/notify-send", f"sent anyway, without {tool}"
+
+    with _notifying() as launched:
+        assert notify.send("ticket-runner updated", "0.4.0")
+    assert launched[0][0] == "/usr/bin/notify-send", "nothing to open, so nothing to follow"
+
+    with _notifying(missing="notify-send") as launched:
+        assert notify.send("ticket-runner updated", "0.4.0") is False
+    assert launched == []
+
+
+@case
+def the_notification_posted_over_dbus_is_the_one_notify_send_would_have_sent():
+    posted: list[list[str]] = []
+    original = subprocess.run
+    subprocess.run = lambda command, **rest: (
+        posted.append(command) or subprocess.CompletedProcess(command, 0, "(uint32 42,)\n", "")
+    )
+    try:
+        assert notify._post("Blocked · t", '42 "why"', urgent=True) == "42"
+    finally:
+        subprocess.run = original
+    command = posted[0]
+    assert "--" in command, "`-1` is an expiry, and gdbus would read it as an option"
+    assert command[command.index("--") + 1:] == [
+        '"ticket-runner"', "0", '"dialog-warning"', '"Blocked · t"', '"42 \\"why\\""',
+        '["default", "Open the ticket"]', "{'urgency': <byte 2>}", "-1",
+    ], "a body is a string, even when it reads like a number"
+
+
+@case
+def only_a_click_opens_the_page_and_a_dismissal_never_does():
+    """`dbus-monitor` says it over several lines, and about every notification."""
+    def watching(*lines):
+        return type("W", (), {"stdout": iter(lines)})()
+
+    clicked = watching(
+        "signal ... interface=org.freedesktop.Notifications; member=ActionInvoked\n",
+        "   uint32 7\n",
+        '   string "default"\n',
+    )
+    assert notify._clicked(clicked, "7")
+
+    dismissed = watching(
+        "signal ... interface=org.freedesktop.Notifications; member=NotificationClosed\n",
+        "   uint32 7\n",
+        "   uint32 2\n",
+    )
+    assert not notify._clicked(dismissed, "7")
+
+    somebody_else = watching(
+        "signal ... interface=org.freedesktop.Notifications; member=ActionInvoked\n",
+        "   uint32 9\n",
+        '   string "default"\n',
+    )
+    assert not notify._clicked(somebody_else, "7"), "another application's notification"
+
+
+@case
+def a_ticket_notification_carries_its_page_to_the_screen_too():
+    seen: list[dict] = []
+    runner = Runner.__new__(Runner)
+    runner.config = _config("")
+    runner.dry_run = False
+    runner.quiet = True
+    ticket = type("T", (), {
+        "page": notion.Page(id=TICKET, url="https://notion.so/t", title="t"),
+        "title": "t",
+        "url": "https://notion.so/t",
+    })()
+    original = notify.send
+    notify.send = lambda title, body, **rest: seen.append({"title": title, **rest})
+    try:
+        runner._tell("done", ticket, "Ready to review · t", "branch")
+    finally:
+        notify.send = original
+    assert seen == [{"title": "Ready to review · t", "urgent": False,
+                     "link": "https://notion.so/t"}]
 
 
 # -- clean, and the branch a failure leaves behind ----------------------------

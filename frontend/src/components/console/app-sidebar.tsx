@@ -1,13 +1,14 @@
 import {
   Activity,
+  CalendarClock,
   LayoutGrid,
   Moon,
   RefreshCw,
   Settings2,
   Sun,
   Terminal,
-  Ticket,
 } from "lucide-react"
+import { Link } from "react-resource-view"
 
 import {
   Sidebar,
@@ -28,26 +29,23 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useConsole } from "@/hooks/use-console"
 import { useTheme } from "@/hooks/use-theme"
-import { visible, type Pane, type PaneMenuItem } from "@/lib/menu"
+import { visible, type PaneMenuItem } from "@/lib/menu"
+import { pageHref, type Route } from "@/lib/router"
 import { cn } from "@/lib/utils"
+import { boardHref } from "@/resources/tickets"
 
 /* The left menu.
  *
- * It replaces the row of tabs, and it says more than the tabs could: how many
- * tickets are ready, which one the Ticket pane is holding, how many sessions are
- * writing right now. A menu that only navigates is a menu you read once.
+ * Five addresses, and it says more than the addresses could: how many tickets
+ * are on the board and how many are ready, how many sessions are writing right
+ * now, whether the timer is on. A menu that only navigates is a menu you read
+ * once.
  *
  * Collapsed it is a rail of icons — ⌘B, or the strip down its right edge — and
  * every entry keeps its name in a tooltip.
  */
-export function AppSidebar({
-  pane,
-  setPane,
-}: {
-  pane: Pane
-  setPane: (pane: Pane) => void
-}) {
-  const { board, runner, sessions, ticket, connection, refresh } = useConsole()
+export function AppSidebar({ route }: { route: Route }) {
+  const { board, runner, sessions, connection, refresh } = useConsole()
   const { theme, toggle } = useTheme()
   const { state, isMobile, setOpenMobile } = useSidebar()
 
@@ -57,8 +55,8 @@ export function AppSidebar({
 
   const items: PaneMenuItem[] = [
     {
-      pane: "board",
       name: "Board",
+      href: boardHref(),
       icon: LayoutGrid,
       priority: 50,
       badge: board.tickets.length || undefined,
@@ -67,43 +65,45 @@ export function AppSidebar({
         .join(" · "),
     },
     {
-      pane: "ticket",
-      name: "Ticket",
-      icon: Ticket,
-      priority: 40,
-      // Nothing to say until a card has been clicked, and saying "#—" would be
-      // saying something.
-      detail: ticket ? `#${ticket.short}` : "click a card",
-    },
-    {
-      pane: "console",
       name: "Console",
+      href: pageHref("console"),
+      page: "console",
       icon: Terminal,
       priority: 30,
       detail: runner?.chat.session_id ? `${runner.chat.turns} turn(s)` : "no conversation yet",
     },
     {
-      pane: "live",
       name: "Live",
+      href: pageHref("live"),
+      page: "live",
       icon: Activity,
       priority: 20,
       badge: sessions.length || undefined,
       detail: running ? `${running} running` : "",
     },
     {
-      pane: "settings",
+      name: "Schedules",
+      href: pageHref("schedules"),
+      page: "schedules",
+      icon: CalendarClock,
+      priority: 15,
+      // No count and no badge: the only way to know is to ask Notion, and this
+      // menu is redrawn every time the board moves.
+      detail: "what comes back on its own",
+    },
+    {
       name: "Settings",
+      href: pageHref("settings"),
+      page: "settings",
       icon: Settings2,
       priority: 10,
       detail: runner?.timer === "enabled" ? "timer on" : `timer ${runner?.timer ?? ""}`.trim(),
     },
   ]
 
-  const choose = (chosen: Pane) => {
-    setPane(chosen)
-    // On a phone the menu is a drawer over the pane it just opened.
-    if (isMobile) setOpenMobile(false)
-  }
+  // Every address of the board — a ticket included — is the Board entry.
+  const active = (item: PaneMenuItem) =>
+    item.page ? route.kind === "page" && route.page === item.page : route.kind === "resource"
 
   const collapsed = state === "collapsed" && !isMobile
 
@@ -112,20 +112,25 @@ export function AppSidebar({
       <SidebarHeader>
         <div
           className={cn(
-            "flex items-center gap-2 px-2 py-1.5",
+            "flex items-center gap-2.5 px-2 py-1.5",
             collapsed && "justify-center px-0"
           )}
         >
-          <span aria-hidden className="text-base leading-none">
+          {/* The one place the accent is spent on something that is not a
+              button: the mark, so the eye has somewhere to start. */}
+          <span
+            aria-hidden
+            className="bg-primary flex size-7 shrink-0 items-center justify-center rounded-lg text-sm leading-none"
+          >
             🎫
           </span>
           {!collapsed ? (
             <div className="min-w-0">
-              <div className="truncate text-sm font-semibold">
+              <div className="truncate text-sm font-semibold tracking-[-0.01em]">
                 ticket<span className="text-muted-foreground">-runner</span>
               </div>
               {runner?.version ? (
-                <div className="text-muted-foreground truncate font-mono text-[0.7rem]">
+                <div className="text-muted-foreground truncate font-mono text-[0.65rem]">
                   v{runner.version}
                   {runner.update ? ` · ${runner.update} waiting` : ""}
                 </div>
@@ -139,35 +144,52 @@ export function AppSidebar({
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>The workspace</SidebarGroupLabel>
+          <SidebarGroupLabel className="font-mono text-[0.65rem] font-semibold tracking-[0.14em] uppercase">
+            workspace
+          </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {visible(items).map((item) => {
                 const Icon = item.icon
                 return (
-                  <SidebarMenuItem key={item.pane}>
+                  <SidebarMenuItem
+                    key={item.name}
+                    // Above 861px the console has a column of its own, and an
+                    // entry for it would be an entry for what is already there.
+                    className={item.page === "console" ? "min-[861px]:hidden" : undefined}
+                  >
                     <SidebarMenuButton
-                      isActive={pane === item.pane}
-                      onClick={() => choose(item.pane)}
+                      asChild
+                      isActive={active(item)}
                       tooltip={item.detail ? `${item.name} — ${item.detail}` : item.name}
                       size="lg"
                       className="group-data-[collapsible=icon]:justify-center"
                     >
-                      {Icon ? <Icon /> : null}
-                      {/* Two lines, so not the single span the collapsed rule
-                          truncates — left to it, the rail shows the first letter
-                          of each label instead of nothing. */}
-                      <span className="flex min-w-0 flex-col group-data-[collapsible=icon]:hidden">
-                        <span className="truncate">{item.name}</span>
-                        {item.detail ? (
-                          <span className="text-muted-foreground truncate text-[0.7rem] font-normal">
-                            {item.detail}
-                          </span>
-                        ) : null}
-                      </span>
+                      <Link
+                        to={item.href}
+                        onClick={() => {
+                          // On a phone the menu is a drawer over the pane it just opened.
+                          if (isMobile) setOpenMobile(false)
+                        }}
+                      >
+                        {Icon ? <Icon /> : null}
+                        {/* Two lines, so not the single span the collapsed rule
+                            truncates — left to it, the rail shows the first letter
+                            of each label instead of nothing. */}
+                        <span className="flex min-w-0 flex-col group-data-[collapsible=icon]:hidden">
+                          <span className="truncate">{item.name}</span>
+                          {item.detail ? (
+                            <span className="text-muted-foreground truncate font-mono text-[0.65rem] font-normal">
+                              {item.detail}
+                            </span>
+                          ) : null}
+                        </span>
+                      </Link>
                     </SidebarMenuButton>
                     {item.badge !== undefined ? (
-                      <SidebarMenuBadge>{item.badge}</SidebarMenuBadge>
+                      <SidebarMenuBadge className="font-mono text-[0.7rem] tabular-nums">
+                        {item.badge}
+                      </SidebarMenuBadge>
                     ) : null}
                   </SidebarMenuItem>
                 )

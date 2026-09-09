@@ -1,99 +1,116 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* The views and the forms are written in Tailwind classes against the shadcn
+   variables below, so Tailwind has to read their compiled files to emit the
+   classes they use. Their own `styles.css` is not imported: the palette is
+   this file's. */
+@source "../node_modules/react-resource-view/dist";
+@source "../node_modules/react-data-form/dist";
+@source "../node_modules/@shadcn/react/dist";
+
 @custom-variant dark (&:is(.dark *));
 
 /* The console's palette, as shadcn/ui names things.
  *
- * The dark values are the ones the hand-written console used — #0f1115 behind
- * everything, #e7e9ee on top of it, a #3b82f6 blue — because it sits beside a
- * terminal and a Notion board and the thing it shows most of the time is a log.
- * The light values are shadcn's slate, for the one person who wants them.
+ * Dark is the console's own mode — it sits beside a terminal and a Notion board
+ * and the thing it shows most of the time is a log — so dark is where the
+ * palette is decided and light is the translation of it. The ladder is four
+ * steps deep: the page, the card on it, the popover above that, and the fill
+ * behind a control. The accent is a lime, not a blue: the one colour on the
+ * page that means "this is the button", and nothing else is allowed to use it.
+ *
+ * Light cannot take the same lime — `text-primary` on white is unreadable, and
+ * both view libraries use it — so it takes the deep end of the same hue.
  *
  * `--tr-*` are the console's own colours: the ones a column heading, a status
  * tag or a session step is drawn in. They are not shadcn's to name, and they
  * are declared here so a component can ask for `text-tr-green` and get the same
- * green everywhere.
+ * green everywhere. `--field` is not shadcn's either: it is the fill every
+ * control sits on, and it exists because a form of filled boxes reads as a form
+ * where a form of outlines reads as a table.
  */
 
 :root {
-  --radius: 0.75rem;
+  --radius: 0.625rem;
 
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.208 0.042 265.755);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.208 0.042 265.755);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.208 0.042 265.755);
-  --primary: oklch(0.623 0.214 259.815);
-  --primary-foreground: oklch(0.984 0.003 247.858);
-  --secondary: oklch(0.968 0.007 247.896);
-  --secondary-foreground: oklch(0.208 0.042 265.755);
-  --muted: oklch(0.968 0.007 247.896);
-  --muted-foreground: oklch(0.554 0.046 257.417);
-  --accent: oklch(0.968 0.007 247.896);
-  --accent-foreground: oklch(0.208 0.042 265.755);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.984 0.003 247.858);
-  --border: oklch(0.929 0.013 255.508);
-  --input: oklch(0.929 0.013 255.508);
-  --ring: oklch(0.623 0.214 259.815);
+  --background: #fbfbf9;
+  --foreground: #14161a;
+  --card: #ffffff;
+  --card-foreground: #14161a;
+  --popover: #ffffff;
+  --popover-foreground: #14161a;
+  --primary: #46600f;
+  --primary-foreground: #f4ffe0;
+  --secondary: #f1f2ee;
+  --secondary-foreground: #14161a;
+  --muted: #f1f2ee;
+  --muted-foreground: #6b7280;
+  --accent: #eceee8;
+  --accent-foreground: #14161a;
+  --destructive: #c8332a;
+  --destructive-foreground: #ffffff;
+  --border: #e4e5e0;
+  --input: #e4e5e0;
+  --ring: #46600f;
+  --field: #f4f5f1;
 
-  --sidebar: oklch(0.984 0.003 247.858);
-  --sidebar-foreground: oklch(0.208 0.042 265.755);
-  --sidebar-primary: oklch(0.623 0.214 259.815);
-  --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-accent: oklch(0.929 0.013 255.508);
-  --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
-  --sidebar-border: oklch(0.929 0.013 255.508);
-  --sidebar-ring: oklch(0.623 0.214 259.815);
+  --sidebar: #f5f5f2;
+  --sidebar-foreground: #14161a;
+  --sidebar-primary: #46600f;
+  --sidebar-primary-foreground: #f4ffe0;
+  --sidebar-accent: #e9eae4;
+  --sidebar-accent-foreground: #14161a;
+  --sidebar-border: #e4e5e0;
+  --sidebar-ring: #46600f;
 
   --tr-blue: #2563eb;
-  --tr-green: #059669;
+  --tr-green: #4d7a10;
   --tr-amber: #b45309;
-  --tr-red: #dc2626;
+  --tr-red: #c8332a;
   --tr-violet: #7c3aed;
   --tr-pink: #db2777;
 }
 
 .dark {
-  --background: #0f1115;
-  --foreground: #e7e9ee;
-  --card: #151820;
-  --card-foreground: #e7e9ee;
-  --popover: #1a1e28;
-  --popover-foreground: #e7e9ee;
-  --primary: #3b82f6;
-  --primary-foreground: #f8fafc;
-  --secondary: #1a1e28;
-  --secondary-foreground: #e7e9ee;
-  --muted: #1a1e28;
-  --muted-foreground: #98a2b3;
-  --accent: #262b36;
-  --accent-foreground: #e7e9ee;
-  --destructive: #f87171;
-  --destructive-foreground: #0f1115;
-  --border: #262b36;
-  --input: #2c3240;
-  --ring: #3b82f6;
+  --background: #0e0f13;
+  --foreground: #f1f2f4;
+  --card: #16181e;
+  --card-foreground: #f1f2f4;
+  --popover: #1b1e26;
+  --popover-foreground: #f1f2f4;
+  --primary: #d5f95a;
+  --primary-foreground: #14180b;
+  --secondary: #1b1e26;
+  --secondary-foreground: #f1f2f4;
+  --muted: #1b1e26;
+  --muted-foreground: #8d95a5;
+  --accent: #232833;
+  --accent-foreground: #f1f2f4;
+  --destructive: #f2685f;
+  --destructive-foreground: #12141a;
+  --border: #262a34;
+  --input: #262a34;
+  --ring: #d5f95a;
+  --field: #1a1d24;
 
   /* A shade below the page, not above it: the sidebar is the frame, and a
      frame that glows brighter than what it holds is a frame you keep reading. */
-  --sidebar: #12141a;
-  --sidebar-foreground: #e7e9ee;
-  --sidebar-primary: #3b82f6;
-  --sidebar-primary-foreground: #f8fafc;
-  --sidebar-accent: #232833;
-  --sidebar-accent-foreground: #e7e9ee;
-  --sidebar-border: #262b36;
-  --sidebar-ring: #3b82f6;
+  --sidebar: #0b0c0f;
+  --sidebar-foreground: #f1f2f4;
+  --sidebar-primary: #d5f95a;
+  --sidebar-primary-foreground: #14180b;
+  --sidebar-accent: #1e222b;
+  --sidebar-accent-foreground: #f1f2f4;
+  --sidebar-border: #1e222b;
+  --sidebar-ring: #d5f95a;
 
-  --tr-blue: #3b82f6;
-  --tr-green: #34d399;
-  --tr-amber: #fbbf24;
-  --tr-red: #f87171;
-  --tr-violet: #a78bfa;
-  --tr-pink: #f472b6;
+  --tr-blue: #4d91ff;
+  --tr-green: #b8f24a;
+  --tr-amber: #e5a94e;
+  --tr-red: #f2685f;
+  --tr-violet: #9b7bff;
+  --tr-pink: #f26bae;
 }
 
 @theme inline {
@@ -138,7 +155,17 @@
   --color-tr-violet: var(--tr-violet);
   --color-tr-pink: var(--tr-pink);
 
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --color-field: var(--field);
+
+  /* The two faces the console speaks in: a geometric grotesque for everything
+     that is prose, and a monospace for everything that is a fact — an id, a
+     path, a cost, a timestamp. Named first are the ones the design was drawn
+     in; what follows is what the machine already has, because the console is
+     served by a Python process on a loopback port and is not going to ask the
+     network for a typeface before it can show you a log. */
+  --font-sans: "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo,
+    Consolas, monospace;
 }
 
 @layer base {
@@ -153,7 +180,7 @@
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans;
     /* The console is a set of panes that scroll inside themselves. The page
        behind them does not scroll, or the header leaves with the board. */
     overflow: hidden;
@@ -170,6 +197,40 @@
 }
 
 @layer utilities {
+  /* Every control on the page is a filled box, and every one of them is filled
+     from here.
+
+     The console draws forms it does not own: the settings tab is its own, but
+     the new-ticket dialog is react-data-form's, and both packages ship their
+     own compiled copies of shadcn's `Input`, `Textarea` and `SelectTrigger` —
+     `bg-transparent` included. A rule in the components layer would lose to
+     those; a rule here does not, because Tailwind's utilities and this block
+     are the same layer and this block is written after the import. So the fill
+     is stated once, on the `data-slot` every copy carries, and a field looks
+     the same whoever drew it.
+
+     The two below it are the same argument about proportion: a label sitting a
+     whole line above its box reads as a heading over a table, and these forms
+     are read as forms. */
+  [data-slot="input"],
+  [data-slot="textarea"],
+  [data-slot="select-trigger"] {
+    background-color: var(--field);
+    border-color: var(--border);
+  }
+  [data-slot="input"]:focus-visible,
+  [data-slot="textarea"]:focus-visible,
+  [data-slot="select-trigger"]:focus-visible {
+    background-color: var(--background);
+  }
+  [data-slot="field-label"] {
+    margin-bottom: 0.375rem;
+  }
+  [data-slot="field-description"] {
+    font-size: 0.75rem;
+    line-height: 1.5;
+  }
+
   /* Written twice, because it is two features. WebKit and Chrome take the
      pseudo-elements, which is where the rounded thumb and the gap around it
      come from; Firefox has none of those and takes the pair of standard

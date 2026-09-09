@@ -13,15 +13,14 @@ changes), the project index, and the tickets database ID.
 
 from __future__ import annotations
 
-import shutil
-import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .. import config as config_module
-from .. import conversation, notion, session, state
+from .. import conversation, notion, session, state, systemd
+from .. import schedules as schedules_module
 from .. import update as update_module
 from ..config import Config
 from ..runner import Runner, scheduled_for, short_id
@@ -110,38 +109,7 @@ class Api:
         projects = self.projects()
         host = self.config.runner.session_host
 
-        tickets = []
-        for page in pages:
-            status = str(notion.read(page, settings.prop("status")) or "")
-            relation = notion.read(page, settings.prop("project")) or []
-            project = projects.get(relation[0]) if relation else None
-            session_id = str(notion.read(page, settings.prop("session")) or "")
-            moment = scheduled_for(notion.read(page, settings.prop("due")))
-            tickets.append(
-                {
-                    "id": page.id.replace("-", ""),
-                    "short": short_id(page.id),
-                    "title": page.title or "(untitled ticket)",
-                    "url": page.url,
-                    "status": status,
-                    "column": names.get(status, "other"),
-                    "project": (project or {}).get("name", ""),
-                    "kind": (project or {}).get("kind", ""),
-                    "priority": str(notion.read(page, settings.prop("priority")) or ""),
-                    "model": str(notion.read(page, settings.prop("model")) or ""),
-                    "progress": str(notion.read(page, settings.prop("progress")) or ""),
-                    "runner": str(notion.read(page, settings.prop("agent")) or ""),
-                    "pull_request": str(notion.read(page, settings.prop("pull_request")) or ""),
-                    "session": _session_id(session_id),
-                    "session_link": session.deep_link(_session_id(session_id), host=host)
-                    if _session_id(session_id)
-                    else "",
-                    "cost": notion.read(page, settings.prop("cost")),
-                    "duration": notion.read(page, settings.prop("duration")),
-                    "scheduled": moment.isoformat(timespec="minutes") if moment else "",
-                    "created": page.raw.get("created_time", ""),
-                }
-            )
+        tickets = [self._ticket(page, names, projects, host) for page in pages]
 
         # Whether this board has a validated column at all. The console offers
         # the gesture only where the runner would honour it: a button that
@@ -170,6 +138,56 @@ class Api:
                 if settings.state(key) not in [settings.state(other) for other in COLUMNS[: COLUMNS.index(key)]]
             ],
         }
+
+    def _ticket(self, page: notion.Page, names: dict[str, str], projects: dict, host: str) -> dict:
+        """One page of the tickets database, as a card reads it."""
+        settings = self.config.notion
+        status = str(notion.read(page, settings.prop("status")) or "")
+        relation = notion.read(page, settings.prop("project")) or []
+        project = projects.get(relation[0]) if relation else None
+        session_id = _session_id(str(notion.read(page, settings.prop("session")) or ""))
+        moment = scheduled_for(notion.read(page, settings.prop("due")))
+        return {
+            "id": page.id.replace("-", ""),
+            "short": short_id(page.id),
+            "title": page.title or "(untitled ticket)",
+            "url": page.url,
+            "status": status,
+            "column": names.get(status, "other"),
+            "project": (project or {}).get("name", ""),
+            "kind": (project or {}).get("kind", ""),
+            "priority": str(notion.read(page, settings.prop("priority")) or ""),
+            "model": str(notion.read(page, settings.prop("model")) or ""),
+            "progress": str(notion.read(page, settings.prop("progress")) or ""),
+            "runner": str(notion.read(page, settings.prop("agent")) or ""),
+            "pull_request": str(notion.read(page, settings.prop("pull_request")) or ""),
+            "session": session_id,
+            "session_link": session.deep_link(session_id, host=host) if session_id else "",
+            "cost": notion.read(page, settings.prop("cost")),
+            "duration": notion.read(page, settings.prop("duration")),
+            "scheduled": moment.isoformat(timespec="minutes") if moment else "",
+            "created": page.raw.get("created_time", ""),
+        }
+
+    def ticket(self, page_id: str) -> dict:
+        """One ticket, and what its page says.
+
+        The card on the board is the row; this is the page under it — the
+        brief you wrote, the report a run appended, the notes in between —
+        flattened the way the runner itself reads it before it starts. It is
+        the same page the ticket's discussion hangs off, so a console showing
+        both is showing one thing.
+        """
+        settings = self.config.notion
+        names = {settings.state(key): key for key in COLUMNS}
+        try:
+            page = self.runner.client.page(page_id)
+            content = self.runner.client.blocks_text(page_id)
+        except notion.NotionError:
+            self.forget()
+            raise
+        card = self._ticket(page, names, self.projects(), self.config.runner.session_host)
+        return {**card, "content": content}
 
     def projects(self) -> dict[str, dict]:
         """{page id: {name, kind}} — one query, kept for a few minutes.
@@ -203,15 +221,67 @@ class Api:
         self._projects_at = time.time()
         return index
 
+    def schedules(self) -> dict:
+        """What comes back on its own, as `ticket-runner schedules` says it.
+
+        Read when the page is opened rather than watched like the board: a
+        schedule moves four times a day at the very most, and a console polling
+        that database would be asking Notion a question whose answer has not
+        changed since breakfast.
+
+        Two facts travel with the rows, because a list of schedules that all
+        look fine explains nothing on an installation where none of them fire:
+        whether the workspace has the database at all, and whether
+        `runner.schedule` is on.
+        """
+        try:
+            rows = self.runner.schedules()
+            database = bool(self.runner.workspace.schedules)
+        except notion.NotionError:
+            self.forget()
+            raise
+        projects = self.projects()
+        return {
+            "enabled": self.config.runner.schedule,
+            "database": database,
+            "page": self.config.notion.page("schedules"),
+            "schedules": [self._schedule(row, projects) for row in rows],
+        }
+
+    def _schedule(self, schedule: schedules_module.Schedule, projects: dict) -> dict:
+        """One row of the Schedules database, as the pane reads it.
+
+        Left in the order Notion hands them over — that order is somebody's, and
+        a console that sorted it would be rearranging their page for them.
+        """
+        return {
+            "id": schedule.page.id.replace("-", ""),
+            "name": schedule.name,
+            "url": schedule.page.url,
+            "cadence": schedule.cadence,
+            "at": schedule.at,
+            "day": schedule.day,
+            "active": schedule.active,
+            "next": schedule.next.isoformat(timespec="minutes") if schedule.next else "",
+            "last": schedule.last.isoformat(timespec="minutes") if schedule.last else "",
+            # The ticket the last occurrence made, addressed the way the board
+            # addresses one: the console links to its page, not to Notion's.
+            "ticket": schedule.last_ticket.replace("-", ""),
+            "project": (projects.get(schedule.project) or {}).get("name", ""),
+            "model": schedule.model,
+            "priority": schedule.priority,
+            "problem": schedule.problem,
+        }
+
     def state(self) -> dict:
         """Everything the header shows: the timer, the lock, the version, the spend."""
         configuration = self.config
-        lock = config_module.state_dir() / "run.lock"
+        held = state.running()
         entries = state.history(10_000)
         return {
-            "timer": _timer_state(),
-            "running": lock.exists(),
-            "lock": lock.read_text(encoding="utf-8").strip() if lock.exists() else "",
+            "timer": systemd.read().label,
+            "running": bool(held),
+            "lock": held,
             "workspace_root": str(configuration.runner.workspace_root),
             "interval_seconds": configuration.runner.interval_seconds,
             "model": configuration.runner.model or "default",
@@ -481,21 +551,6 @@ def _update_available() -> str:
     """
     status = update_module.remembered()
     return status.latest[:8] if status.stale else ""
-
-
-def _timer_state() -> str:
-    if not shutil.which("systemctl"):
-        return "no systemd"
-    try:
-        result = subprocess.run(
-            ["systemctl", "--user", "is-enabled", "ticket-runner.timer"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return "unknown"
-    return result.stdout.strip() or "not installed"
 
 
 def _subcommands() -> tuple[str, ...]:

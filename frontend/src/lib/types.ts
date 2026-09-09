@@ -38,6 +38,12 @@ export interface Ticket {
   created: string
 }
 
+/** A ticket, with the page under it: the brief, the report, the notes between. */
+export interface TicketDetail extends Ticket {
+  /** The page's blocks, flattened the way the runner reads them. */
+  content: string
+}
+
 export interface Board {
   tickets: Ticket[]
   /** Whether this board has a `validated` column the runner would honour. */
@@ -50,6 +56,38 @@ export interface Project {
   name: string
   kind: string
   url: string
+}
+
+/** One row of the Schedules database: a recipe for a ticket, and how often it is born. */
+export interface Schedule {
+  id: string
+  name: string
+  url: string
+  /** "Hourly" | "Daily" | "Weekly" | "Monthly", or empty where nobody picked one. */
+  cadence: string
+  at: string
+  day: string
+  active: boolean
+  /** When the next ticket is due, and when the last one was made. Empty for "never yet". */
+  next: string
+  last: string
+  /** The ticket the last occurrence made, addressed as the board addresses one. */
+  ticket: string
+  project: string
+  model: string
+  priority: string
+  /** What stops this schedule being acted on, in the words `doctor` prints. */
+  problem: string
+}
+
+export interface Schedules {
+  /** `runner.schedule`: off, and nothing is born however the rows are ticked. */
+  enabled: boolean
+  /** Whether the workspace has a Schedules database at all. */
+  database: boolean
+  /** What that page is called, for the sentence that says it is missing. */
+  page: string
+  schedules: Schedule[]
 }
 
 export interface ChatState {

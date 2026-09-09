@@ -1,9 +1,13 @@
-import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
+import type * as React from "react"
+import { PanelRightClose, PanelRightOpen } from "lucide-react"
+
+import { Button } from "@/components/ui/button"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useConsole } from "@/hooks/use-console"
 import { cn } from "@/lib/utils"
+
+import { Eyebrow } from "./frame"
 
 /** An interval, as somebody would say it out loud. */
 function every(seconds: number): string {
@@ -15,54 +19,111 @@ function every(seconds: number): string {
  *
  * Every pill here answers a question somebody would otherwise open a terminal
  * for: is the timer on, is something running now, is `claude` even installed,
- * what has this cost, is there a version waiting.
+ * what has this cost, is there a version waiting. At the right edge, the
+ * switch that folds the second column away — a board of seven columns wants
+ * the width more often than not.
+ *
+ * The bar names where you are and nothing more: the page under it opens with
+ * its own heading, and a title said twice is a title read neither time.
  */
-export function Header({ title }: { title: string }) {
+
+/** One reading of the runner's state: a dot, a word, and the colour of the news. */
+function Pill({
+  tone,
+  dot,
+  pulse = false,
+  children,
+}: {
+  tone?: "green" | "amber" | "blue"
+  dot?: boolean
+  pulse?: boolean
+  children: React.ReactNode
+}) {
+  const skin = {
+    green: "border-tr-green/30 bg-tr-green/10 text-tr-green",
+    amber: "border-tr-amber/30 bg-tr-amber/10 text-tr-amber",
+    blue: "border-tr-blue/30 bg-tr-blue/10 text-tr-blue",
+  }
+  const seed = {
+    green: "bg-tr-green",
+    amber: "bg-tr-amber",
+    blue: "bg-tr-blue",
+  }
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium whitespace-nowrap",
+        tone ? skin[tone] : "text-muted-foreground"
+      )}
+    >
+      {dot ? (
+        <span
+          className={cn(
+            "size-1.5 shrink-0 rounded-full",
+            tone ? seed[tone] : "bg-muted-foreground",
+            pulse && "animate-pulse"
+          )}
+        />
+      ) : null}
+      {children}
+    </span>
+  )
+}
+
+export function Header({
+  crumbs,
+  aside,
+  asideLabel,
+  onToggleAside,
+}: {
+  /** Where you are, said as a path: the sidebar's entry, then what is open under it. */
+  crumbs: string[]
+  aside: boolean
+  asideLabel: string
+  onToggleAside: () => void
+}) {
   const { runner } = useConsole()
 
   return (
     <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-3 py-2">
       <SidebarTrigger className="-ml-1" />
-      <Separator orientation="vertical" className="mr-1 !h-4" />
-      <span className="text-sm font-semibold tracking-tight">{title}</span>
+      <div className="min-w-0 truncate">
+        <Eyebrow>
+          {crumbs.map((part, index) => (
+            <span key={part}>
+              {index ? <span className="text-border mx-1.5">/</span> : null}
+              {part}
+            </span>
+          ))}
+        </Eyebrow>
+      </div>
+
+      <span className="flex-1" />
 
       <div className="flex flex-wrap items-center gap-1.5">
         {runner ? (
           <>
-            <Badge variant={runner.timer === "enabled" ? "secondary" : "outline"}>
-              <span
-                className={cn(
-                  "size-1.5 rounded-full",
-                  runner.timer === "enabled" ? "bg-tr-green" : "bg-tr-amber"
-                )}
-              />
+            <Pill tone={runner.timer === "enabled" ? "green" : "amber"} dot>
               {runner.timer === "enabled"
                 ? `timer on · ${every(runner.interval_seconds)}`
                 : `timer ${runner.timer}`}
-            </Badge>
+            </Pill>
             {runner.running ? (
-              <Badge className="bg-tr-blue/15 text-tr-blue border-tr-blue/30" variant="outline">
-                <span className="bg-tr-blue size-1.5 animate-pulse rounded-full" />a run is in
-                progress
-              </Badge>
+              <Pill tone="blue" dot pulse>
+                a run is in progress
+              </Pill>
             ) : null}
-            {!runner.claude ? (
-              <Badge className="bg-tr-amber/15 text-tr-amber border-tr-amber/30" variant="outline">
-                claude not found
-              </Badge>
-            ) : null}
-            <Badge variant="outline">
-              {runner.handled} handled · ${runner.spend}
-            </Badge>
+            {!runner.claude ? <Pill tone="amber">claude not found</Pill> : null}
+            <Pill>
+              <span className="font-mono tabular-nums">{runner.handled}</span> handled ·{" "}
+              <span className="font-mono tabular-nums">${runner.spend}</span>
+            </Pill>
             {runner.update ? (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Badge
-                    className="bg-tr-amber/15 text-tr-amber border-tr-amber/30"
-                    variant="outline"
-                  >
-                    {runner.update} available · run update
-                  </Badge>
+                  <span>
+                    <Pill tone="amber">{runner.update} available · run update</Pill>
+                  </span>
                 </TooltipTrigger>
                 <TooltipContent>
                   v{runner.version} — {runner.update} is waiting, run: ticket-runner update
@@ -72,6 +133,21 @@ export function Header({ title }: { title: string }) {
           </>
         ) : null}
       </div>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground max-[860px]:hidden"
+            onClick={onToggleAside}
+            aria-label={aside ? `hide the ${asideLabel}` : `show the ${asideLabel}`}
+          >
+            {aside ? <PanelRightClose /> : <PanelRightOpen />}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{aside ? `hide the ${asideLabel}` : `show the ${asideLabel}`}</TooltipContent>
+      </Tooltip>
     </header>
   )
 }

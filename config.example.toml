@@ -23,7 +23,7 @@ token = "ntn_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 #
 #     ticket-runner init <url-of-a-notion-page>
 #
-# creates the four databases with their columns, their relations and their
+# creates the five databases with their columns, their relations and their
 # status options, and writes the line below for you. Share the page with your
 # integration first — that is the one step no API can take.
 workspace = ""
@@ -58,6 +58,8 @@ mention = "@claude"
 #   agents    optional: the page holding a database of agents. A ticket points
 #             at one through its `Agent` column, and that agent's page is the
 #             role the session plays — its craft, its rules, its model
+#   schedules optional: the page holding a database of schedules — what comes
+#             back on its own. Absent, nothing repeats and nothing changes
 #
 # Rows created under the older names — "Master Tickets", "Soul" — are still
 # found, as long as this table does not name them otherwise. Nothing to rename.
@@ -66,6 +68,7 @@ tickets = "Tickets"
 projects = "Projects"
 agents = "Agents"
 context = "Context"
+schedules = "Schedules"      # on the board this shipped against: "Master Scheluder"
 
 # Rename here if your Notion columns are named differently.
 # A property that does not exist in the database is simply skipped.
@@ -96,6 +99,45 @@ progress = "Progress"
 # A date here is a start gate, not a deadline: the ticket is left alone until
 # that moment, then picked up on the first pass after it.
 due = "Scheduled"
+
+# The columns of the *schedules* database — what comes back on its own. A row
+# there is the recipe for a ticket and the cadence it is born at; the body of
+# the page is the brief, copied into each ticket so it reads on its own. What
+# comes out is an ordinary ticket: same ready column, same queue, same session,
+# same pull request. The schedule only presses the button for you.
+#
+# The first four are yours to fill in:
+#   cadence  Hourly, Daily, Weekly, Monthly — the whole of it. A cadence the
+#            runner does not know means the row is skipped and `doctor` says so
+#   at       the hour, written 09:00. Empty means midnight — and, hourly, :00
+#   day      Monday for a weekly one (empty: whichever day it is read on),
+#            1 to 31 for a monthly one, clipped to the last day the month has:
+#            the 31st in February is the 28th
+#   active   the tick that turns it on. Unticking stops everything and deletes
+#            nothing, which is what you want on the way back from holiday
+#
+# The last three the runner writes, and they are how it keeps its word:
+#   next_run  when the next ticket is born. Written *before* the ticket is made,
+#             never after — a crash in between loses one occurrence, the other
+#             order would make two, and two identical tickets cost two sessions.
+#             It is also recomputed **from now**, so a machine that was off for
+#             three days wakes up owing one ticket and not twelve. This is
+#             anacron, not cron: turning a laptop back on sets off no avalanche
+#   last_run  when the last one was
+#   last_ticket  what the last occurrence produced. While that ticket is neither
+#             done nor failed, no new one is made — `next_run` moves on anyway,
+#             and the pass says so. Without that rule, one schedule stuck on a
+#             question fills the board with twenty copies of itself
+#
+# Project, Model and Priority are read from the same names as above: what the
+# schedule carries, every ticket it makes carries too.
+cadence = "Cadence"
+at = "At"
+day = "Day"
+active = "Active"
+next_run = "Next"
+last_run = "Last"
+last_ticket = "Last ticket"
 
 # On the projects database, two columns are read by name, either capitalisation:
 #   Repository  the GitHub URL or owner/name — matched against your clones
@@ -246,6 +288,15 @@ reply_interval_seconds = 60      # ten seconds is the floor
 reply_scan = 20                  # pages looked at per pass
 reply_timeout_minutes = 10       # somebody is waiting for this one
 reply_permission_mode = "plan"   # it talks; it does not work
+
+# Let the schedules database make tickets. A pass reads it between the validated
+# column and the queue, so a ticket born at 09:00 is claimed by that very pass
+# rather than by the next one. See [notion.properties] above for what a row
+# holds, and `ticket-runner schedules` for what is coming.
+#   ticket-runner schedules --run "Revue des dépendances"   without waiting
+# Off, the database is read by nobody and no row has to be unticked — and a
+# workspace with no schedules page never had any of this to begin with.
+schedule = true
 
 # Keep the installation on the latest version, on its own. A run looks at the
 # clock before it looks at the tickets: once every update_interval_seconds it

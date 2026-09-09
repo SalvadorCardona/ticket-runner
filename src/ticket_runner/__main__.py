@@ -19,7 +19,8 @@ from datetime import datetime
 
 from . import __version__, channels, config as config_module, conversation, git, notion
 from . import provision
-from . import session, state
+from . import schedules as schedules_module
+from . import session, state, systemd
 from . import update as update_module
 from . import workspace as workspace_module
 from .projects import Resolver
@@ -110,7 +111,18 @@ def command_list(args: argparse.Namespace) -> int:
     rows = [(ticket, moment, "") for ticket, moment in waiting]
     rows += [(ticket, moment, " · validated") for ticket, moment in runner.scheduled()]
     rows.sort(key=lambda row: row[1])
-    if not tickets and not rows:
+    # And what is not written yet: a schedule is as much a thing about to happen
+    # as a dated ticket is. Showing one without the other would be half a
+    # calendar, and the half that surprises you is always the other one.
+    births = sorted(
+        (
+            schedule
+            for schedule in runner.schedules()
+            if schedule.active and schedule.next and not schedule.problem
+        ),
+        key=lambda schedule: schedule.next,
+    ) if configuration.runner.schedule else []
+    if not tickets and not rows and not births:
         print("No ticket ready.")
         return 0
     if tickets:
@@ -132,15 +144,127 @@ def command_list(args: argparse.Namespace) -> int:
         tail = " · ".join([part for part in [project, kind, *badges] if part])
         print(f"  {position}. {ticket.title}\n     {DIM}{tail}{RESET}\n     {DIM}{ticket.url}{RESET}")
 
+    now = datetime.now().astimezone()
     if rows:
         title(f"\n{len(rows)} ticket(s) waiting for their date")
-        now = datetime.now().astimezone()
         for ticket, moment, note in rows:
-            delay = moment - now
-            hours = delay.total_seconds() / 3600
-            when = f"in {hours:.0f} h" if hours < 48 else f"in {delay.days} days"
-            stamp = moment.strftime("%Y-%m-%d %H:%M")
-            print(f"  {ticket.title}\n     {DIM}{stamp} — {when}{note}{RESET}")
+            print(f"  {ticket.title}\n     {DIM}{_when(moment, now)}{note}{RESET}")
+
+    if births:
+        title(f"\n{len(births)} ticket(s) not written yet")
+        for schedule in births:
+            cadence = " · ".join(
+                part for part in (schedule.cadence, schedule.day, schedule.at) if part
+            )
+            print(
+                f"  {schedule.name}\n"
+                f"     {DIM}{_when(schedule.next, now)} · {cadence}{RESET}"
+            )
+    return 0
+
+
+def _when(moment: datetime, now: datetime) -> str:
+    """“2026-09-14 09:00 — in 6 days”, the way `list` says a date."""
+    delay = moment - now
+    hours = delay.total_seconds() / 3600
+    if hours < 0:
+        return f"{moment.strftime('%Y-%m-%d %H:%M')} — overdue"
+    near = f"in {hours:.0f} h" if hours < 48 else f"in {delay.days} days"
+    return f"{moment.strftime('%Y-%m-%d %H:%M')} — {near}"
+
+
+def command_schedules(args: argparse.Namespace) -> int:
+    """What repeats, when it next happens, and how the last one went.
+
+    `--run` is what makes the thing tryable: a schedule you have just written
+    should not need you to wait until Monday to find out what it produces.
+    """
+    configuration = load_config()
+    runner = Runner(configuration, quiet=True)
+    try:
+        rows = runner.schedules()
+    except notion.NotionError as error:
+        print(f"{RED}Notion:{RESET} {error}", file=sys.stderr)
+        return 1
+
+    if not runner.workspace.schedules:
+        print("Nothing repeats here.")
+        print(
+            f"  {DIM}no “{configuration.notion.page('schedules')}” page in the workspace"
+            f" — ticket-runner init <page-url> builds it{RESET}"
+        )
+        return 0
+    if args.run:
+        return _run_schedule(runner, rows, args.run, force=args.force)
+    if not rows:
+        print("Nothing repeats here yet — the schedules database is empty.")
+        return 0
+
+    now = datetime.now().astimezone()
+    title(f"{len(rows)} schedule(s)")
+    for schedule in rows:
+        mark = f"{GREEN}✓{RESET}" if schedule.active else f"{DIM}·{RESET}"
+        cadence = schedule.cadence or f"{YELLOW}no cadence{RESET}"
+        when = " ".join(part for part in (schedule.day, schedule.at) if part)
+        print(f"  {mark} {schedule.name}  {DIM}{cadence}{(' · ' + when) if when else ''}{RESET}")
+        if schedule.problem:
+            print(f"     {YELLOW}{schedule.problem}{RESET}")
+            continue
+        if not schedule.active:
+            print(f"     {DIM}unticked — nothing is born{RESET}")
+            continue
+        nxt = _when(schedule.next, now) if schedule.next else "not computed yet"
+        last = schedule.last.strftime("%Y-%m-%d %H:%M") if schedule.last else "never"
+        print(f"     {DIM}next {nxt} · last {last}{RESET}")
+        if schedule.last_ticket:
+            state_of = "still open" if runner._busy(schedule) else "finished"  # noqa: SLF001
+            print(f"     {DIM}last occurrence: {state_of}{RESET}")
+    if not configuration.runner.schedule:
+        warn("runner.schedule = false — none of this runs")
+    return 0
+
+
+def _run_schedule(
+    runner: Runner, rows: list[schedules_module.Schedule], reference: str, *, force: bool
+) -> int:
+    """Make one schedule's ticket now, without waiting for its hour."""
+    wanted = reference.strip().lower()
+    matches = [row for row in rows if row.name.lower() == wanted] or [
+        row for row in rows if wanted in row.name.lower()
+    ]
+    if not matches:
+        bad(f"no schedule named “{reference}”")
+        print(f"    {DIM}{', '.join(row.name for row in rows) or 'the database is empty'}{RESET}")
+        return 1
+    if len(matches) > 1:
+        warn(f"{len(matches)} schedules match “{reference}” — name one of them:")
+        for row in matches:
+            print(f"    {row.name}")
+        return 1
+
+    schedule = matches[0]
+    if schedule.problem:
+        bad(f"{schedule.name} — {schedule.problem}")
+        return 1
+    # The overlap rule holds here too: triggering by hand is still an
+    # occurrence, and two of them open at once is the thing it exists to stop.
+    # `--force` is how you say you meant it.
+    if not force and runner._busy(schedule):  # noqa: SLF001
+        warn(f"{schedule.name} — its last ticket is still open")
+        print(f"    {DIM}ticket-runner schedules --run “{schedule.name}” --force{RESET}")
+        return 1
+    entry = runner._born(schedule)  # noqa: SLF001
+    if not entry:
+        return 1
+    # `Next` is left where it is: triggering by hand borrows an occurrence, it
+    # does not move the rhythm. The one it was already due is skipped by the
+    # overlap rule if this ticket is still open when it comes round.
+    runner._mark(  # noqa: SLF001
+        schedule,
+        {runner.config.notion.prop("last_run"): datetime.now().astimezone()},
+    )
+    state.record(entry)
+    ok(f"{entry['ticket']} — created, waiting in “{runner.config.notion.state('ready')}”")
     return 0
 
 
@@ -201,17 +325,7 @@ def command_status(args: argparse.Namespace) -> int:
 
     title("Services")
     if shutil.which("systemctl"):
-        active = subprocess.run(
-            ["systemctl", "--user", "is-enabled", "ticket-runner.timer"],
-            capture_output=True, text=True,
-        ).stdout.strip()
-        timers = subprocess.run(
-            ["systemctl", "--user", "list-timers", "ticket-runner.timer", "--no-pager"],
-            capture_output=True, text=True,
-        ).stdout.strip().splitlines()
-        (ok if active == "enabled" else warn)(f"ticket-runner.timer: {active or 'not installed'}")
-        for line in timers[1:2]:
-            print(f"    {DIM}{line.strip()}{RESET}")
+        _timer_line(systemd.read())
         # The console runs by default, so its absence is worth a line: nothing
         # about a ticket goes wrong when it is down, you simply have no board.
         console = subprocess.run(
@@ -228,9 +342,9 @@ def command_status(args: argparse.Namespace) -> int:
     else:
         warn("no systemd — the runner only runs on demand")
 
-    lock_file = config_module.state_dir() / "run.lock"
-    if lock_file.exists():
-        warn(f"a run is in progress ({lock_file.read_text().strip()})")
+    held = state.running()
+    if held:
+        warn(f"a run is in progress ({held})")
     else:
         ok("no run in progress")
 
@@ -374,8 +488,13 @@ def command_init(args: argparse.Namespace) -> int:
             client, configuration.notion, page, demo=not args.no_demo
         )
     except notion.NotionError as error:
-        bad(str(error).splitlines()[0])
-        warn("nothing is half-built: run the same command again once it is fixed")
+        # The API's validation errors say what is wrong on the lines after the
+        # first one; cutting them off leaves “body failed validation. Fix one:”.
+        first, *rest = str(error).splitlines()
+        bad(first)
+        for line in rest:
+            print(f"    {DIM}{line}{RESET}")
+        warn("what was built is kept: run the same command again once it is fixed")
         return 1
     for verb, what in report.steps:
         if verb == "created":
@@ -412,6 +531,24 @@ def command_init(args: argparse.Namespace) -> int:
 def _kept(message: str) -> None:
     """Already there, and left alone. Worth one dim line, not a green tick."""
     print(f"  {DIM}·{RESET} {message}")
+
+
+def _timer_line(timer: systemd.Timer) -> None:
+    """One line for the timer, and it is red when the timer will never fire.
+
+    `enabled` is what `is-enabled` says, and it stayed true for the two hours the
+    runner was silent: the timer was loaded, active, and had no next run. That
+    state is the fault, and it is the only visible sign of it.
+    """
+    if timer.stalled:
+        bad("ticket-runner.timer: enabled, but no next run — it will never fire again")
+        print(f"    {DIM}ticket-runner enable   to restart it{RESET}")
+    elif timer.enabled == "enabled":
+        ok("ticket-runner.timer: enabled" + (" — a run is in progress" if timer.running else ""))
+    else:
+        warn(f"ticket-runner.timer: {timer.enabled}")
+    if timer.row:
+        print(f"    {DIM}{timer.row}{RESET}")
 
 
 def command_doctor(args: argparse.Namespace) -> int:
@@ -539,7 +676,7 @@ def command_doctor(args: argparse.Namespace) -> int:
                 f"“{configuration.notion.page('context')}” — {len(space.context)} characters "
                 f"in every prompt: {DIM}{first[:60]}{RESET}"
             )
-        for key in ("projects", "agents"):
+        for key in ("projects", "agents", "schedules"):
             if resolved := getattr(space, key):
                 ok(f"“{configuration.notion.page(key)}” → database {resolved}")
 
@@ -615,6 +752,9 @@ def command_doctor(args: argparse.Namespace) -> int:
                 problems += 1
         print(f"  {DIM}available: {', '.join(options)}{RESET}")
 
+    title("Schedules database")
+    problems += _doctor_schedules(client, configuration, space)
+
     title("Comments")
     # The one capability that is off by default, and the one whose absence is
     # silent: a ticket runs perfectly well while its discussion is invisible.
@@ -652,6 +792,10 @@ def command_doctor(args: argparse.Namespace) -> int:
     ok(f"claude: {session.available() or 'missing'}")
     interval = configuration.runner.interval_seconds
     print(f"  {DIM}one run every {interval}s (ticket-runner enable to apply a change){RESET}")
+    if shutil.which("systemctl"):
+        timer = systemd.read()
+        _timer_line(timer)
+        problems += 1 if timer.stalled else 0
     print(f"  {DIM}permission_mode = {configuration.runner.permission_mode}{RESET}")
     if configuration.runner.progress:
         every = configuration.runner.progress_interval_seconds
@@ -664,6 +808,91 @@ def command_doctor(args: argparse.Namespace) -> int:
         return 1
     print(f"\n{GREEN}Everything is in place.{RESET}")
     return 0
+
+
+def _doctor_schedules(
+    client: notion.Client,
+    configuration: config_module.Config,
+    space: workspace_module.Workspace,
+) -> int:
+    """The Schedules database, and what would keep a ticket from being born.
+
+    Optional throughout: an installation without the database is an installation
+    where nothing repeats, which is a fine way to run and worth one grey line
+    rather than a warning. Returns the number of problems found — none of which
+    a board that ignores the feature can have.
+    """
+    database = space.schedules
+    if not database:
+        print(f"  {DIM}no schedules database — nothing repeats here{RESET}")
+        print(
+            f"  {DIM}ticket-runner init <page-url> adds it; "
+            f"a board without it runs exactly as before{RESET}"
+        )
+        return 0
+    if not configuration.runner.schedule:
+        warn("runner.schedule = false — the database is read by nobody")
+
+    settings = configuration.notion
+    try:
+        schema = client.schema(database)
+    except notion.NotionError as error:
+        warn(f"unreadable: {str(error).splitlines()[0]}")
+        return 0
+    ok(f"readable — {len(schema)} property(ies)")
+    for key, preferred, why in (
+        ("cadence", "select", "Hourly, Daily, Weekly or Monthly"),
+        ("at", "rich_text", "the hour it happens at, written 09:00"),
+        ("day", "rich_text", "Monday for a weekly one, 1 to 31 for a monthly one"),
+        ("active", "checkbox", "unticked stops it without deleting anything"),
+        ("next_run", "date", "written by the runner: when the next ticket is born"),
+        ("last_run", "date", "written by the runner: when the last one was"),
+        ("last_ticket", "relation", "written by the runner: how it knows the last one is over"),
+        ("project", "relation", "the project every ticket it makes points at"),
+        ("model", "select", "the model every ticket it makes runs on"),
+        ("priority", "select", "the priority every ticket it makes carries"),
+    ):
+        name = settings.prop(key)
+        kind = schema.get(name)
+        if kind is None:
+            warn(f"“{name}” missing — {why}")
+        elif kind != preferred:
+            ok(f"“{name}” ({kind}) — {preferred} would be better: {why}")
+        else:
+            ok(f"“{name}” ({kind})")
+
+    try:
+        rows = [schedules_module.read(page, settings) for page in client.query(database)]
+    except notion.NotionError as error:
+        warn(f"the schedules could not be read: {str(error).splitlines()[0]}")
+        return 0
+    if not rows:
+        print(f"  {DIM}no schedule written yet{RESET}")
+        return 0
+
+    problems = 0
+    now = datetime.now().astimezone()
+    for schedule in rows:
+        if schedule.problem:
+            bad(f"“{schedule.name}” — {schedule.problem}")
+            problems += 1
+            continue
+        if not schedule.active:
+            print(f"  {DIM}·{RESET} {DIM}“{schedule.name}” unticked{RESET}")
+            continue
+        # A `Next` a day behind is not a schedule running late: it is a runner
+        # that has stopped, and this is the only place that would say so.
+        if schedule.next and (now - schedule.next).total_seconds() > 86400:
+            bad(
+                f"“{schedule.name}” — due since "
+                f"{schedule.next.strftime('%Y-%m-%d %H:%M')} and never born: "
+                "the runner is not passing"
+            )
+            problems += 1
+            continue
+        when = schedule.next.strftime("%Y-%m-%d %H:%M") if schedule.next else "on the next pass"
+        ok(f"“{schedule.name}” — {schedule.cadence.lower()}, next {when}")
+    return problems
 
 
 def command_config(args: argparse.Namespace) -> int:
@@ -926,9 +1155,14 @@ def command_timer(args: argparse.Namespace) -> int:
     interval = configuration.runner.interval_seconds
     update_module.write_units(interval)
     subprocess.call(["systemctl", "--user", "daemon-reload"])
-    code = subprocess.call(
-        ["systemctl", "--user", "enable", "--now", "ticket-runner.timer"]
-    )
+    # Enabled, then restarted rather than `--now`: a timer that is already
+    # active is left alone by `--now`, and a timer left alone keeps the next
+    # run it had — which, after the fault this exists to cure, is none. A
+    # restart gives OnActiveSec its starting point; the service, if one is
+    # running, is not the timer's to stop and carries on.
+    code = subprocess.call(["systemctl", "--user", "enable", "ticket-runner.timer"])
+    if code == 0:
+        code = subprocess.call(["systemctl", "--user", "restart", "ticket-runner.timer"])
     if code == 0:
         every = f"{interval}s" if interval < 120 else f"{interval // 60} min"
         ok(f"timer enabled — one run every {every}")
@@ -1024,6 +1258,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     listing = subparsers.add_parser("list", help="list the ready tickets")
     listing.set_defaults(function=command_list)
+
+    scheduling = subparsers.add_parser("schedules", help="what comes back on its own, and when")
+    scheduling.add_argument("--run", metavar="NAME", help="make its ticket now, without waiting")
+    scheduling.add_argument(
+        "--force", action="store_true", help="with --run: even if the last one is still open"
+    )
+    scheduling.set_defaults(function=command_schedules)
 
     projects = subparsers.add_parser("projects", help="check the project → repository mapping")
     projects.set_defaults(function=command_projects)
