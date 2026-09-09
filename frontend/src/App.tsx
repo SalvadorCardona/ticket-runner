@@ -6,6 +6,7 @@ import { ConsolePane } from "@/components/console/console-pane"
 import { Header } from "@/components/console/header"
 import { LivePane } from "@/components/console/live-pane"
 import { ResourcePane } from "@/components/console/resource-pane"
+import { SchedulesPane } from "@/components/console/schedules-pane"
 import { SettingsPane } from "@/components/console/settings-pane"
 import { TicketTalk } from "@/components/console/ticket-talk"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
@@ -30,6 +31,7 @@ import { cn } from "@/lib/utils"
 const CRUMB: Record<Page, string> = {
   console: "console",
   live: "live",
+  schedules: "schedules",
   settings: "settings",
 }
 
@@ -134,6 +136,15 @@ function Console() {
             ) : null}
             {cell("live", <LivePane />)}
             {cell("settings", <SettingsPane onCheck={check} />)}
+
+            {/* Not a `cell`: this one has nothing half-typed to keep, and the
+                only way to draw it is a Notion query — which a tab left open on
+                the board has no business making. */}
+            {route.kind === "page" && route.page === "schedules" ? (
+              <div className="scroll-thin col-start-1 row-start-1 min-h-0 overflow-y-auto">
+                <SchedulesPane />
+              </div>
+            ) : null}
 
             {/* The second column, or the whole page below 861px when the
                 address is the console's. */}

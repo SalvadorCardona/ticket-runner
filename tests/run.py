@@ -3225,6 +3225,51 @@ def a_message_written_to_a_ticket_reaches_every_open_console():
     assert event.payload["text"] == "on garde le bandeau"
 
 
+@case
+def the_console_draws_what_comes_back_on_its_own():
+    """A schedule the runner reads is one the console shows, problem included.
+
+    And the switch travels with the rows, because a browser is the one place
+    `runner.schedule = false` cannot be seen otherwise: a page of ticked
+    schedules that never fire would read as a calendar that works.
+    """
+    import time as clock
+
+    api = _bare_api(_TalkClient([]))
+    api._runner = _recurring(
+        [
+            _schedule_page(
+                "s-1",
+                next="2026-09-14T09:00:00+02:00",
+                last_ticket="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            ),
+            _schedule_page("s-2", name="Le rapport", cadence="Fortnightly", active=False),
+        ],
+        schedule=False,
+    )
+    api._config = api._runner.config
+    api._projects = {"p-animalink": {"id": "panimalink", "name": "Animalink", "kind": "code"}}
+    api._projects_at = clock.time()
+
+    payload = api.schedules()
+    assert payload["database"], "the workspace has one; the pane must not offer to build it"
+    assert payload["page"] == "Schedules"
+    assert payload["enabled"] is False, "the one switch that turns the whole calendar off"
+
+    first, second = payload["schedules"]
+    assert first["name"] == "Revue des dépendances"
+    assert (first["cadence"], first["at"], first["active"]) == ("Daily", "09:00", True)
+    assert first["next"].startswith("2026-09-14T09:00")
+    assert first["project"] == "Animalink", "the relation is resolved, as it is on a card"
+    assert first["ticket"] == "aaaaaaaabbbbccccddddeeeeeeeeeeee", "addressed as the board does"
+    assert not first["problem"]
+
+    # A cadence nobody knows is stepped over by the pass rather than raised, and
+    # says so here rather than showing a date it does not have.
+    assert second["problem"], "a schedule the runner cannot read has to say why"
+    assert second["next"] == "" and second["active"] is False
+
+
 class _PageClient(_TalkClient):
     """A ticket page: its row, and the blocks written under it."""
 

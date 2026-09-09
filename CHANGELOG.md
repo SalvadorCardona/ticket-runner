@@ -70,8 +70,21 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
   date and the ones not written yet. Optional throughout: a workspace with no
   schedules page has nothing that repeats, `doctor` is green on it, and
   `runner.schedule = false` turns everything off without a row being unticked.
+- The web console shows what comes back on its own. A *Schedules* page in the
+  menu — `/?page=schedules` — reads the calendar the way `ticket-runner
+  schedules` reads it: what repeats, at what rhythm, when the next ticket is due
+  and when the last one was made, with a way through to the ticket that
+  occurrence produced. A row nobody can read says what is wrong with it rather
+  than showing a date it does not have, and `runner.schedule = false` is said at
+  the foot of the page — a browser was the one place that switch could not be
+  seen, and a calendar of ticked rows that never fire reads as one that works.
+  Nothing is written from here: a schedule is a Notion page, and its name is the
+  link to it. The page asks Notion when you open it rather than living on the
+  event stream, so a tab left open on the board never polls that database.
 - `GET /api/tickets/<id>`: one ticket, with the page under it flattened the way
   the runner reads it before a run.
+- `GET /api/schedules`: the Schedules database as the console draws it, with
+  what makes each row unreadable spelled out rather than raised.
 - The official `shadcn` skill, vendored under `.claude/skills/shadcn`, so a
   session working on the console composes from the same kit.
 

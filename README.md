@@ -880,6 +880,9 @@ ticket-runner schedules --run "Revue des dépendances"   # now, without waiting 
 ticket-runner list                               # the whole calendar: tickets and births
 ```
 
+The same calendar is a page of the web console — *Schedules* in the menu, `/?page=schedules`
+— which is where you look at it from a phone. See [The web console](#the-web-console).
+
 Everything here is optional. A workspace with no schedules page has nothing that repeats,
 `doctor` is green on it, and nothing about it runs differently — `ticket-runner init`
 builds the database on a board that predates it, and `runner.schedule = false` turns the
@@ -1020,8 +1023,8 @@ Open `http://127.0.0.1:8787` and you get one page, four things:
 │ ▸ Board    4  │  ┌──────────┐  ┌──────────┐  │  workspace                  │
 │   1 ready     │  │ Retirer  │  │ Migrer   │  │  Six minutes in, on Trader  │
 │   Live     1  │  │ le       │  │ vers     │  │  IA. It has rewritten       │
-│   Settings    │  │ bandeau  │  │ SQLite   │  │  src/storage.py and is on   │
-│               │  │ High     │  │ pytest   │  │  pytest. Nothing committed. │
+│   Schedules   │  │ bandeau  │  │ SQLite   │  │  src/storage.py and is on   │
+│   Settings    │  │ High     │  │ pytest   │  │  pytest. Nothing committed. │
 │               │  └──────────┘  └──────────┘  │                             │
 │               │                              │  > status                   │
 │ ● live        │                    ───▶      │  timer on · 30 min          │
@@ -1085,6 +1088,16 @@ terminal opens the very same one, and it survives the browser, the server and th
 An address written anywhere the console shows text — an answer, the output of a command, a
 step of a session, a comment on a ticket — is a link you can click. A pull request the
 runner just opened is one click away, not a URL to read out loud into another tab.
+
+**Schedules** is the calendar of [what comes back on its own](#what-comes-back-on-its-own),
+read the way `ticket-runner schedules` reads it: what repeats, at what rhythm, when the next
+ticket is due and when the last one was made — with a way through to the ticket that
+occurrence produced. A row nobody can read says what is wrong with it instead of a date it
+does not have, and `runner.schedule = false` is said at the foot of the page, because a
+browser is the one place that switch would otherwise be invisible. Nothing is written from
+here: a schedule is a Notion page, and its name is the link to it. The page asks Notion
+when you open it rather than living on the event stream — a schedule moves four times a day
+at the very most, and a tab left open on the board has no business polling that database.
 
 **Settings** is `config.toml` drawn as a page — the same file, the same keys, and every one
 of them, from the Notion token down to what your board calls its *Blocked* column. It is
