@@ -1,3 +1,5 @@
+![ticket-runner](https://raw.githubusercontent.com/SalvadorCardona/brand-assets/main/projects/ticket-runner/banner.png)
+
 # ticket-runner
 
 **Your Notion tickets, played by Claude Code.** You write a ticket, you move it to
