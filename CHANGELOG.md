@@ -90,6 +90,21 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Fixed
 
+- A project whose `Path` points nowhere is no longer refused when the same page still
+  names its repository. Rename a clone on disk and the page keeps the old path, while
+  its `Repository` column stays right — the runner used to stop at the first wrong
+  declaration and never read the second, blocking every ticket of that project with
+  `project not found on disk`. Each way is now tried in turn, and the ticket runs on
+  what the first working one finds; its comment says which declaration is out of
+  date, and `ticket-runner projects` shows the project with a `!` rather than a tick
+  until you correct it. A repository renamed on GitHub is found too: `gh` is asked what
+  the old name is called now, and that is what the clones are matched against. What a
+  fallback may find is deliberately narrow — only a clone whose `origin` remote is the
+  one declared, never one whose folder is merely named like the project, and never one
+  of two clones that answer to the same remote. A project none of its declarations lead
+  to is still put back, and the comment now lists every way that was tried and why each
+  one failed, instead of the first disappointment alone.
+
 - A desktop notification now takes you to the ticket it names: clicking it
   opens that ticket's Notion page, where before a click did nothing and you
   had to go and find the title on the board. `notify-send` cannot do it — it

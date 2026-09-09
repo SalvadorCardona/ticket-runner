@@ -114,6 +114,176 @@ def remotes_normalise_to_owner_and_name():
         assert _normalise(url) == "salvadorcardona/trader-ia", url
 
 
+class _ProjectClient:
+    """Notion reduced to one project page, with the columns it was given."""
+
+    def __init__(self, title: str, **columns: str) -> None:
+        self._page = notion.Page(
+            id="p-1",
+            url="https://notion.so/p-1",
+            title=title,
+            properties={
+                key: {"type": "rich_text", "rich_text": [{"plain_text": value}]}
+                for key, value in columns.items()
+            },
+        )
+
+    def page(self, page_id: str) -> notion.Page:
+        return self._page
+
+    def blocks_text(self, page_id: str, depth: int = 0) -> str:
+        return ""
+
+
+@contextmanager
+def _workspace(remotes: dict[str, str], renamed: dict[str, str] | None = None):
+    """A workspace_root of fake clones — folder name → origin remote — and a
+    GitHub that answers `gh repo view` from `renamed`, old name → new name.
+
+    Yields the resolver and the list of names GitHub was asked about, so a
+    test can check that the network is the last thing tried, or not tried.
+    """
+    asked: list[str] = []
+    original = projects.git.remote_url, projects.git.current_name
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        for folder, remote in remotes.items():
+            (root / folder / ".git").mkdir(parents=True)
+        projects.git.remote_url = lambda repo: remotes.get(str(repo.relative_to(root)), "")
+        projects.git.current_name = lambda name: (asked.append(name), (renamed or {}).get(name, ""))[1]
+        try:
+            yield projects.Resolver(root, {}), asked
+        finally:
+            projects.git.remote_url, projects.git.current_name = original
+
+
+@case
+def a_path_that_exists_is_taken_before_anything_else():
+    """Nothing is noted and GitHub is never asked: the first way answered."""
+    with _workspace({"mobile-factory": "git@github.com:SalvadorCardona/mobile-factory.git"}) as (
+        resolver, asked,
+    ):
+        client = _ProjectClient(
+            "Jeu d'usine mobile",
+            Path=str(resolver._root / "mobile-factory"),  # noqa: SLF001
+            Repository="https://github.com/SalvadorCardona/somewhere-else",
+        )
+        project = resolver.resolve(client, "p-1")
+    assert project.path.name == "mobile-factory"
+    assert not project.is_stale and project.note == ""
+    assert asked == []
+
+
+@case
+def a_wrong_path_gives_way_to_the_repository_property():
+    """The case that blocked a real board: the clone was renamed on disk, and
+    the page kept the old path — while its Repository column was still right.
+    """
+    with _workspace({"mobile-factory": "git@github.com:SalvadorCardona/mobile-factory.git"}) as (
+        resolver, asked,
+    ):
+        client = _ProjectClient(
+            "Jeu d'usine mobile",
+            Path=str(resolver._root / "factory-mobile"),  # noqa: SLF001
+            Repository="https://github.com/SalvadorCardona/mobile-factory",
+        )
+        project = resolver.resolve(client, "p-1")
+    assert project.is_code and project.path.name == "mobile-factory"
+    assert project.is_stale, "found, but not by the declaration that should have found it"
+    assert "factory-mobile, from the project's Path property, is not a git repository" in project.note
+    assert "salvadorcardona/mobile-factory" in project.note, "the note says how it was found"
+    assert asked == [], "a remote that matches is not a question for GitHub"
+
+
+@case
+def a_repository_renamed_on_github_is_found_under_its_new_name():
+    """GitHub redirects the old name, so `gh repo view old` says the new one."""
+    with _workspace(
+        {"mobile-factory": "git@github.com:SalvadorCardona/mobile-factory.git"},
+        renamed={"salvadorcardona/factory-mobile": "SalvadorCardona/mobile-factory"},
+    ) as (resolver, asked):
+        client = _ProjectClient(
+            "Jeu d'usine mobile", Repository="https://github.com/SalvadorCardona/factory-mobile"
+        )
+        project = resolver.resolve(client, "p-1")
+    assert project.path.name == "mobile-factory"
+    assert project.is_stale
+    assert "which GitHub has renamed salvadorcardona/mobile-factory" in project.note
+    assert asked == ["salvadorcardona/factory-mobile"], "asked once, about the name that failed"
+
+
+@case
+def a_project_no_way_leads_to_says_everything_that_was_tried():
+    with _workspace({"other": "git@github.com:SalvadorCardona/other.git"}) as (resolver, asked):
+        client = _ProjectClient(
+            "Jeu d'usine mobile",
+            Path=str(resolver._root / "factory-mobile"),  # noqa: SLF001
+            Repository="https://github.com/SalvadorCardona/factory-mobile",
+        )
+        try:
+            resolver.resolve(client, "p-1")
+        except LookupError as error:
+            message = str(error)
+        else:
+            raise AssertionError("nothing leads to a repository, so this has to fail")
+    assert "“Jeu d'usine mobile”" in message
+    assert "factory-mobile, from the project's Path property, is not a git repository" in message
+    assert "salvadorcardona/factory-mobile, from the project's Repository property, matches no origin remote" in message
+    assert "GitHub gave no other name" in message
+    assert '"Jeu d\'usine mobile" = "/path/to/the/repo"' in message, "and what to do about it"
+    assert asked == ["salvadorcardona/factory-mobile"]
+
+
+@case
+def a_wrong_path_alone_is_still_an_error_and_not_a_document():
+    """Declaring a repository that is not there must not quietly turn the
+    project's tickets into pages: the page meant a repository."""
+    with _workspace({}) as (resolver, asked):
+        client = _ProjectClient("Site", Path="/nowhere/at/all")
+        try:
+            resolver.resolve(client, "p-1")
+        except LookupError as error:
+            assert "/nowhere/at/all, from the project's Path property" in str(error)
+        else:
+            raise AssertionError("a wrong Path with nothing else is not a document project")
+    assert asked == [], "there is no name to ask GitHub about"
+
+
+@case
+def a_folder_named_like_the_project_is_not_a_match():
+    """Only the remote designates a repository. A clone whose folder happens to
+    carry the declared name, with another remote, is somebody else's project."""
+    with _workspace({"factory-mobile": "git@github.com:SomebodyElse/factory-mobile.git"}) as (
+        resolver, asked,
+    ):
+        client = _ProjectClient("Jeu", Repository="https://github.com/SalvadorCardona/factory-mobile")
+        try:
+            resolver.resolve(client, "p-1")
+        except LookupError as error:
+            assert "matches no origin remote" in str(error)
+        else:
+            raise AssertionError("a folder name is a resemblance, not a declaration")
+
+
+@case
+def two_clones_of_one_remote_answer_for_neither():
+    with _workspace(
+        {
+            "trader-ia": "git@github.com:SalvadorCardona/trader-ia.git",
+            "labo/trader-ia-copy": "https://github.com/SalvadorCardona/trader-ia",
+        }
+    ) as (resolver, asked):
+        client = _ProjectClient("Trader IA", Repository="SalvadorCardona/trader-ia")
+        try:
+            resolver.resolve(client, "p-1")
+        except LookupError as error:
+            message = str(error)
+        else:
+            raise AssertionError("two candidates is no answer")
+    assert "is the remote of 2 repositories" in message
+    assert "trader-ia-copy" in message and "trader-ia" in message
+
+
 # -- configuration -----------------------------------------------------------
 
 
@@ -2613,6 +2783,29 @@ def a_ticket_with_no_title_is_named_from_what_it_says():
     assert runner.client.written[0] == {"Titre": "Réparer le bandeau blanc de la console"}
     assert ticket.title == "Réparer le bandeau blanc de la console"
     assert job.branch == "ticket/reparer-le-bandeau-blanc-de-la-console-75f74ff5"
+
+
+@case
+def a_project_found_by_a_fallback_says_so_on_the_ticket():
+    """The ticket runs, and the comment carries which declaration to correct —
+    the alternative is a page that stays wrong for as long as the fallback holds."""
+
+    class _StaleRepository:
+        def resolve(self, client, page_id: str) -> projects.Project:
+            return projects.Project(
+                name="ticket-runner",
+                path=Path("/repo"),
+                note="Repository found by its origin remote, x/y, but a more explicit "
+                "declaration is wrong: /old, from the project's Path property, is not "
+                "a git repository. Correct it: the fallback is what its tickets run on.",
+            )
+
+    runner, ticket = _nameless("Retirer le shader", "Il coûte 12 % de CPU pour rien.")
+    runner.resolver = _StaleRepository()
+    with _state_home(), _naming_session("") as asked:
+        job = runner.prepare(ticket)
+    assert job is not None and job.project.path == Path("/repo"), "the ticket runs"
+    assert len(job.notes) == 1 and "from the project's Path property" in job.notes[0]
 
 
 @case

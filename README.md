@@ -467,10 +467,21 @@ branch, commits and a pull request. Three ways to name it, most explicit first:
 2. a **`Path` property on the project page**, which keeps the mapping on the board rather
    than in a file on one machine;
 3. a **`Repository` property** — a GitHub URL or `owner/name` — matched against the
-   `origin` remotes of every repository found under `workspace_root`.
+   `origin` remotes of every repository found under `workspace_root`. A repository
+   renamed on GitHub is still found under its old name: `gh` is asked what it is called
+   now, and that name is matched instead.
 
 Both columns are read by name, whatever their capitalisation, and the `github` column
 earlier versions asked for still works.
+
+A way that fails gives way to the next: a `Path` pointing at a folder that was renamed
+does not stop the `Repository` property from finding the clone. The ticket runs, and its
+comment says which declaration is out of date — `ticket-runner projects` shows the same
+project with a `!` rather than a tick until you correct it. What a later way may find is
+bounded, though: a repository is only ever taken on the strength of its `origin` remote,
+never because its folder is named like the project, and never when two clones answer to
+the same remote. A project none of its declarations lead to is put back, with every way
+that was tried and why it failed in a comment.
 
 A project that names none — and **a ticket with no project at all** — is **document work**.
 It gets a disposable scratch directory instead of a worktree, and the agent's answer is
@@ -1372,7 +1383,8 @@ board is shared with people you would not hand those credentials to, leave the c
 | a comment on a ticket changes nothing | the ticket is *done*, or no run of this host ever reported on it — those two never wake |
 | a ticket keeps running again and again | its report never gets posted, so your answer stays the last word: the integration lost *Insert comments* |
 | a ticket ignores its agent | the `Agent` column is missing or is not a relation — `doctor` names it |
-| “project not found on disk” | the project names a repository that is not there: fix its `Path` or `Repository` property, or add `"Notion name" = "/path"` under `[projects]` |
+| “project not found on disk” | none of what the project declares leads to a repository — the comment lists each way that was tried and why it failed. Fix its `Path` or `Repository` property, or add `"Notion name" = "/path"` under `[projects]` |
+| a ticket ran, but its comment says a declaration is wrong | the repository was found by a fallback: a `Path` pointing nowhere, or a `Repository` GitHub has since renamed. Correct the project page — `ticket-runner projects` shows it with a `!` until you do |
 | a ticket became a document when you wanted code | its project names no repository. Give the project page a `Path` or a `Repository` |
 | “nothing to work from” | the ticket has neither a title nor a description — a page left on the bare template counts as empty |
 | a ticket sat in *In progress* forever | it no longer can: the next run puts back any ticket this host claimed while no run was alive |

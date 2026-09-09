@@ -284,7 +284,12 @@ def command_projects(args: argparse.Namespace) -> int:
         try:
             project = runner.resolver.resolve(runner.client, page_id)
             where = project.path if project.is_code else f"{DIM}document — no repository{RESET}"
-            ok(f"{project.name} → {where}")
+            if project.is_stale:
+                # Resolved, and its tickets run — on a fallback. Neither a
+                # tick nor a cross: the repository is right, the page is not.
+                warn(f"{project.name} → {where}\n    {project.note}")
+            else:
+                ok(f"{project.name} → {where}")
         except (LookupError, notion.NotionError) as error:
             failed += 1
             bad(str(error).replace("\n", "\n    "))
@@ -630,7 +635,8 @@ def command_doctor(args: argparse.Namespace) -> int:
     root = configuration.runner.workspace_root
     if root.is_dir():
         resolver = Resolver(root, configuration.projects)
-        count = len(resolver._index())  # noqa: SLF001 — diagnostics
+        index = resolver._index()  # noqa: SLF001 — diagnostics
+        count = sum(len(repos) for repos in index.values())
         ok(f"{root} — {count} repository(ies) found")
     else:
         bad(f"{root} does not exist (runner.workspace_root)")

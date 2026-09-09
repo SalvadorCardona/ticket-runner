@@ -1305,6 +1305,12 @@ class Runner:
         said = f" · {len(job.comments)} comment(s)" if job.comments else ""
         role = f" · as {agent.name}" if agent else ""
         self.say(f"  → {ticket.title}\n    {project.name or 'no project'} · {where}{role}{said}")
+        if project.note:
+            # Found by a way of last resort: the ticket runs, and the ticket's
+            # comment says which declaration on the project page to correct —
+            # or the page stays wrong for as long as the fallback keeps working.
+            self.say("    · " + project.note)
+            job.notes.append(project.note)
         if not self.dry_run:
             # The session identifier is written now, not at the end: a ticket
             # still in progress is exactly the one you want to look into, and

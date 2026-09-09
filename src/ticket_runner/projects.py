@@ -6,12 +6,25 @@ Three ways, in this order, from the most explicit to the least:
 2. a **`path` property on the project page** in Notion, which keeps the mapping
    on the board rather than in a file on one machine;
 3. the project's `github` property, matched against the `origin` remotes of the
-   repositories found under `workspace_root`.
+   repositories found under `workspace_root` — under the name it declares, or
+   under the name GitHub redirects that one to, for a repository renamed since
+   the page was written.
 
 A project that declares none of them has no repository, and its tickets produce
-a document instead of a pull request. A project that declares one that does not
-exist is an error, not an invitation to guess: the ticket is put back with the
-reason in a comment.
+a document instead of a pull request.
+
+A way that fails does not stop the ones after it: a `path` that points nowhere
+is what a repository renamed on disk looks like, and the same page usually
+still names it correctly on the next line. The ticket runs on what the next way
+finds, and the project says how it was found — `Project.note` — so that the
+stale declaration gets corrected rather than trusted a little less each time.
+
+What a later way may find is bounded, though. A declaration that does not
+match is an error, not an invitation to guess: a repository is only ever taken
+on the strength of its `origin` remote, never because its folder happens to be
+named like the project, and never when two clones answer to the same remote.
+A project none of its declarations lead to is put back, with every way that
+was tried and why it failed in a comment.
 """
 
 from __future__ import annotations
@@ -32,11 +45,21 @@ class Project:
     notion_id: str = ""
     github: str = ""
     brief: str = ""
+    note: str = ""
 
     @property
     def is_code(self) -> bool:
         """A project with a repository is worked on in git; the others are not."""
         return self.path is not None
+
+    @property
+    def is_stale(self) -> bool:
+        """Found, but not by the declaration that should have found it.
+
+        The repository is the right one — the note says which declaration on
+        the project page is out of date, and what it should say instead.
+        """
+        return bool(self.note)
 
 
 def _normalise(url: str) -> str:
@@ -92,16 +115,23 @@ class Resolver:
     def __init__(self, workspace_root: Path, overrides: dict[str, str]) -> None:
         self._root = workspace_root
         self._overrides = overrides
-        self._by_remote: dict[str, Path] | None = None
+        self._by_remote: dict[str, list[Path]] | None = None
 
-    def _index(self) -> dict[str, Path]:
+    def _index(self) -> dict[str, list[Path]]:
+        """Every repository under the root, by its `origin` remote.
+
+        A list, because nothing stops two clones of one repository from sitting
+        side by side — and when they do, neither is *the* one: a match against
+        that remote is refused rather than settled on whichever was walked
+        first. A repository with no remote is walked but indexed nowhere, since
+        nothing on a project page could designate it.
+        """
         if self._by_remote is None:
             self._by_remote = {}
             for repo in _walk(self._root):
                 url = git.remote_url(repo)
                 if url:
-                    self._by_remote[_normalise(url)] = repo
-                self._by_remote.setdefault(repo.name.lower(), repo)
+                    self._by_remote.setdefault(_normalise(url), []).append(repo)
         return self._by_remote
 
     def brief(self, client: notion.Client, page_id: str) -> str:
@@ -124,6 +154,21 @@ class Resolver:
         name = page.title or page_id
         github = str(_property(page, "Repository", "github", "repo") or "")
 
+        # Every way that was tried and did not lead anywhere, in order. Read
+        # twice: as the note on a project a later way found, and as the whole
+        # of the error on a project none did.
+        failed: list[str] = []
+
+        def found(path: Path, how: str) -> Project:
+            note = ""
+            if failed:
+                note = (
+                    f"Repository found {how}, but a more explicit declaration is wrong: "
+                    + "; ".join(failed)
+                    + ". Correct it: the fallback is what its tickets run on."
+                )
+            return Project(name, path, page_id, github, self.brief(client, page_id), note)
+
         for source, declared in (
             ("[projects] in your configuration", self._overrides.get(name)),
             ("the project's Path property", _property(page, "Path", "path")),
@@ -131,11 +176,17 @@ class Resolver:
             if not declared:
                 continue
             path = Path(str(declared)).expanduser()
-            if not git.is_repo(path):
-                raise LookupError(f"“{name}”: {path}, from {source}, is not a git repository")
-            return Project(name, path, page_id, github, self.brief(client, page_id))
+            if git.is_repo(path):
+                return found(path, f"from {source}")
+            failed.append(f"{path}, from {source}, is not a git repository")
 
         if not github:
+            if failed:
+                # Something was declared and it is wrong. Not a document
+                # project: a page that names a repository means one, and a
+                # ticket answered on the page instead would be a silent
+                # change of kind, not a fallback.
+                raise LookupError(self._nowhere(name, failed))
             # Nothing declares a repository, so the project does not have one:
             # its tickets produce a document written back into Notion. Guessing
             # from the project's name would be worse than useless here — it
@@ -143,17 +194,60 @@ class Resolver:
             # merely happens to be named alike.
             return Project(name, None, page_id, "", self.brief(client, page_id))
 
-        index = self._index()
-        match = index.get(_normalise(github))
+        source = "the project's Repository property"
+        declared = _normalise(github)
+        match = self._match(declared)
+        if isinstance(match, Path):
+            return found(match, f"by its origin remote, {declared}")
         if match:
-            return Project(name, match, page_id, github, self.brief(client, page_id))
-        slug = _normalise(github).split("/")[-1]
-        if slug in index:
-            return Project(name, index[slug], page_id, github, self.brief(client, page_id))
+            # Two clones, and the declaration is not wrong: it is the disk that
+            # cannot answer. No other name would make it answer better.
+            raise LookupError(self._nowhere(name, [*failed, match]))
+        failed.append(f"{declared}, from {source}, matches no origin remote under {self._root}")
 
-        raise LookupError(
-            f"“{name}”: {github} is declared but no matching repository exists "
-            f"under {self._root}"
-            + f'\nAdd  "{name}" = "/path/to/the/repo"  under [projects], or clear '
-            "the project's github property to make it a document project."
+        # GitHub redirects a renamed repository, and only GitHub knows to what.
+        # Asked last, because it is the one way that leaves the machine — and
+        # only about a name that already failed to match anything here.
+        current = _normalise(git.current_name(declared)) if "/" in declared else ""
+        if current and current != declared:
+            match = self._match(current)
+            if isinstance(match, Path):
+                failed[-1] = f"{source} says {declared}, which GitHub has renamed {current}"
+                return found(match, f"by its origin remote, {current}")
+            failed.append(
+                match or f"GitHub renamed it {current}, which matches no origin remote either"
+            )
+        elif current == declared:
+            failed.append("GitHub knows it by that name and no other")
+        else:
+            failed.append(
+                "GitHub gave no other name for it (no such repository, or gh not usable here)"
+            )
+
+        raise LookupError(self._nowhere(name, failed))
+
+    def _match(self, remote: str) -> Path | str:
+        """The one repository with that remote, or why there is not one.
+
+        A string is a reason and nothing was found: no clone at all, or more
+        than one — which is as far from an answer, since a ticket committed to
+        the wrong clone is a ticket lost somewhere nobody looks.
+        """
+        candidates = self._index().get(remote, [])
+        if len(candidates) == 1:
+            return candidates[0]
+        if not candidates:
+            return ""
+        return (
+            f"{remote} is the remote of {len(candidates)} repositories under {self._root}: "
+            + ", ".join(str(path) for path in sorted(candidates))
+        )
+
+    def _nowhere(self, name: str, failed: list[str]) -> str:
+        return (
+            f"“{name}”: no repository could be found —\n"
+            + "".join(f"  · {reason}\n" for reason in failed)
+            + f'Add  "{name}" = "/path/to/the/repo"  under [projects], correct the '
+            "project's Path or Repository property, or clear both to make it a "
+            "document project."
         )
