@@ -18,6 +18,22 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Added
 
+- **An OpenRouter key, and every other model comes within reach.** `openrouter.key`
+  in the configuration — or the *Every other model* section of the console's
+  Settings tab, where it is a secret like any other — and every session the
+  runner starts carries it as `OPENROUTER_API_KEY`. Nothing about the runner
+  changes: the key is simply *there*, so a ticket can have a GPT write the copy,
+  a model transcribe an audio file or another make the video, and pay for it,
+  without the runner having to know what any of those are. The second switch,
+  `openrouter.route_sessions = true`, runs the sessions themselves on it: Claude
+  Code then talks to OpenRouter rather than to Anthropic, and every model named
+  — a ticket's Model column, an agent's, `runner.model` — becomes an OpenRouter
+  slug, `openai/gpt-5` or `anthropic/claude-sonnet-4.5`. Two things travel with
+  that one, and the README says so where it is offered: the CLI is authenticated
+  by a token instead of as you, so Claude in Chrome does not load, and the bill
+  is OpenRouter's rather than the subscription's, so there is no window left for
+  `runner.wait_for_credits` to wait for.
+
 - **The runner waits for the credits instead of failing on them.** A Claude
   subscription is metered in windows, and a spent one used to cost a whole
   board: every ticket the runner touched came back as a failure with a log to

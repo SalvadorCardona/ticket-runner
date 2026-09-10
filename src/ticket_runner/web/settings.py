@@ -184,6 +184,38 @@ SECTIONS: tuple[Section, ...] = (
         ),
     ),
     Section(
+        key="openrouter",
+        title="Every other model",
+        blurb=(
+            "One key in front of every provider there is. It goes into each session's "
+            "environment as `OPENROUTER_API_KEY`, so the work itself can call whatever model "
+            "it needs — a GPT, an image, a transcription, a video — and pay for it. Running "
+            "the sessions themselves on it is the second switch, and it changes who answers "
+            "them."
+        ),
+        fields=(
+            Field(
+                "openrouter", "key", "secret", "OpenRouter key",
+                "The `sk-or-…` one, from openrouter.ai/keys. On its own it only makes the "
+                "key reachable from a session; nothing about the runner changes.",
+            ),
+            Field(
+                "openrouter", "route_sessions", "bool", "Run the sessions on it",
+                "Claude Code then talks to OpenRouter rather than to Anthropic, and every "
+                "model named — a ticket's Model column, an agent's, the one above — becomes "
+                "an OpenRouter slug: `openai/gpt-5`, `anthropic/claude-sonnet-4.5`. Two "
+                "things go with it: the CLI is no longer signed in as you, so Claude in "
+                "Chrome does not load, and the bill is OpenRouter's rather than your "
+                "subscription's — there is no window left to wait for.",
+            ),
+            Field(
+                "openrouter", "base_url", "text", "Endpoint",
+                "Where that key is spent. Only worth touching for a gateway of your own "
+                "that speaks the same API.",
+            ),
+        ),
+    ),
+    Section(
         key="git",
         title="Git and pull requests",
         blurb="What a ticket with a repository turns into, and how it is accepted.",
@@ -450,6 +482,7 @@ def _fallback(config: Config, entry: Field) -> object:
         "runner": config.runner,
         "notify": config.notify,
         "web": config.web,
+        "openrouter": config.openrouter,
     }.get(entry.table)
     if holder is None:  # a channel table: nothing is defaulted into it
         return ""

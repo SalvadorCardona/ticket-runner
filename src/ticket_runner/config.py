@@ -217,6 +217,29 @@ class Web:
     chat_timeout_minutes: int = 20
 
 
+# Where an OpenRouter key is spent, unless the file names somewhere else. It is
+# the only endpoint that key works against, so it is a default rather than a
+# question — the line exists for a gateway of your own that speaks the same API.
+OPENROUTER_URL = "https://openrouter.ai/api/v1"
+
+
+@dataclass
+class OpenRouter:
+    """One key, and every model behind it. See openrouter.py.
+
+    Empty is the whole of the old behaviour: no key, nothing added to a session's
+    environment, Claude Code talking to Anthropic as it always did.
+    """
+
+    key: str = ""
+    base_url: str = OPENROUTER_URL
+    # Whether the sessions themselves run on it, rather than the key merely
+    # being *available* to the work. Off by default, and deliberately: it
+    # changes which company answers the agent, what a model name means, and who
+    # bills you. See openrouter.py for what goes with it.
+    route_sessions: bool = False
+
+
 @dataclass
 class Config:
     notion: Notion
@@ -225,6 +248,7 @@ class Config:
     path: Path
     web: Web = field(default_factory=Web)
     notify: Notify = field(default_factory=Notify)
+    openrouter: OpenRouter = field(default_factory=OpenRouter)
 
     def require_usable(self) -> None:
         """Raise ConfigError if the file is not complete enough to run."""
@@ -672,6 +696,17 @@ def load(path: Path | None = None) -> Config:
         ),
     )
 
+    router_raw = raw.get("openrouter", {})
+    router_defaults = OpenRouter()
+    openrouter = OpenRouter(
+        key=str(router_raw.get("key", router_defaults.key)).strip(),
+        # A trailing slash here would produce `…/v1//messages`, which some
+        # gateways answer and others refuse. Emptied, the default answers.
+        base_url=str(router_raw.get("base_url", "")).strip().rstrip("/")
+        or router_defaults.base_url,
+        route_sessions=bool(router_raw.get("route_sessions", router_defaults.route_sessions)),
+    )
+
     notify_raw = raw.get("notify", {})
     # `runner.notify` came first and said "one desktop notification per ticket".
     # It keeps saying exactly that: the new table only has to name what it
@@ -698,6 +733,7 @@ def load(path: Path | None = None) -> Config:
         path=target,
         web=web,
         notify=notify,
+        openrouter=openrouter,
     )
 
 
