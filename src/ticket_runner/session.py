@@ -79,6 +79,7 @@ def run(
     timeout_minutes: int = 30,
     session_id: str = "",
     resume: bool = False,
+    environment: dict[str, str] | None = None,
     on_event: Callable[[dict], None] | None = None,
 ) -> Outcome:
     binary = available()
@@ -94,7 +95,8 @@ def run(
         # overrides that, so the setting alone would never reach us here. It
         # attaches to the Chrome already running — it cannot start one — and it
         # needs the OAuth session of the CLI: an ANTHROPIC_API_KEY session gets
-        # `user:inference` alone and the integration refuses to load.
+        # `user:inference` alone and the integration refuses to load — which is
+        # also what a session routed through OpenRouter is, see openrouter.py.
         "--chrome",
         # `--resume` continues a conversation that already exists, and refuses
         # to be given an identifier to create: the console's chat is one long
@@ -109,7 +111,14 @@ def run(
         command += ["--model", model]
     command.append(prompt)
 
-    environment = {**os.environ, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+    # What the caller adds comes last: an OpenRouter key configured for the
+    # runner is meant to win over one that happens to be in this shell. See
+    # openrouter.py.
+    inherited = {
+        **os.environ,
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+        **(environment or {}),
+    }
     started = time.monotonic()
     log.parent.mkdir(parents=True, exist_ok=True)
     stderr_path = log.with_suffix(".err")
@@ -122,7 +131,7 @@ def run(
             stderr=errors,
             text=True,
             bufsize=1,
-            env=environment,
+            env=inherited,
             start_new_session=True,  # its own process group, so we can kill it all
         )
 

@@ -351,6 +351,38 @@ document_prompt_file = ""
 delivery_prompt_file = ""
 
 # ---------------------------------------------------------------------------
+# Every other model
+# ---------------------------------------------------------------------------
+# What the runner drives is Claude Code, and Claude Code talks to Anthropic —
+# one family of models, on one subscription. An OpenRouter key is one account in
+# front of every provider there is, and it reaches a session two ways.
+#
+# The key alone changes nothing about the runner: it is simply *there*, in the
+# environment of every session, under the name every library already looks for.
+# A ticket can then have a GPT write the copy, a model transcribe an audio file
+# or another make the video, and pay for it — without the runner having to know
+# what any of those are.
+#   openrouter.ai/keys   the sk-or- key
+[openrouter]
+key = ""
+
+# And this is the other way, which is a decision rather than a convenience: the
+# sessions themselves run on it. Claude Code then speaks to OpenRouter instead
+# of to Anthropic, and every model named — a ticket's Model column, an agent's,
+# runner.model above — becomes an OpenRouter slug rather than "opus":
+#   model = "openai/gpt-5"          or "anthropic/claude-sonnet-4.5"
+# Two things go with it, and neither is a detail. The CLI is then authenticated
+# by a token instead of as you, so Claude in Chrome does not load — a ticket
+# that needed the browser cannot be handled that way. And the bill is
+# OpenRouter's, not the subscription's: nothing meters in windows any more, so
+# wait_for_credits has nothing left to wait for.
+route_sessions = false
+
+# Where that key is spent. The default is OpenRouter itself; the line is here
+# for a gateway of your own that speaks the same API.
+# base_url = "https://openrouter.ai/api/v1"
+
+# ---------------------------------------------------------------------------
 # Being told where you are, and answering with one word
 # ---------------------------------------------------------------------------
 # A desktop notification only works if you are in front of that desktop. So the

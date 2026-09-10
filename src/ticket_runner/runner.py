@@ -25,7 +25,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import agents, channels, conversation, credits, git, naming, notion, notify, progress
+from . import agents, channels, conversation, credits, git, naming, notion, notify
+from . import openrouter, progress
 from . import prompt as prompt_module, schedules as schedules_module, session, state
 from . import update as update_module
 from . import voice as voice_module
@@ -191,6 +192,16 @@ class Runner:
         is heard on the next run without the service being restarted.
         """
         return voice_module.Voice(self.config.runner.language)
+
+    @property
+    def environment(self) -> dict[str, str]:
+        """What every session this run starts is given, beyond what it inherits.
+
+        The OpenRouter key when there is one, and nothing at all when there is
+        not. Read off the configuration each time, for the same reason as
+        `voice`: a key typed into the console is a key the next run uses.
+        """
+        return openrouter.environment(self.config.openrouter)
 
     # -- output --------------------------------------------------------------
 
@@ -1448,6 +1459,7 @@ class Runner:
                 # conversation runs in is more than it needs.
                 permission_mode=self.config.runner.reply_permission_mode,
                 timeout_minutes=naming.TIMEOUT_MINUTES,
+                environment=self.environment,
             )
             if outcome.ok:
                 title = naming.clean(outcome.answer)
@@ -1525,6 +1537,7 @@ class Runner:
                 permission_mode=self.config.runner.permission_mode,
                 timeout_minutes=self.config.runner.timeout_minutes,
                 session_id=job.session_id,
+                environment=self.environment,
                 on_event=live.event if live else None,
             )
         except BaseException:
@@ -2066,6 +2079,7 @@ class Runner:
             timeout_minutes=self.config.runner.reply_timeout_minutes,
             session_id=session_id,
             resume=resume,
+            environment=self.environment,
         )
         self._hold_credits(outcome)
         return outcome

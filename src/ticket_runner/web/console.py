@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from .. import progress, session
+from .. import openrouter, progress, session
 from ..config import Config, state_dir
 
 # Commands the console will not run, and why. None is dangerous — each is
@@ -182,6 +182,7 @@ class Chat:
                 timeout_minutes=self.config.web.chat_timeout_minutes,
                 session_id=self.session_id,
                 resume=not first,
+                environment=openrouter.environment(self.config.openrouter),
                 on_event=self._on_event,
             )
         except Exception as error:  # noqa: BLE001

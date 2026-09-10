@@ -294,6 +294,50 @@ for reading rather than for filling in.
 | `[notion.status]` | | if your statuses have other names |
 | `[projects]` | | `"Notion name" = "/path"` for repositories that cannot be guessed |
 | `[web]` | | the console's host, port and token — see *The web console* |
+| `openrouter.key` | `""` | one key in front of every other provider — see *Every other model* below |
+| `openrouter.route_sessions` | `false` | run the sessions themselves on it |
+| `openrouter.base_url` | `https://openrouter.ai/api/v1` | only for a gateway of your own |
+
+### Every other model
+
+What the runner drives is Claude Code, and Claude Code talks to Anthropic: one family of
+models, on one subscription. An [OpenRouter](https://openrouter.ai/keys) key is one account
+in front of every provider there is, and it reaches a session two ways.
+
+```toml
+[openrouter]
+key = "sk-or-v1-..."
+```
+
+That alone changes nothing about the runner. The key is simply *there*, in the environment
+of every session it starts, as `OPENROUTER_API_KEY` — the name every library and every
+snippet already looks for. So a ticket can have a GPT write the copy, a model transcribe an
+audio file or another make the video, and pay for it, without the runner having to know
+what any of those are.
+
+The other way is a decision rather than a convenience:
+
+```toml
+route_sessions = true
+```
+
+The sessions themselves then run on it. Claude Code speaks to OpenRouter instead of to
+Anthropic, and every model named — a ticket's **Model** column, an agent's, `runner.model`
+— becomes an OpenRouter slug rather than `"opus"`:
+
+```toml
+model = "openai/gpt-5"     # or "anthropic/claude-sonnet-4.5", or anything on the list
+```
+
+Two things travel with that, and neither is a detail. The CLI is then authenticated by a
+token instead of as you, so **Claude in Chrome does not load** — a ticket that needed the
+browser cannot be handled that way. And the bill is OpenRouter's rather than the
+subscription's: nothing is metered in windows any more, so `runner.wait_for_credits` has
+nothing left to wait for.
+
+Both switches are fields of the console's **Settings** tab, under *Every other model*; the
+key is a secret like any other, so it goes out to the page as “set, ending in …abcd” and
+comes back only when you type a new one.
 
 ---
 
