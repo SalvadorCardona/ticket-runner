@@ -30,6 +30,8 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, quote, urlparse
 
+from . import credits
+
 
 @dataclass
 class Outcome:
@@ -43,6 +45,11 @@ class Outcome:
     cost_usd: float = 0.0
     turns: int = 0
     seconds: float = 0.0
+    # The subscription's quota, spent: a session that never got to start rather
+    # than one that went wrong. `resets_at` is when it comes back, in seconds
+    # since the epoch. See credits.py, and what the runner does with it.
+    exhausted: bool = False
+    resets_at: float = 0.0
 
     @property
     def resume_command(self) -> str:
@@ -179,8 +186,14 @@ def run(
     failed = bool(final.get("is_error")) or process.returncode != 0
     blocked = _verdict(answer) == "blocked"
     error = ""
+    resets_at = 0.0
     if failed:
-        error = answer[-800:] or _tail(stderr_path) or f"claude exited with code {process.returncode}"
+        tail = _tail(stderr_path)
+        error = answer[-800:] or tail or f"claude exited with code {process.returncode}"
+        # Read on a failure only: a session that *talks* about usage limits must
+        # not put the runner to sleep. And out of both the answer and stderr,
+        # because the CLI says it in whichever of the two it was writing to.
+        resets_at = credits.reached(f"{answer}\n{tail}")
 
     return Outcome(
         ok=not failed and not blocked,
@@ -193,6 +206,8 @@ def run(
         cost_usd=float(final.get("total_cost_usd") or 0.0),
         turns=int(final.get("num_turns") or 0),
         seconds=seconds,
+        exhausted=bool(resets_at),
+        resets_at=resets_at,
     )
 
 

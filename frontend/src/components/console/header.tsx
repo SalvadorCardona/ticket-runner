@@ -113,6 +113,23 @@ export function Header({
                 a run is in progress
               </Pill>
             ) : null}
+            {/* A timer that is on and a board that does not move: without this
+                pill, the only honest reading of that is "it is broken". */}
+            {runner.credits ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span>
+                    <Pill tone="amber" dot>
+                      out of credit · back at {runner.credits_at}
+                    </Pill>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  The subscription's window is spent. Tickets stay where they are and the
+                  first run after {runner.credits_at} takes them again.
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
             {!runner.claude ? <Pill tone="amber">claude not found</Pill> : null}
             <Pill>
               <span className="font-mono tabular-nums">{runner.handled}</span> handled ·{" "}

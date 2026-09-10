@@ -17,7 +17,7 @@ from pathlib import Path
 
 from datetime import datetime
 
-from . import __version__, channels, config as config_module, conversation, git, notion
+from . import __version__, channels, config as config_module, conversation, credits, git, notion
 from . import provision
 from . import schedules as schedules_module
 from . import session, state, systemd
@@ -347,6 +347,12 @@ def command_status(args: argparse.Namespace) -> int:
         warn(f"a run is in progress ({held})")
     else:
         ok("no run in progress")
+
+    # A runner that is on, has tickets and does nothing looks broken. It is not:
+    # the subscription's window is spent, and the wait is the point.
+    until = credits.held()
+    if until:
+        warn(f"out of credit — nothing is run until {credits.when(until)}")
 
     title("Board")
     try:

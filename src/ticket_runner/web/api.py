@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import config as config_module
-from .. import conversation, notion, session, state, systemd
+from .. import conversation, credits, notion, session, state, systemd
 from .. import schedules as schedules_module
 from .. import update as update_module
 from ..config import Config
@@ -278,10 +278,16 @@ class Api:
         configuration = self.config
         held = state.running()
         entries = state.history(10_000)
+        # A timer that is on and a board that does not move is the one state
+        # somebody would open a terminal for. `credits` is 0 the rest of the
+        # time, which is how the header knows to say nothing.
+        waiting = credits.held() if configuration.runner.wait_for_credits else 0.0
         return {
             "timer": systemd.read().label,
             "running": bool(held),
             "lock": held,
+            "credits": waiting,
+            "credits_at": credits.when(waiting) if waiting else "",
             "workspace_root": str(configuration.runner.workspace_root),
             "interval_seconds": configuration.runner.interval_seconds,
             "model": configuration.runner.model or "default",

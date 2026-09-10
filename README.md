@@ -269,6 +269,7 @@ for reading rather than for filling in.
 | `runner.interval_seconds` | `1800` | seconds between two passes — `ticket-runner enable` applies a change |
 | `runner.max_concurrent` | `2` | tickets handled side by side in one run |
 | `runner.timeout_minutes` | `30` | past this, the session is killed and the ticket fails |
+| `runner.wait_for_credits` | `true` | a spent subscription window puts the runner to sleep instead of failing tickets — see *When the credits run out* below |
 | `runner.model` | `""` | `"opus"`, `"sonnet"`… empty = the CLI's default |
 | `runner.language` | `""` | `"fr"` to be answered in French — see *The language it answers in* below |
 | `runner.permission_mode` | `"bypassPermissions"` | see *What protects your code* below |
@@ -1408,6 +1409,42 @@ board is shared with people you would not hand those credentials to, leave the c
 
 ---
 
+## When the credits run out
+
+A Claude subscription is metered in windows: a few hours of work, then the CLI answers
+*usage limit reached* to everything until the window rolls over. A runner nobody is
+watching reads that as every other broken session — and one spent window costs a whole
+board, because each ticket it touches comes back as a failure with a log to read, and by
+the time the credits return there is nobody left to put any of them back.
+
+So it waits instead. When a session dies on the quota:
+
+- **the ticket goes back where it came from** — *ready* for work, *validated* for a
+  publication — with a comment saying why and no question asked of you. Its branch, its
+  worktree and whatever it had already committed are left exactly as they are: the next
+  attempt picks the branch up and carries on from there, as it does for any ticket that
+  has run before;
+- **nothing else is started**. The wait is written to
+  `~/.local/state/ticket-runner/credits.json`, and the runs in between — a run is a process
+  the timer starts, not a loop — find it and do nothing at all: no session, no claim, no
+  answer in a thread;
+- **the first run after it carries on**, as though the pass had never happened.
+
+How long it waits is what Claude Code said. `Claude AI usage limit reached|1758031200` is
+the CLI naming the moment; when it names none, the wait is a quarter of an hour and a run
+that finds the limit still standing simply writes a new one. Guessing a full window would
+be the expensive mistake — what was hit is the *end* of one, and it may be a minute away.
+
+`ticket-runner status` says how much of it is left, and the console's header carries the
+same line, because a timer that is on above a board that does not move has only one honest
+reading otherwise: it is broken.
+
+Set `runner.wait_for_credits = false` to have the old behaviour back — an exhausted quota
+reported as the session failure it looks like. There is one case for it: an
+`ANTHROPIC_API_KEY` runner, which is billed per token and hits nothing to wait for.
+
+---
+
 ## When it does not work
 
 | Symptom | Most likely cause |
@@ -1425,6 +1462,7 @@ board is shared with people you would not hand those credentials to, leave the c
 | a ticket became a document when you wanted code | its project names no repository. Give the project page a `Path` or a `Repository` |
 | “nothing to work from” | the ticket has neither a title nor a description — a page left on the bare template counts as empty |
 | a ticket sat in *In progress* forever | it no longer can: the next run puts back any ticket this host claimed while no run was alive |
+| the timer is on and nothing moves | the subscription's window is spent — `ticket-runner status` says until when. Tickets are where they were, and the first run after that takes them again |
 | a ticket ran before and its branch is still there | it is picked up, not refused: the branch is checked out again and rebased onto the base branch, and the session continues from what it already holds. The ticket's comment says so, and says when the rebase conflicted. `ticket-runner clean --force` is what starts it over instead |
 | `branch … is checked out in …` | two attempts at the same ticket at once, or a worktree kept somewhere else — the one case that still stops it. `git worktree remove <path>`, once you are done with what is in there |
 | no desktop notification | `notify-send` is missing, or the service has no session bus. `runner.notify = false` silences the attempt |

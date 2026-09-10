@@ -18,6 +18,18 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Added
 
+- **The runner waits for the credits instead of failing on them.** A Claude
+  subscription is metered in windows, and a spent one used to cost a whole
+  board: every ticket the runner touched came back as a failure with a log to
+  read, and by the time the credits returned there was nobody left to put any of
+  them back. Now a session that dies on the quota puts the ticket back where it
+  was taken from — *ready* for work, *validated* for a publication, branch and
+  worktree untouched — and nothing at all is started until the window rolls
+  over. The wait lasts as long as Claude Code said it would, or a quarter of an
+  hour when it did not say; `ticket-runner status` and the console's header both
+  show how much of it is left. `runner.wait_for_credits = false` brings back the
+  old behaviour, which is what an `ANTHROPIC_API_KEY` runner wants.
+
 - `runner.language`, and the runner answers in it. `"fr"` — or `"FR"`, or
   `"fr-FR"`, or `"français"` — and every report under a ticket, every question a
   blocked one asks and every line that reaches Telegram or Slack comes back in

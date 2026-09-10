@@ -25,7 +25,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import agents, channels, conversation, git, naming, notion, notify, progress
+from . import agents, channels, conversation, credits, git, naming, notion, notify, progress
 from . import prompt as prompt_module, schedules as schedules_module, session, state
 from . import update as update_module
 from . import voice as voice_module
@@ -827,6 +827,11 @@ class Runner:
         # note about where it came from has done its work.
         state.release(ticket.id)
         said = self.voice
+        if self._out_of_credit(outcome):
+            # Back to validated, not to ready: the decision to publish it has
+            # already been taken, and the wait does not take it back.
+            return self._requeue(ticket, self.config.notion.state("validated"), outcome)
+
         trace = self._trace(job, outcome)
 
         if not outcome.ok:
@@ -1243,6 +1248,79 @@ class Runner:
         )
         return {"ticket": ticket.title, "id": ticket.id, "status": outcome, "reason": reason}
 
+    # -- nothing left to spend -----------------------------------------------
+
+    def _out_of_credit(self, outcome: session.Outcome) -> bool:
+        """Did this session die on the subscription's quota, and do we wait?
+
+        The two halves of the same question: what happened, which `session.run`
+        read off the CLI, and what the configuration says to do about it. With
+        `wait_for_credits` off, an exhausted quota is a session failure like any
+        other and is reported as one — which is what the runner always did.
+        """
+        return bool(outcome.exhausted and self.config.runner.wait_for_credits)
+
+    def _hold_credits(self, outcome: session.Outcome) -> None:
+        """Put the runner to sleep until the credits come back.
+
+        On disk rather than in memory: a run is a process the timer starts, so
+        the runs that follow only learn this by reading it — see credits.py.
+        Said out loud here, once, because those runs are silent about it.
+        """
+        if not self._out_of_credit(outcome):
+            return
+        credits.hold(outcome.resets_at)
+        when = credits.when(outcome.resets_at)
+        self.say(f"  ⏸ out of credit — nothing is run until {when}")
+        self._notify("ticket-runner is out of credit", f"Back to work at {when}.")
+
+    def _requeue(
+        self, ticket: Ticket, status: str, outcome: session.Outcome, note: str = ""
+    ) -> dict:
+        """Put a ticket back in the column it was taken from, and say why.
+
+        The one way out of a run that is neither a success nor a failure:
+        nothing was wrong with the ticket, there was simply nothing left to work
+        on it with. So no question is asked and nobody's phone rings — the
+        column it goes back to is the whole of the message, and the first run
+        after the wait claims it like any other ticket.
+        """
+        said = self.voice
+        when = credits.when(outcome.resets_at)
+        self.say(f"    ⏸ {ticket.title} — out of credit, back in “{status}” until {when}")
+        self._set(ticket, **{self.config.notion.prop("status"): status})
+        self._comment(
+            ticket,
+            said.report(
+                self.agent_label,
+                "out-of-credit",
+                said.say("credit-spent", status=status, when=when),
+                note,
+            ),
+        )
+        return {
+            "ticket": ticket.title,
+            "id": ticket.id,
+            "status": "waiting",
+            "reason": f"out of credit until {when}",
+        }
+
+    def waiting_for_credits(self) -> float:
+        """The moment the credits come back, or 0.0 when there is nothing to wait for.
+
+        Reading it is also what ends the wait: a note whose moment has passed is
+        removed here, so the run that finds the credits back is the one that
+        says so.
+        """
+        if not self.config.runner.wait_for_credits:
+            return 0.0
+        until = credits.held()
+        if until:
+            return until
+        if credits.release():
+            self.say("  ▶ the credits are back — carrying on")
+        return 0.0
+
     # -- preparation ---------------------------------------------------------
 
     def prepare(self, ticket: Ticket) -> Job | None:
@@ -1458,12 +1536,15 @@ class Runner:
             raise
         if live:
             # The toggle's last word: what the session achieved, or which of the
-            # two ways of not achieving it this was.
-            live.close(
-                outcome.summary
-                if outcome.ok
-                else ("blocked — it asked a question" if outcome.blocked else "stopped")
-            )
+            # ways of not achieving it this was.
+            if self._out_of_credit(outcome):
+                closing = "out of credit — it will be picked up again"
+            elif outcome.ok:
+                closing = outcome.summary
+            else:
+                closing = "blocked — it asked a question" if outcome.blocked else "stopped"
+            live.close(closing)
+        self._hold_credits(outcome)
         if self.config.runner.attach_sessions:
             # The session ran in a directory that is about to be deleted. Filed
             # under the project instead, it shows up in `claude --resume` there,
@@ -1513,6 +1594,12 @@ class Runner:
             return self._fail(ticket, self.voice.say("no-session"), str(error))
 
         said = self.voice
+        if self._out_of_credit(outcome):
+            # The working directory is left as it is: whatever the session had
+            # written into ANSWER.md before the quota ran out is what the next
+            # attempt opens on.
+            return self._requeue(ticket, self.config.notion.state("ready"), outcome)
+
         trace = self._trace(job, outcome)
         answer_file = job.workdir / "ANSWER.md"
         content = ""
@@ -1621,6 +1708,20 @@ class Runner:
 
         said = self.voice
         trace = self._trace(job, outcome)
+
+        if self._out_of_credit(outcome):
+            # Not a failure: there was nothing to work with. The worktree stays
+            # where it is whatever `keep_worktree_on_failure` says — the branch
+            # is what the next attempt picks up, commits and all, and throwing
+            # it away would make the wait cost the work that came before it.
+            return self._requeue(
+                ticket,
+                self.config.notion.state("ready"),
+                outcome,
+                said.say("credit-spent-kept", branch=job.branch)
+                if git.commits_ahead(job.workdir, job.base)
+                else "",
+            )
 
         if not outcome.ok:
             reason = said.say("asked-something" if outcome.blocked else "session-failed")
@@ -1881,7 +1982,7 @@ class Runner:
             text, workdir, short, agent, ticket, session_id=resumed or session.new_id(),
             resume=bool(resumed),
         )
-        if not outcome.ok and resumed:
+        if not outcome.ok and resumed and not outcome.exhausted:
             # A session Claude Code no longer has — pruned, or filed on another
             # machine. The thread's history is in Notion, so a fresh one starts
             # from everything except the tone of the last exchange.
@@ -1891,6 +1992,13 @@ class Runner:
             outcome = self._reply_session(
                 text, workdir, short, agent, ticket, session_id=session.new_id(), resume=False
             )
+
+        if self._out_of_credit(outcome):
+            # An answer nobody could afford is not an answer to write down: the
+            # thread is left as it was, unanswered, and the pass that runs once
+            # the credits are back finds it exactly where it is.
+            self.say("    ⏸ out of credit — this one is answered later")
+            return None
 
         answer = conversation.trim(outcome.answer if outcome.ok else "")
         if not answer:
@@ -1949,7 +2057,7 @@ class Runner:
             or agent.model
             or self.config.runner.model
         )
-        return session.run(
+        outcome = session.run(
             prompt_text,
             cwd=workdir,
             log=state.log_file(f"{short}-talk"),
@@ -1959,6 +2067,8 @@ class Runner:
             session_id=session_id,
             resume=resume,
         )
+        self._hold_credits(outcome)
+        return outcome
 
     def _project_of(self, ticket: Ticket) -> Project:
         """The ticket's project, or none at all. Never a failure: a conversation
@@ -2012,6 +2122,16 @@ class Runner:
 
     def tick(self, *, limit: int | None = None, reference: str = "") -> list[dict]:
         self.update()
+        # Nothing at all while the subscription is out: every session this pass
+        # could start would die on the same sentence, and every ticket it
+        # touched would come back as a failure of its own. The run that put the
+        # wait there said so; these ones are quiet, because at a ten-second
+        # cadence saying it again is six lines a minute for four hours.
+        waiting = self.waiting_for_credits()
+        if waiting:
+            if self.announce_idle:
+                self.say(f"Out of credit — nothing is run until {credits.when(waiting)}.")
+            return []
         # The comments are read afresh: a run is where the board is looked at,
         # and a Runner kept alive by the console would otherwise answer a
         # question from an hour ago. Before `answers`, so that what you replied

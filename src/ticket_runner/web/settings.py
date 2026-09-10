@@ -149,6 +149,12 @@ SECTIONS: tuple[Section, ...] = (
                 minimum=1,
             ),
             Field(
+                "runner", "wait_for_credits", "bool", "Wait when the credits run out",
+                "A subscription is metered in windows. When one is spent, the ticket goes "
+                "back where it came from and nothing is run until the window rolls over — "
+                "off, an exhausted quota fails every ticket it touches.",
+            ),
+            Field(
                 "runner", "model", "text", "Model",
                 "Empty: whatever Claude Code is set to. A ticket's own Model column wins "
                 "over this one.",

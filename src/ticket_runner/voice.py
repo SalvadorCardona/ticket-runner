@@ -76,6 +76,7 @@ _SAID: dict[str, dict[str, str]] = {
     "failed": {"en": "that did not work.", "fr": "ça n'a pas marché."},
     "blocked": {"en": "I am stuck.", "fr": "je suis bloqué."},
     "requeued": {"en": "back in the queue.", "fr": "remis dans la file."},
+    "out-of-credit": {"en": "the credits are out.", "fr": "les crédits sont épuisés."},
     # -- a ticket that got somewhere -----------------------------------------
     "after-code": {
         "en": "{commits} on `{branch}`, and the pull request is waiting to be read: {url}",
@@ -239,6 +240,23 @@ _SAID: dict[str, dict[str, str]] = {
     "no-pull-request-opened": {
         "en": "The pull request could not be opened: {error}",
         "fr": "La pull request n'a pas pu être ouverte : {error}",
+    },
+    # -- a run with nothing left to spend -------------------------------------
+    "credit-spent": {
+        "en": (
+            "The Claude subscription has hit its usage limit, so there was nothing to "
+            "work with. Nothing is lost and nothing is asked of you: the ticket goes "
+            "back to “{status}”, and the first run after {when} takes it again."
+        ),
+        "fr": (
+            "L'abonnement Claude a atteint sa limite d'usage, il n'y avait donc rien "
+            "pour travailler. Rien n'est perdu et rien n'est demandé : le ticket "
+            "retourne dans « {status} », et le premier run après {when} le reprendra."
+        ),
+    },
+    "credit-spent-kept": {
+        "en": "What the session had already committed is kept on `{branch}`.",
+        "fr": "Ce que la session avait déjà commité est conservé sur `{branch}`.",
     },
     # -- a run that died in the middle ---------------------------------------
     "abandoned": {

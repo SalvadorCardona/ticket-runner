@@ -102,6 +102,11 @@ class Runner:
     interval_seconds: int = 1800
     max_concurrent: int = 2
     timeout_minutes: int = 30
+    # What to do when the subscription's quota is spent: wait for the window to
+    # roll over rather than fail every ticket it touches. Off is the old
+    # behaviour — an exhausted quota is reported as the session failure it looks
+    # like. See credits.py.
+    wait_for_credits: bool = True
     model: str = ""
     # The language the runner writes its reports in, and the one it asks a
     # session to answer in. Empty is English, and it is more than that: a file
@@ -577,6 +582,9 @@ def load(path: Path | None = None) -> Config:
         interval_seconds=max(1, int(runner_raw.get("interval_seconds", defaults.interval_seconds))),
         max_concurrent=max(1, int(runner_raw.get("max_concurrent", defaults.max_concurrent))),
         timeout_minutes=max(1, int(runner_raw.get("timeout_minutes", defaults.timeout_minutes))),
+        wait_for_credits=bool(
+            runner_raw.get("wait_for_credits", defaults.wait_for_credits)
+        ),
         model=str(runner_raw.get("model", defaults.model)).strip(),
         # Kept as the file wrote it: `voice` reads it down to a language it
         # speaks, and the difference between "nothing was said" and "English was
