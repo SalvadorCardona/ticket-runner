@@ -20,7 +20,6 @@ import {
   type RowComponentPropsInterface,
 } from "react-resource-view"
 
-import { PageHead } from "@/components/console/frame"
 import {
   EDGE,
   LABEL,
@@ -43,7 +42,8 @@ import { cn } from "@/lib/utils"
  * stream), what a card looks like (`TicketCard`), which columns it is laid out
  * in (the board's own), how a card is moved (a drop is a status change), what
  * a new ticket asks for (the create form), and what opening one shows (the
- * ticket page). The package does the rest — the list, the popup, the URL.
+ * ticket page). The package does the rest — the list, its header, the panel a
+ * form opens in, the URL.
  */
 
 export const TICKETS = "tickets"
@@ -190,25 +190,17 @@ function TicketCard({ row }: RowComponentPropsInterface) {
 
 /* What sits above whatever react-resource-view is drawing.
  *
- * Two jobs, because the package offers one slot: it asks the list to reread the
- * store whenever the stream moves the board, and — on the board itself, never
- * on a ticket's page — it draws the heading the board opens with.
+ * One job, and it draws nothing: it asks the list to reread the store whenever
+ * the stream moves the board. The heading is the package's own since 0.7.0 —
+ * the resource's icon, the view's name and the line under it — so the board no
+ * longer opens with a `PageHead` of its own, which would say it all twice.
  */
 function BoardTop() {
-  const context = useCurrentViewResourceContext()
-  const { fetchData, resourceAction } = context
+  const { fetchData } = useCurrentViewResourceContext()
   const latest = React.useRef(fetchData)
   latest.current = fetchData
   React.useEffect(() => subscribeBoard(() => latest.current()), [])
-
-  if (resourceAction !== ActionList.list) return null
-  return (
-    <PageHead
-      crumbs={["operations", "board"]}
-      title="Keep the work moving."
-      blurb="Notion holds the board; this is it, live. Drop a card in another column and the runner is told."
-    />
-  )
+  return null
 }
 
 /** A column's name as a heading: the board's own word, with a capital, under its colour. */
@@ -341,12 +333,19 @@ export const tickets = createViewResource<TicketItem, TicketItem, TicketWrite>(T
     components: { top: BoardTop },
   },
   views: {
-    [ActionList.list]: { name: "Board" },
+    // The name and the line under it are what the list's own header says, next
+    // to the resource's icon: the board opens on its own words.
+    [ActionList.list]: {
+      name: "Board",
+      description:
+        "Notion holds the board; this is it, live. Drop a card in another column and the runner is told.",
+    },
     [ActionList.create]: {
       name: "New ticket",
       form: createForm,
-      // Over the board rather than instead of it.
-      behavior: { openIn: "popup" },
+      // Over the board rather than instead of it, and against the edge rather
+      // than in the middle of it: a brief is written at full height.
+      behavior: { openIn: "drawer" },
     },
     [ActionList.read]: { name: "Ticket", viewComponent: TicketPage },
   },
