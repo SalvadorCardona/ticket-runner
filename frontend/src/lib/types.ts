@@ -100,6 +100,10 @@ export interface RunnerState {
   timer: string
   running: boolean
   lock: string
+  /** When the credits come back, in seconds since the epoch — 0 while there are some. */
+  credits: number
+  /** The same moment, as a clock reads it. */
+  credits_at: string
   workspace_root: string
   interval_seconds: number
   model: string

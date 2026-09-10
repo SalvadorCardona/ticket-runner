@@ -205,6 +205,16 @@ max_concurrent = 2
 # Past this, the session is killed and the ticket goes back as failed.
 timeout_minutes = 30
 
+# A subscription is metered in windows: a few hours of work, then Claude Code
+# answers "usage limit reached" to everything until the window rolls over. With
+# this on, that is not a failure — the ticket goes back to the column it was
+# taken from, its branch and its worktree untouched, and nothing at all is run
+# until the credits return. The CLI usually says when that is; when it does not,
+# the runner tries again a quarter of an hour later.
+#   ticket-runner status   says how long there is left to wait
+# Off: an exhausted quota fails every ticket it touches, one after another.
+wait_for_credits = true
+
 # Empty = the CLI's default model. Otherwise "opus", "sonnet", "haiku"…
 model = ""
 

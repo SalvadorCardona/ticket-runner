@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import traceback
 import contextlib
 from contextlib import contextmanager
@@ -33,7 +34,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ticket_runner import config as C  # noqa: E402
-from ticket_runner import agents, channels, conversation, markdown, naming, notion  # noqa: E402
+from ticket_runner import agents, channels, conversation, credits, markdown, naming, notion  # noqa: E402
 from ticket_runner import notify, progress, projects, prompt, provision  # noqa: E402
 from ticket_runner import schedules, session, state, systemd  # noqa: E402
 from ticket_runner.channels import slack as slack_channel, telegram as telegram_channel  # noqa: E402
@@ -2291,6 +2292,147 @@ def the_timer_counts_from_its_own_start():
     for directive in ("OnActiveSec=600s", "OnBootSec=600s", "OnUnitActiveSec=600s"):
         assert directive in timer, directive
     assert "@" not in timer, "a placeholder left in the unit"
+
+
+# -- when the credits run out -------------------------------------------------
+
+
+@case
+def an_exhausted_quota_is_told_apart_from_every_other_failure():
+    """The one refusal that is not the session's fault, read off what it said.
+
+    A false positive here would put the runner to sleep for a quarter of an
+    hour on an ordinary crash, so nothing but these two sentences counts.
+    """
+    assert credits.reached("Claude AI usage limit reached|1758031200") == 1758031200.0
+    # A timestamp in milliseconds would otherwise be the year 57000: a runner
+    # asleep for good, on a message whose format changed under it.
+    far = credits.reached("Claude AI usage limit reached|1758031200000")
+    assert far <= time.time() + credits.LONGEST_WAIT
+    # No moment named: a short wait, and the next run asks again.
+    blind = credits.reached("Claude usage limit reached. Your limit will reset at 10pm.")
+    assert time.time() + credits.BLIND_WAIT - 5 < blind <= time.time() + credits.BLIND_WAIT
+    assert credits.reached("API Error: Credit balance is too low") > 0
+    assert credits.reached("claude exited with code 1") == 0.0
+    assert credits.reached("the session was killed after 30 min") == 0.0
+    assert credits.reached("") == 0.0
+
+
+@case
+def a_wait_outlives_the_run_that_wrote_it():
+    """A run is a process the timer starts: what it learned only travels on disk."""
+    with _state_home():
+        assert credits.held() == 0.0, "nothing waited for until something says so"
+        credits.hold(time.time() + 300)
+        assert credits.held() > time.time(), "the next run finds it and stands down"
+        # A moment that has passed is no wait at all — and `release` is what
+        # removes the note, so the run that finds the credits back can say so.
+        credits.hold(time.time() - 1)
+        assert credits.held() == 0.0
+        assert credits.release() and not credits.release()
+
+
+def _spent(seconds_away: float = 300) -> session.Outcome:
+    """What `session.run` hands back when the subscription's window is spent."""
+    return session.Outcome(
+        ok=False,
+        blocked=False,
+        session_id="s-1",
+        summary="",
+        log=Path("/dev/null"),
+        error="Claude AI usage limit reached",
+        exhausted=True,
+        resets_at=time.time() + seconds_away,
+    )
+
+
+def _out_of_credit(page: notion.Page) -> Runner:
+    """A board runner whose every session dies on the quota."""
+    runner = _board_runner([page], {})
+    runner.config.runner.auto_update = False
+    runner._run_session = lambda job, template: _spent()
+    return runner
+
+
+@case
+def a_ticket_the_credits_ran_out_on_goes_back_to_ready_rather_than_failing():
+    """Nothing was wrong with it: there was nothing left to work on it with.
+
+    Failing it would cost the ticket twice — once for the quota, and once for
+    the four hours nobody is there to put it back.
+    """
+    page = _reviewed("p-doc", "In progress", None)
+    runner = _out_of_credit(page)
+    job = runner_module.Job(
+        runner_module.Ticket(page),
+        projects.Project(name="", path=None),
+        branch="",
+        base="",
+        workdir=Path(tempfile.mkdtemp()) / "doc",
+    )
+    result = runner._execute_document(job)
+    assert runner.client.written == [("p-doc", {"Status": "Ready"})]
+    assert result["status"] == "waiting", "neither done nor failed"
+    said = runner.client.comments_written[0]
+    assert "usage limit" in said and "back to “Ready”" in said
+    assert "?" not in said, "a wait asks nothing of anybody"
+
+
+@case
+def a_publication_the_credits_ran_out_on_goes_back_to_validated():
+    """Not to ready: the decision to publish it has already been taken."""
+    with _state_home():
+        page = _reviewed("p-post", "Validated", None)
+        runner = _out_of_credit(page)
+        result = runner._publish(
+            runner_module.Ticket(page), projects.Project(name="", path=None)
+        )
+    assert runner.client.written[0][1]["Status"] == "In progress", "claimed first"
+    assert runner.client.written[-1] == ("p-post", {"Status": "Validated"})
+    assert result["status"] == "waiting"
+    assert state.claims() == {}, "and the claim is let go of on the way out"
+
+
+@case
+def nothing_at_all_is_run_while_the_credits_are_out():
+    """Every session this pass could start would die on the same sentence."""
+    with _state_home():
+        runner = _out_of_credit(_reviewed("p-ready", "Ready", None))
+        said: list[str] = []
+        runner.quiet, runner.say, runner.announce_idle = False, said.append, True
+        credits.hold(time.time() + 300)
+        assert runner.tick() == []
+        assert runner.client.queried == [], "the board is not even read"
+        assert runner.client.written == []
+        assert any("Out of credit" in line for line in said)
+
+        # And the wait ends by itself: the run that finds it over says so, once.
+        credits.hold(time.time() - 1)
+        assert runner.waiting_for_credits() == 0.0
+        assert any("credits are back" in line for line in said)
+
+
+@case
+def a_runner_told_not_to_wait_fails_on_the_quota_as_it_always_did():
+    """`wait_for_credits = false` is the old behaviour, kept for an API key."""
+    with _state_home():
+        page = _reviewed("p-doc", "In progress", None)
+        runner = _out_of_credit(page)
+        runner.config.runner.wait_for_credits = False
+        credits.hold(time.time() + 300)
+        assert runner.waiting_for_credits() == 0.0, "a note nobody reads"
+
+        job = runner_module.Job(
+            runner_module.Ticket(page),
+            projects.Project(name="", path=None),
+            branch="",
+            base="",
+            workdir=Path(tempfile.mkdtemp()) / "doc",
+        )
+        # Reported as the session failure it looks like — here a question, the
+        # way a session that writes no answer always came back.
+        assert runner._execute_document(job)["status"] == "blocked"
+        assert "the credits are out" not in runner.client.comments_written[0]
 
 
 # -- runner ------------------------------------------------------------------
