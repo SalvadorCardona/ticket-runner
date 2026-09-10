@@ -1225,7 +1225,8 @@ none is configured and `list_items_in_registries` refuses to look.
 one declaration for
 [react-resource-view](https://github.com/SalvadorCardona/react-resource-view) —
 `frontend/src/resources/tickets.tsx` — which renders the column layout, the table, the
-popup and the addresses from it, with the forms drawn by
+header the list opens on, the panel a new ticket is written in and the addresses from it,
+with the forms drawn by
 [react-data-form](https://github.com/SalvadorCardona/react-data-form). The package knows
 neither this router nor this API: it asks for four navigation primitives and a *dialect*,
 and both are written in `frontend/src/lib/` — the primitives over the History API, in the

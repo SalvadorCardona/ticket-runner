@@ -79,6 +79,14 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
   the two transcripts are shadcn's `message` and `message-scroller`. A switch at
   the right of the header folds the second column away, for a board that wants
   the width.
+- The board opens on one heading instead of two, and a new ticket is written in
+  a panel. react-resource-view 0.7.0 draws a list's header itself — the board's
+  icon, its name and the line that says what it is for, with the *board* and
+  *table* switch and **New ticket** on the same row — so the console has given
+  up writing its own above it. The form for a new ticket slides in from the
+  right of the screen, and up from the bottom on a phone, rather than landing in
+  a dialog in the middle of it: a brief is written at full height with the board
+  still there behind it, and the panel closes itself once the ticket is written.
 
 ### Added
 
