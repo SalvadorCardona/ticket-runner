@@ -64,7 +64,9 @@ the runner's job.
 5. If the request is too ambiguous to settle alone, or if the ticket does not \
 match this repository, do not guess: commit nothing and explain what is missing.
 {language}
-End with a final line, exactly one of these two:
+End with a final line, exactly one of these two. It is read on a phone, as a \
+notification, so it is one sentence of under 200 characters and it is cut where \
+it stops being one:
 
 RESULT: ok — <what you changed, in one sentence>
 RESULT: blocked — <what is missing to decide>
@@ -110,7 +112,9 @@ the gap.
 7. If the request is too ambiguous to answer usefully, do not pad: write no \
 `ANSWER.md` and explain what is missing.
 {language}
-End with a final line, exactly one of these two:
+End with a final line, exactly one of these two. It is read on a phone, as a \
+notification, so it is one sentence of under 200 characters and it is cut where \
+it stops being one:
 
 RESULT: ok — <what you produced, in one sentence>
 RESULT: blocked — <what is missing to decide>
@@ -149,7 +153,9 @@ again.
 4. Nothing else. No file to fix, no adjacent improvement, no follow-up you \
 thought of: those are other tickets.
 {language}
-End with a final line, exactly one of these two:
+End with a final line, exactly one of these two. It is read on a phone, as a \
+notification, so it is one sentence of under 200 characters and it is cut where \
+it stops being one:
 
 RESULT: ok — <what you published and where, with the link if there is one>
 RESULT: blocked — <what stopped you, or what is missing to do it>

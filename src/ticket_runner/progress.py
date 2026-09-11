@@ -35,7 +35,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
-from . import markdown, notion
+from . import markdown, notion, voice as voice_module
 
 # The default cadence, in seconds. Ten is short enough to feel live and long
 # enough that a page is not rewritten under the reader's eyes.
@@ -213,7 +213,8 @@ class Live:
         database: str = "",
         property_name: str = "",
         interval: float = CADENCE,
-        heading: str = "Live",
+        heading: str = "",
+        words: voice_module.Voice | None = None,
         clock: Callable[[], float] = time.monotonic,
         say: Callable[[str], None] = lambda message: None,
     ) -> None:
@@ -222,7 +223,11 @@ class Live:
         self.database = database
         self.property_name = property_name
         self.interval = max(1.0, float(interval))
-        self.heading = heading
+        # The block's title is read on the ticket, next to a report written in
+        # the configured language: “⏳ Live — 16 step(s)” under a French verdict
+        # was the runner speaking two languages in the same glance.
+        self.words = words or voice_module.Voice()
+        self.heading = heading or self.words.say("live")
         self.clock = clock
         self.say = say
         self.started = clock()
@@ -286,19 +291,45 @@ class Live:
             self._cap()
         return len(steps)
 
-    def close(self, note: str = "") -> None:
-        """Last flush, then the toggle stops saying it is live."""
+    def close(self, note: str = "", *, ok: bool = True) -> None:
+        """Last flush, then the toggle stops saying it is live.
+
+        A run that ended badly renames it rather than ticking it: the block is
+        no longer the story of a session, it is the trace of one, and it is
+        where the report sends whoever wants the rest — see `detail`.
+        """
         if self.disabled:
             return
         self.flush()
         if not self._toggle:
             return
         tail = f" · {_one_line(note, 120)}" if note else ""
-        self._retitle(f"✓ {self._tally()}{tail}")
+        if ok:
+            self._retitle(f"✓ {self._tally()}{tail}")
+        else:
+            self._retitle(f"⚠️ {self.words.say('live-trace')} — {self._tally()}{tail}")
         # The ticket's own report — the comment, the status, the pull request —
         # is what speaks now; a column still showing “Edit src/x.py” would be
         # saying something that stopped being true.
         self._publish("")
+
+    def detail(self, text: str) -> bool:
+        """One last paragraph inside the block, and whether it got there.
+
+        What a comment used to end on — the command that resumes the session,
+        the log, the worktree that was kept — said once, folded, and only when
+        a run went wrong. The answer matters to the caller: a block that was
+        never opened, or a page that refused three writes, is not somewhere a
+        trace can be left, and the report then carries it itself.
+        """
+        if self.disabled or not self._toggle or not str(text or "").strip():
+            return False
+        try:
+            self.client.append_blocks(self._toggle, [_paragraph(Step(_prose(text)))])
+        except notion.NotionError as error:
+            self._failed(error)
+            return False
+        return True
 
     def _blocks(self, steps: list[Step]) -> list[dict]:
         """The blocks a batch of steps becomes.
@@ -408,8 +439,8 @@ class Live:
             pass
 
     def _tally(self) -> str:
-        minutes = (self.clock() - self.started) / 60
-        return f"{self.written} step(s) · {minutes:.0f} min"
+        elapsed = self.clock() - self.started
+        return f"{self.words.count(self.written, 'step')} · {self.words.minutes(elapsed)}"
 
 
     def _failed(self, error: notion.NotionError) -> None:

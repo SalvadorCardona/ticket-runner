@@ -637,7 +637,7 @@
     <h3>Following the work</h3>
     <p>While the session works, its steps are written <b>into the ticket</b> on a ten-second cadence: one toggle per run, a bullet per file read and per command run, and what the agent said as a paragraph of its own.</p>
     <div class="diagram">
-<pre>⏳ Live — 12 step(s) · 3 min
+<pre>⏳ Live — 12 steps · 3 minutes
    •  Read    src/app/header.component.html
    ──────────────────────────────────────────────────────────────────
    I will remove the banner from the template and the stylesheet rules
@@ -693,7 +693,7 @@ In review     <span class="ar">──────▶</span>     you read it. Goo
     <p>Running a ticket again is the right answer to <em>do it differently</em>. It is the wrong answer to <em>why did you do it like that?</em> — so a comment under one of its reports is simply answered, in the same thread, in the language you wrote in:</p>
 
     <div class="thread">
-      <div class="msg bot"><span class="who">ticket-runner@laptop — done.</span>Removed the header from the dashboard. Branch <code>ticket/supprimer-l-entete-9d2cb790</code> · 2 commit(s) · <a href="#talk">github.com/…/pull/12</a></div>
+      <div class="msg bot"><span class="who">✅ To review — PR #12 · 2 commits · 9 minutes · $0.74</span>Removed the header from the dashboard. <a href="#talk">github.com/…/pull/12</a></div>
       <div class="msg you"><span class="who">you</span>pourquoi une nouvelle branche plutôt que celle d’hier ?</div>
       <div class="msg bot reply"><span class="who">Ticket Runner</span>celle d’hier était déjà partie en revue sur la PR #11, et y pousser aurait mélangé deux changements sans rapport. La nouvelle part de <code>main</code>, qui contient déjà #11.</div>
     </div>
@@ -1127,7 +1127,7 @@ port = <span class="n">8787</span></pre>
     type('<span class="k">Edit</span> src/app/header.html', 4300);
     type('<span class="k">Edit</span> src/app/header.css', 5500);
     type('<span class="k">Bash</span> npm test -- --watch=false', 6700);
-    at(8400, function () { setLive('<span class="ok">✓</span> 27 step(s) · 6 min · 2 commits'); });
+    at(8400, function () { setLive('<span class="ok">✓</span> 27 steps · 6 minutes · 2 commits'); });
 
     at(9600, function () { move('review'); setMeta('Site vitrine · <span class="pr" style="color:var(--warn)">PR #12</span>'); setLive('<span class="pr">github.com/…/pull/12</span> — yours to read'); });
     at(13400, function () { move('validated'); setMeta('Site vitrine · <b>you said yes</b>'); setLive('<span class="k">gh</span> pr merge --squash<span class="caret"></span>'); });

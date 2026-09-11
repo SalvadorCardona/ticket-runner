@@ -16,12 +16,14 @@ Two decisions hold it together.
   unrecognised is English rather than a failure — a typo in a language name is
   not a reason for a ticket to come back unreported. An empty setting is the
   runner as it always was, and that is the point of it being empty.
-- **It says what happened, not what it ran.** A report used to read
-  “Branch `x` · 3 commit(s) · <url>”, which is a row of facts with the sentence
-  taken out. The facts are the same here; what changed is that they are said.
-  The plumbing — the session id, the log path — comes last and in one sentence,
-  because it is what you need on the rare day something went wrong, not what you
-  came to the ticket to read.
+- **The first line of a comment is a notification.** Notion pushes a comment to
+  the phone as it stands, cut after two or three lines, so the first line is all
+  there is: it gets a mark, the verdict as an action — *to review*, *stuck* —
+  and the figures that place it, and nothing else. One sentence follows, cut at
+  `BRIEF` characters, then a link if there is one. What used to be under that —
+  the host that wrote it, the session id, the log path — is not lost, it is read
+  off the board's own columns and off the folded block the run leaves on the
+  page, which is where somebody looks on the rare day a run went wrong.
 
 One thing a report carries is deliberately not here: the note `git.add_worktree`
 writes when a ticket runs a second time on a branch it already had. That
@@ -50,6 +52,57 @@ _SPELLINGS = {
 }
 
 
+# How long a sentence may be under a verdict. Two hundred characters is about
+# what a phone shows before it gives up, and the prompt asks for one sentence:
+# this is what happens when it is answered with three.
+BRIEF = 200
+
+# The mark every report opens with, one per verdict. It is read by a person at a
+# glance — green is nothing to do, the hand is a question — and by the runner, as
+# the thing that tells its own comment from your answer: see `is_report`.
+MARKS = {
+    "review": "✅",
+    "read": "✅",
+    "merged": "✅",
+    "published": "✅",
+    "blocked": "🙋",
+    "failed": "⚠️",
+    "waiting": "⏸️",
+    "requeued": "↩️",
+}
+
+# How every report opened until the marks arrived: `ticket-runner@<host> — `.
+# Still recognised, and only recognised — nothing writes it any more. A board
+# does not start over when the runner is updated, and the comments already on it
+# have to keep being read as ours.
+SIGNATURE = "ticket-runner@"
+
+
+def is_report(text: str) -> bool:
+    """Was this comment written by a run, rather than by a person?
+
+    The honest answer is `conversation.ours`, which asks Notion who wrote it.
+    This is the fallback for the boards where Notion will not say — an
+    integration without *Read user information* — and it reads the only thing a
+    report has that an answer does not: the mark it opens with.
+    """
+    said = str(text or "").lstrip()
+    return said.startswith(tuple(MARKS.values())) or said.startswith(SIGNATURE)
+
+
+def plain(text: str) -> str:
+    """A report without the host an older run signed it with.
+
+    Reports made before the marks open with `ticket-runner@laptop — done.`, and
+    the host is exactly the part nobody needs — least of all the session about
+    to read the thread back as context.
+    """
+    first, newline, rest = str(text or "").partition("\n")
+    if first.lstrip().startswith(SIGNATURE):
+        first = first.split("—", 1)[-1].strip()
+    return first + newline + rest
+
+
 def understood(raw: str) -> str:
     """The language a file asked for, as one of the two this speaks.
 
@@ -65,58 +118,48 @@ def understood(raw: str) -> str:
 
 
 # One entry per thing the runner has to say, in every language it says it in.
-# Grouped as a run goes: how a report opens, how a finished ticket reads, what a
-# failure is called, and what reaches a phone.
+# Grouped as a run goes: the verdict a report opens with, the facts that place
+# it, what a failure is called, and what reaches a phone.
 _SAID: dict[str, dict[str, str]] = {
-    # -- how a report opens --------------------------------------------------
-    # The host label in front of these is what every reader of the board — and
-    # `web.api._voice` — recognises the runner by, so only the words after the
-    # dash are ever translated.
-    "done": {"en": "done.", "fr": "c'est fait."},
-    "failed": {"en": "that did not work.", "fr": "ça n'a pas marché."},
-    "blocked": {"en": "I am stuck.", "fr": "je suis bloqué."},
-    "requeued": {"en": "back in the queue.", "fr": "remis dans la file."},
-    "out-of-credit": {"en": "the credits are out.", "fr": "les crédits sont épuisés."},
-    # -- a ticket that got somewhere -----------------------------------------
-    "after-code": {
-        "en": "{commits} on `{branch}`, and the pull request is waiting to be read: {url}",
-        "fr": "{commits} sur `{branch}`, et la pull request attend une relecture : {url}",
+    # -- the verdict, which is the notification -------------------------------
+    # One word each, and each one says what is expected *of you*: “done” was
+    # true and useless, since it left the reader to work out whether anything
+    # was being asked. Every one of these is preceded by its mark — see `MARKS`
+    # — and followed by the figures that place it.
+    "verdict-review": {"en": "To review", "fr": "À relire"},
+    "verdict-read": {"en": "To read", "fr": "À lire"},
+    "verdict-merged": {"en": "Merged", "fr": "Fusionnée"},
+    "verdict-published": {"en": "Published", "fr": "Publié"},
+    "verdict-blocked": {"en": "Stuck", "fr": "Bloqué"},
+    "verdict-failed": {"en": "Failed", "fr": "Échec"},
+    "verdict-waiting": {"en": "Waiting", "fr": "En attente"},
+    "verdict-requeued": {"en": "Back in the queue", "fr": "Remis dans la file"},
+    # -- the facts that go on the same line -----------------------------------
+    # Short enough to be read in a row, and in the order somebody reads them:
+    # where the work is, how much of it there is, what it took.
+    "pull-request": {"en": "PR #{number}", "fr": "PR #{number}"},
+    "on-branch": {"en": "branch `{branch}`", "fr": "branche `{branch}`"},
+    "in-the-page": {"en": "answer in the page", "fr": "réponse dans la page"},
+    "merged-with": {"en": "{method} merge", "fr": "fusion en {method}"},
+    "merged-before": {"en": "already merged", "fr": "déjà fusionnée"},
+    "credits-out": {
+        "en": "out of credit, back in “{status}” until {when}",
+        "fr": "crédits épuisés, retour dans « {status} » jusqu'à {when}",
     },
-    "after-code-alone": {
-        "en": "{commits} on `{branch}`. No pull request, so the branch is where to look.",
-        "fr": "{commits} sur `{branch}`. Pas de pull request : tout est sur la branche.",
+    "abandoned": {
+        "en": "nobody was working on it any more, {minutes} after the last trace",
+        "fr": "plus personne ne s'en occupait, {minutes} après la dernière trace",
     },
-    "after-document": {
-        "en": "The answer is in the page above, {blocks} of it.",
-        "fr": "La réponse est dans la page ci-dessus, {blocks} en tout.",
+    # -- the one sentence under a verdict -------------------------------------
+    "answer-here": {
+        "en": "An answer here or on your phone — yes, no, or a sentence — and it runs "
+        "again on the next pass.",
+        "fr": "Une réponse ici ou sur ton téléphone — oui, non, ou une phrase — et il "
+        "repart au prochain passage.",
     },
-    "after-publication": {
-        "en": "Validated, so it went out. {summary}",
-        "fr": "Validé, donc c'est parti. {summary}",
-    },
-    "after-merge": {
-        "en": "Validated, so the pull request went in: {url}",
-        "fr": "Validé, donc la pull request est passée : {url}",
-    },
-    "merged-already": {
-        "en": "It had already been merged — there was nothing left to do.",
-        "fr": "Elle avait déjà été fusionnée — il n'y avait plus rien à faire.",
-    },
-    "merged-now": {
-        "en": "Merged with a {method}.\n{said}",
-        "fr": "Fusionnée en {method}.\n{said}",
-    },
-    "merged-elsewhere": {
-        "en": "Its pull request has been merged, so this one is closed: {url}",
-        "fr": "Sa pull request a été fusionnée, donc le ticket est clos : {url}",
-    },
-    "spent": {
-        "en": "That took {minutes} and {turns}, and cost {cost}.",
-        "fr": "Ça a pris {minutes} et {turns}, pour {cost}.",
-    },
-    "spent-freely": {
-        "en": "That took {minutes} and {turns}.",
-        "fr": "Ça a pris {minutes} et {turns}.",
+    "trace-in-page": {
+        "en": "What it did is in the folded block at the bottom of the page.",
+        "fr": "Ce qu'il a fait est dans le bloc replié en bas de la page.",
     },
     "trace": {
         "en": "To pick the session back up: `{resume}`{picker}. Its log is `{log}`.",
@@ -242,48 +285,14 @@ _SAID: dict[str, dict[str, str]] = {
         "fr": "La pull request n'a pas pu être ouverte : {error}",
     },
     # -- a run with nothing left to spend -------------------------------------
-    "credit-spent": {
-        "en": (
-            "The Claude subscription has hit its usage limit, so there was nothing to "
-            "work with. Nothing is lost and nothing is asked of you: the ticket goes "
-            "back to “{status}”, and the first run after {when} takes it again."
-        ),
-        "fr": (
-            "L'abonnement Claude a atteint sa limite d'usage, il n'y avait donc rien "
-            "pour travailler. Rien n'est perdu et rien n'est demandé : le ticket "
-            "retourne dans « {status} », et le premier run après {when} le reprendra."
-        ),
-    },
     "credit-spent-kept": {
         "en": "What the session had already committed is kept on `{branch}`.",
         "fr": "Ce que la session avait déjà commité est conservé sur `{branch}`.",
     },
     # -- a run that died in the middle ---------------------------------------
-    "abandoned": {
-        "en": (
-            "Nobody was working on this any more, {minutes} after it was last touched: "
-            "its run was stopped, or it died in the middle of a session."
-        ),
-        "fr": (
-            "Plus personne ne s'en occupait, {minutes} après la dernière trace : son run "
-            "a été arrêté, ou il est mort en cours de session."
-        ),
-    },
     "abandoned-requeued": {
         "en": "I am picking it up again from the start.",
         "fr": "Je le reprends depuis le début.",
-    },
-    "abandoned-publishing": {
-        "en": (
-            "It was being published at the time, having been validated, so I am not "
-            "trying again on my own: it may well have gone out just before the run died. "
-            "Worth a look — and back to “{origin}” if it did not."
-        ),
-        "fr": (
-            "Il était en cours de publication, après avoir été validé, donc je ne "
-            "recommence pas de moi-même : il est peut-être parti juste avant que le run "
-            "ne meure. À vérifier — et à remettre dans « {origin} » si ce n'est pas le cas."
-        ),
     },
     # -- talking in a thread --------------------------------------------------
     "no-reply": {
@@ -295,25 +304,14 @@ _SAID: dict[str, dict[str, str]] = {
         "fr": "la session s'est terminée sans rien dire",
     },
     # -- what reaches a phone -------------------------------------------------
-    "headline-blocked": {"en": "Stuck · {title}", "fr": "Bloqué · {title}"},
-    "headline-failed": {"en": "Failed · {title}", "fr": "En échec · {title}"},
-    "headline-review": {"en": "Ready to read · {title}", "fr": "À relire · {title}"},
-    "headline-published": {"en": "Published · {title}", "fr": "Publié · {title}"},
-    "written-into-notion": {
-        "en": "The answer is in the Notion ticket.",
-        "fr": "La réponse est dans le ticket Notion.",
-    },
-    "branch-only": {
-        "en": "{commits} on the branch {branch}.",
-        "fr": "{commits} sur la branche {branch}.",
-    },
+    # The title of a desktop or Telegram notification, where the ticket has to
+    # be named — Notion puts the page's own name above the comment, and these
+    # two have nothing but what they are handed. The words are the verdicts'.
+    "headline": {"en": "{verdict} · {title}", "fr": "{verdict} · {title}"},
     "publication-interrupted": {
-        "en": "Its publication was interrupted. Did it go out? If not, back to “{origin}”.",
-        "fr": "Sa publication a été interrompue. Est-elle partie ? Sinon, retour dans « {origin} ».",
-    },
-    "invitation": {
-        "en": "\n\nAn answer here — yes, no, or a sentence — and it runs again on the next pass.",
-        "fr": "\n\nUne réponse ici — oui, non, ou une phrase — et il repart au prochain passage.",
+        "en": "its publication was interrupted — did it go out? If not, back to “{origin}”",
+        "fr": "sa publication a été interrompue — est-elle partie ? Sinon, retour "
+        "dans « {origin} »",
     },
     # -- answering from Telegram or Slack -------------------------------------
     "noted": {
@@ -341,11 +339,23 @@ _SAID: dict[str, dict[str, str]] = {
     "commits": {"en": "{count} commits", "fr": "{count} commits"},
     "block": {"en": "{count} block", "fr": "{count} bloc"},
     "blocks": {"en": "{count} blocks", "fr": "{count} blocs"},
-    "turn": {"en": "{count} turn", "fr": "{count} échange"},
-    "turns": {"en": "{count} turns", "fr": "{count} échanges"},
+    "step": {"en": "{count} step", "fr": "{count} étape"},
+    "steps": {"en": "{count} steps", "fr": "{count} étapes"},
     "minute": {"en": "{count} minute", "fr": "{count} minute"},
     "minutes": {"en": "{count} minutes", "fr": "{count} minutes"},
     "under-a-minute": {"en": "under a minute", "fr": "moins d'une minute"},
+    # -- the folded block a run leaves on the page ----------------------------
+    # Its title, while the session runs and once it is over. A failed run calls
+    # it a trace, because that is what somebody opens it for.
+    "live": {"en": "Live", "fr": "En cours"},
+    "live-trace": {"en": "Trace", "fr": "Trace"},
+    "live-interrupted": {"en": "interrupted", "fr": "interrompu"},
+    "live-stopped": {"en": "stopped", "fr": "arrêté"},
+    "live-blocked": {"en": "it asked a question", "fr": "il a posé une question"},
+    "live-waiting": {
+        "en": "out of credit — it will be picked up again",
+        "fr": "crédits épuisés — il sera repris",
+    },
     # -- what the session is told to write in ---------------------------------
     # Not a report: the sentence handed to `prompt.build`, which is why it is
     # written *to* the session and not about it — and why both rows are in
@@ -412,14 +422,59 @@ class Voice:
 
     # -- a report under a ticket ---------------------------------------------
 
-    def report(self, label: str, event: str, *parts: object) -> str:
-        """One comment: who is speaking, then what happened, a paragraph each.
+    def facts(self, *facts: object) -> str:
+        """The figures that place a verdict, in the order somebody reads them.
 
-        The label is the host the runner signs with, and it stays in front
-        whatever the language: it is what tells a reader — and the next run —
-        that this comment is the runner's own rather than somebody's answer.
+        Where the work is, how much of it there is, what it took — separated by
+        a middle dot, because a comma would read as a sentence and this is a
+        row of labels.
         """
-        return f"{label} — {self.say(event)}\n" + self.paragraphs(*parts)
+        return " · ".join(said for fact in facts if (said := str(fact or "").strip()))
+
+    def verdict(self, name: str, *facts: object) -> str:
+        """The first line of a report, which is the notification.
+
+        A mark, one word saying what is expected of you, and the figures. It has
+        about eighty characters before a phone stops showing it, so nothing else
+        goes here — and nothing at all goes in front of it, which is the whole
+        difference with the reports that opened on the name of a machine.
+        """
+        said = f"{MARKS[name]} {self.say('verdict-' + name)}"
+        placed = self.facts(*facts)
+        return f"{said} — {placed}" if placed else said
+
+    def headline(self, name: str, title: str) -> str:
+        """A notification's title: the same verdict, and what it is about.
+
+        Notion writes the page's name above the comment it pushes; a desktop
+        notification and a Telegram message have only what they are handed, so
+        the ticket is named here — and named with the verdict the comment opens
+        on, so that the two read as one thing said twice.
+        """
+        return self.say("headline", verdict=self.say("verdict-" + name), title=title)
+
+    def report(self, headline: str, *lines: object) -> str:
+        """One comment: the verdict, one sentence, one link. In that order.
+
+        Three lines, and the order is the point — a reader who stops after the
+        first has the decision, one who stops after the second has the story,
+        and the third is where they go. A run that went wrong is allowed one
+        more, saying where the rest of it is, because that is the day somebody
+        needs it.
+        """
+        return "\n".join(said for line in (headline, *lines) if (said := str(line or "").strip()))
+
+    def brief(self, text: object, limit: int = BRIEF) -> str:
+        """What the session said, cut on a word rather than mid-syllable.
+
+        The prompt asks for one sentence and mostly gets one; asking is not
+        enforcing, and a report is not the place to find out. Cut here, once,
+        rather than by whatever is showing it.
+        """
+        flat = " ".join(str(text or "").split())
+        if len(flat) <= limit:
+            return flat
+        return flat[:limit].rsplit(" ", 1)[0].rstrip(" ,;:—-") + "…"
 
     def paragraphs(self, *parts: object) -> str:
         """Whatever is worth saying, one paragraph each, blanks dropped.
@@ -443,12 +498,13 @@ class Voice:
             return ""
         return text[:1].upper() + text[1:] + ("" if text[-1] in ".!?…" else ".")
 
-    def spent(self, turns: int, seconds: float, cost: float) -> str:
-        """What the run cost, in the three units anybody actually compares."""
-        counted = {"minutes": self.minutes(seconds), "turns": self.count(turns, "turn")}
-        if not cost:
-            return self.say("spent-freely", **counted)
-        return self.say("spent", **counted, cost=self.money(cost))
+    def spent(self, seconds: float, cost: float) -> tuple[str, ...]:
+        """What the run took, as facts for a verdict line rather than a sentence.
+
+        Two of them, not three: the turn count is on the board already, in its
+        own column, and a notification has room for what changes a decision.
+        """
+        return (self.minutes(seconds), self.money(cost) if cost else "")
 
     def trace(self, resume: str, log: object, home: object = "") -> str:
         """Where to go when the report is not enough: the session, then the log."""

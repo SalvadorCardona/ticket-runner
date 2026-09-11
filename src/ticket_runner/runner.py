@@ -78,6 +78,10 @@ class Job:
     comments: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     resumed: bool = False
+    # The folded block this job's session wrote its steps into, once it has one.
+    # Kept on the job because what goes in it is decided after the session ends:
+    # a run that failed files its trace there rather than in the report.
+    live: progress.Live | None = None
 
 
 def short_id(page_id: str) -> str:
@@ -127,6 +131,17 @@ def _message_of(prompt_text: str) -> str:
     if marker in prompt_text:
         return prompt_text.split(marker, 1)[1].split("\n# What is expected", 1)[0].strip()
     return prompt_text.strip()
+
+
+def _pull_request(said: voice_module.Voice, url: str) -> str:
+    """“PR #19”, which is how anybody refers to one out loud.
+
+    The URL says the same thing in seventy characters, and a verdict line has
+    about eighty in all — so the number goes on that line and the URL goes on
+    its own, where it is a link to click rather than a fact to read.
+    """
+    found = re.search(r"/pull/(\d+)", str(url or ""))
+    return said.say("pull-request", number=found.group(1)) if found else ""
 
 
 def slugify(text: str, limit: int = 40) -> str:
@@ -225,7 +240,7 @@ class Runner:
         self,
         event: str,
         ticket: Ticket,
-        headline: str,
+        verdict: str,
         body: str,
         *,
         urgent: bool = False,
@@ -234,21 +249,29 @@ class Runner:
         """One moment of a ticket, said everywhere it is worth saying.
 
         The screen of the machine the runner sits on, and the messaging app you
-        actually have on you. Same sentence in both, one line longer in the
-        second because a message you can answer has to say so — and both carry
-        the ticket's page, because a notification you then have to go and find
-        is a notification you do not act on: written out in the message, and
-        opened by a click on the notification.
+        actually have on you. Same words as the comment — the same verdict, the
+        same sentence under it — because a Notion notification and a Telegram
+        one are the same event reaching you twice, and telling it twice in two
+        ways is how you end up reading both. One line longer in the second,
+        because a message you can answer has to say so — and both carry the
+        ticket's page, because a notification you then have to go and find is a
+        notification you do not act on.
+
+        `event` is which of them you asked to be told about — `notify.events` —
+        and `verdict` is what is being said, which is not the same question: a
+        merge and a pull request to read are both `done` to a setting, and *To
+        review* and *Merged* to a reader.
         """
+        said = self.voice
+        headline = said.headline(verdict, ticket.title)
         self._notify(headline, body, urgent=urgent, link=ticket.url)
         settings = self.config.notify
         if self.dry_run or not settings.remote or not settings.wants(event):
             return
-        invitation = self.voice.say("invitation") if ask else ""
-        mark = {"blocked": "🙋", "failed": "⚠️", "done": "✅"}.get(event, "•")
+        invitation = "\n\n" + said.say("answer-here") if ask else ""
         channels.announce(
             settings,
-            f"{mark} {headline}\n{body}{invitation}\n{ticket.url}",
+            f"{voice_module.MARKS[verdict]} {headline}\n{body}{invitation}\n{ticket.url}",
             ticket=ticket.page.id,
             title=ticket.title,
             ask=ask,
@@ -422,7 +445,14 @@ class Runner:
         asked, and still puts the ticket back in the queue — an answer relayed
         from Telegram or Slack included, which wears the runner's token and is
         nonetheless yours.
+
+        Which machine reported is read off the board's Agent column rather than
+        off the comment: reports open on a verdict now, not on a host, and the
+        column is where the host was always written down anyway.
         """
+        agent = str(notion.read(ticket.page, self.config.notion.prop("agent")) or "")
+        if agent and agent != self.agent_label:
+            return False
         try:
             comments = self.comments(ticket.page.id)
         except notion.NotionError:
@@ -433,7 +463,7 @@ class Runner:
         reports = [
             index
             for index, comment in enumerate(comments)
-            if comment.text.startswith(self.agent_label)
+            if voice_module.is_report(comment.text)
         ]
         if not reports:
             return False
@@ -525,23 +555,15 @@ class Runner:
                 self.say(
                     f"  ↺ {ticket.title} — publication interrupted, asking rather than redoing"
                 )
+                interrupted = said.say("publication-interrupted", origin=origin)
                 self._set(ticket, **{status_property: self.config.notion.state("blocked")})
                 self._comment(
                     ticket,
                     said.report(
-                        self.agent_label,
-                        "blocked",
-                        stopped,
-                        said.say("abandoned-publishing", origin=origin),
+                        said.verdict("blocked", interrupted), said.say("answer-here")
                     ),
                 )
-                self._tell(
-                    "blocked",
-                    ticket,
-                    said.say("headline-blocked", title=ticket.title),
-                    said.say("publication-interrupted", origin=origin),
-                    ask=True,
-                )
+                self._tell("blocked", ticket, "blocked", said.sentence(interrupted), ask=True)
                 state.release(ticket.id)
                 recovered += 1
                 continue
@@ -550,7 +572,7 @@ class Runner:
             self._comment(
                 ticket,
                 said.report(
-                    self.agent_label, "requeued", stopped, said.say("abandoned-requeued")
+                    said.verdict("requeued", stopped), said.say("abandoned-requeued")
                 ),
             )
             state.release(ticket.id)
@@ -587,13 +609,11 @@ class Runner:
             if not url.startswith("http") or git.pull_request_state(url) != "MERGED":
                 continue
             ticket = Ticket(page)
+            said = self.voice
             self.say(f"  ✓ {ticket.title} — pull request merged, moved to done")
             self._set(ticket, **{status_property: self.config.notion.state("done")})
             self._comment(
-                ticket,
-                self.voice.report(
-                    self.agent_label, "done", self.voice.say("merged-elsewhere", url=url)
-                ),
+                ticket, said.report(said.verdict("merged", _pull_request(said, url)), url)
             )
             closed += 1
         return closed
@@ -762,10 +782,10 @@ class Runner:
                 question=said.say("pull-request-closed-question", url=url),
             )
         method = self.config.runner.merge_method
-        note = said.say("merged-already")
+        how = said.say("merged-before")
         if state_of != "MERGED":
             try:
-                merged = git.merge_pull_request(url, method)
+                git.merge_pull_request(url, method)
             except git.GitError as error:
                 return self._fail(
                     ticket,
@@ -774,7 +794,7 @@ class Runner:
                     blocked=True,
                     question=said.say("merge-refused-question", error=_line(error)),
                 )
-            note = said.say("merged-now", method=method, said=merged)
+            how = said.say("merged-with", method=method)
         self.say(f"  ✓ {ticket.title} — pull request merged, moved to done")
         self._set(
             ticket,
@@ -782,7 +802,7 @@ class Runner:
         )
         self._comment(
             ticket,
-            said.report(self.agent_label, "done", said.say("after-merge", url=url), note),
+            said.report(said.verdict("merged", _pull_request(said, url), how), url),
         )
         return {"ticket": ticket.title, "id": ticket.id, "status": "done", "merged": url}
 
@@ -857,21 +877,16 @@ class Runner:
             # already been taken, and the wait does not take it back.
             return self._requeue(ticket, self.config.notion.state("validated"), outcome)
 
-        trace = self._trace(job, outcome)
-
         if not outcome.ok:
             # Kept, always: a publication that half happened is exactly the log
             # somebody is going to want to read before trying again.
             return self._fail(
                 ticket,
                 said.say("not-published"),
-                said.paragraphs(
-                    outcome.summary or outcome.error,
-                    trace,
-                    said.say("workdir-kept", path=job.workdir),
-                ),
+                outcome.summary or outcome.error,
                 blocked=outcome.blocked,
                 question=outcome.summary,
+                note=self._filed(job, outcome, said.say("workdir-kept", path=job.workdir)),
             )
 
         shutil.rmtree(job.workdir, ignore_errors=True)
@@ -886,23 +901,11 @@ class Runner:
                 **self._measures(outcome),
             },
         )
-        self._comment(
-            ticket,
-            said.report(
-                self.agent_label,
-                "done",
-                said.say("after-publication", summary=outcome.summary),
-                said.spent(outcome.turns, outcome.seconds, outcome.cost_usd),
-                trace,
-            ),
-        )
+        facts = said.spent(outcome.seconds, outcome.cost_usd)
+        brief = said.brief(outcome.summary)
+        self._comment(ticket, said.report(said.verdict("published", *facts), brief))
         self.say(f"    ✓ {ticket.title} — published")
-        self._tell(
-            "done",
-            ticket,
-            said.say("headline-published", title=ticket.title),
-            outcome.summary,
-        )
+        self._tell("done", ticket, "published", said.report(said.facts(*facts), brief))
         return {
             "ticket": ticket.title,
             "id": ticket.id,
@@ -1221,18 +1224,17 @@ class Runner:
         budget = COMMENT_CHARS
         for comment in reversed(comments[-COMMENT_LIMIT:]):
             text = comment.text
-            if conversation.ours(comment, me) and not text.startswith(self.agent_label):
+            if conversation.ours(comment, me) and not voice_module.is_report(text):
                 # Something the runner said in a thread rather than reported.
                 # Attributing it to the ticket's author would have the next run
                 # read its own words back as an instruction.
                 text = " ".join(text.split())
                 who = "answered in the comments, by us"
-            elif text.startswith(self.agent_label):
+            elif voice_module.is_report(text):
                 # Our own report. Its first two lines hold the verdict and the
-                # reason; the rest is branch names, session IDs and log paths,
-                # which mean nothing to the session about to read them.
-                text = text[len(self.agent_label):].lstrip(" —-")
-                text = " ".join("\n".join(text.splitlines()[:2]).split())
+                # sentence under it; anything after is a link and, on the
+                # reports older runs wrote, the machinery they ended on.
+                text = " ".join("\n".join(voice_module.plain(text).splitlines()[:2]).split())
                 who = "a previous run"
             else:
                 text = " ".join(text.split())
@@ -1252,26 +1254,65 @@ class Runner:
         *,
         blocked: bool = False,
         question: str = "",
+        note: str = "",
     ) -> dict:
+        """A run that did not get there, said in as few lines as it takes.
+
+        A blocked ticket opens on the **question**, because that is the thing
+        somebody has to read and answer; a failed one opens on the reason, and
+        says under it what the session said before it stopped. `note` is where
+        the rest went — the folded block, usually, and the trace itself on a
+        ticket that has no such block: see `_filed`.
+        """
         outcome = "blocked" if blocked else "failed"
         said = self.voice
         self.say(f"    ✗ {ticket.title} — {reason}")
+        asked = question.strip() if blocked and question.strip() else said.sentence(reason)
         # A blocked ticket is a question, and a question is the one thing worth
         # waking somebody for — so it travels with what the agent actually
         # asked, not with the runner's own summary of the situation.
         self._tell(
             outcome,
             ticket,
-            said.say(f"headline-{outcome}", title=ticket.title),
-            (question.strip() if blocked and question.strip() else said.sentence(reason)),
+            outcome,
+            said.brief(asked),
             urgent=not blocked,
             ask=blocked,
         )
         self._set(ticket, **{self.config.notion.prop("status"): self.config.notion.state(outcome)})
+        # A blocked ticket has the invitation to answer under its question, and
+        # the detail only when it says something the question does not — which
+        # on most of these roads it does not, the question *being* the detail.
+        under = said.brief(detail)
+        if blocked:
+            under = "" if under == said.brief(asked) else under
         self._comment(
-            ticket, said.report(self.agent_label, outcome, said.sentence(reason), detail)
+            ticket,
+            said.report(
+                said.verdict(outcome, said.brief(asked)),
+                under,
+                said.say("answer-here") if blocked else "",
+                note,
+            ),
         )
         return {"ticket": ticket.title, "id": ticket.id, "status": outcome, "reason": reason}
+
+    def _filed(self, job: Job, outcome: session.Outcome, *rest: object) -> str:
+        """The machinery of a failed run, put where it does not crowd the report.
+
+        Inside the folded block the run already wrote its steps into, which is
+        where somebody looking for it would open anyway — and the report then
+        says so in one line. A ticket that has no such block, because the live
+        report is off or Notion refused it, keeps the trace in the comment: a
+        trace nobody can find is a trace nobody has.
+
+        Nothing of this is said when a run went right. The command that resumes
+        a finished session is not something anybody has ever needed to read.
+        """
+        said = self.voice.paragraphs(self._trace(job, outcome), *rest)
+        if job.live and job.live.detail(said):
+            return self.voice.say("trace-in-page")
+        return said
 
     # -- nothing left to spend -----------------------------------------------
 
@@ -1317,9 +1358,7 @@ class Runner:
         self._comment(
             ticket,
             said.report(
-                self.agent_label,
-                "out-of-credit",
-                said.say("credit-spent", status=status, when=when),
+                said.verdict("waiting", said.say("credits-out", status=status, when=when)),
                 note,
             ),
         )
@@ -1541,7 +1580,7 @@ class Runner:
         # choice, the more deliberate it was.
         chosen = job.model or job.agent.model or self.config.runner.model
         self.say(f"    Claude session {job.session_id}{' · ' + chosen if chosen else ''} → {log}")
-        live = self._live(job)
+        live = job.live = self._live(job)
         try:
             outcome = session.run(
                 text,
@@ -1559,19 +1598,8 @@ class Runner:
             # column stuck on whatever it was doing. Closing here is what makes
             # the page tell the truth on the way out too.
             if live:
-                live.close("interrupted")
+                live.close(self.voice.say("live-interrupted"), ok=False)
             raise
-        if live:
-            # The toggle's last word: what the session achieved, or which of the
-            # ways of not achieving it this was.
-            if self._out_of_credit(outcome):
-                closing = "out of credit — it will be picked up again"
-            elif outcome.ok:
-                closing = outcome.summary
-            else:
-                closing = "blocked — it asked a question" if outcome.blocked else "stopped"
-            live.close(closing)
-        self._hold_credits(outcome)
         if self.config.runner.attach_sessions:
             # The session ran in a directory that is about to be deleted. Filed
             # under the project instead, it shows up in `claude --resume` there,
@@ -1580,6 +1608,22 @@ class Runner:
             if session.relocate(outcome.session_id, home):
                 job.session_home = home
                 self.say(f"    session filed under {home}")
+        if live:
+            # The block's last word: what the session achieved, or which of the
+            # ways of not achieving it this was. After the session has been
+            # filed, because a run that went wrong puts the way back into it in
+            # this very block — see `_filed` — and that sentence names where the
+            # session now lives.
+            said = self.voice
+            if self._out_of_credit(outcome):
+                closing, ended_well = said.say("live-waiting"), True
+            elif outcome.ok:
+                closing, ended_well = said.brief(outcome.summary, 120), True
+            else:
+                closing = said.say("live-blocked" if outcome.blocked else "live-stopped")
+                ended_well = False
+            live.close(closing, ok=ended_well)
+        self._hold_credits(outcome)
         return outcome
 
     def _live(self, job: Job) -> progress.Live | None:
@@ -1597,15 +1641,16 @@ class Runner:
             database=self.database,
             property_name=self.config.notion.prop("progress"),
             interval=self.config.runner.progress_interval_seconds,
+            words=self.voice,
             say=self.say,
         )
 
     def _trace(self, job: Job, outcome: session.Outcome) -> str:
-        """Where to look when the report was not enough. Last, and in one line.
+        """Where to look when the report was not enough — and only then.
 
-        It used to open with the session id on a line of its own, which put the
-        least interesting fact of the run in the most visible place a comment
-        has.
+        One sentence, and it no longer ends a report: it goes into the folded
+        block of a run that failed, which is the only day anybody has wanted to
+        read it. See `_filed`.
         """
         return self.voice.trace(outcome.resume_command, outcome.log, job.session_home)
 
@@ -1627,7 +1672,6 @@ class Runner:
             # attempt opens on.
             return self._requeue(ticket, self.config.notion.state("ready"), outcome)
 
-        trace = self._trace(job, outcome)
         answer_file = job.workdir / "ANSWER.md"
         content = ""
         if answer_file.exists():
@@ -1648,9 +1692,10 @@ class Runner:
             return self._fail(
                 ticket,
                 reason,
-                said.paragraphs(detail, trace, kept),
+                detail,
                 blocked=outcome.blocked or not content,
                 question=detail,
+                note=self._filed(job, outcome, kept),
             )
 
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -1663,7 +1708,10 @@ class Runner:
             return self._fail(
                 ticket,
                 said.say("answer-not-written"),
-                said.paragraphs(error, said.say("answer-on-disk", path=answer_file), trace),
+                _line(error),
+                note=self._filed(
+                    job, outcome, said.say("answer-on-disk", path=answer_file)
+                ),
             )
 
         shutil.rmtree(job.workdir, ignore_errors=True)
@@ -1678,24 +1726,15 @@ class Runner:
                 **self._measures(outcome),
             },
         )
-        self._comment(
-            ticket,
-            said.report(
-                self.agent_label,
-                "done",
-                outcome.summary,
-                said.say("after-document", blocks=said.count(blocks, "block")),
-                said.spent(outcome.turns, outcome.seconds, outcome.cost_usd),
-                trace,
-            ),
+        facts = (
+            said.say("in-the-page"),
+            said.count(blocks, "block"),
+            *said.spent(outcome.seconds, outcome.cost_usd),
         )
+        brief = said.brief(outcome.summary)
+        self._comment(ticket, said.report(said.verdict("read", *facts), brief))
         self.say(f"    ✓ {ticket.title} — {blocks} block(s) written to the ticket")
-        self._tell(
-            "done",
-            ticket,
-            said.say("headline-review", title=ticket.title),
-            said.say("written-into-notion"),
-        )
+        self._tell("done", ticket, "read", said.report(said.facts(*facts), brief))
         return {
             "ticket": ticket.title,
             "id": ticket.id,
@@ -1734,7 +1773,6 @@ class Runner:
             return self._fail(ticket, self.voice.say("no-session"), str(error))
 
         said = self.voice
-        trace = self._trace(job, outcome)
 
         if self._out_of_credit(outcome):
             # Not a failure: there was nothing to work with. The worktree stays
@@ -1764,9 +1802,10 @@ class Runner:
             return self._fail(
                 ticket,
                 reason,
-                said.paragraphs(detail, trace, kept),
+                detail,
                 blocked=outcome.blocked,
                 question=detail if outcome.blocked else "",
+                note=self._filed(job, outcome, kept),
             )
 
         commits = git.commits_ahead(job.workdir, job.base)
@@ -1776,9 +1815,10 @@ class Runner:
             return self._fail(
                 ticket,
                 said.say("nothing-committed"),
-                said.paragraphs(outcome.summary, trace),
+                outcome.summary,
                 blocked=True,
                 question=outcome.summary,
+                note=self._filed(job, outcome),
             )
 
         pull_request = ""
@@ -1788,10 +1828,9 @@ class Runner:
                 return self._fail(
                     ticket,
                     said.say("push-refused"),
-                    said.paragraphs(
-                        pushed.err or pushed.out,
-                        said.say("push-refused-detail", branch=job.branch),
-                        trace,
+                    pushed.err or pushed.out,
+                    note=self._filed(
+                        job, outcome, said.say("push-refused-detail", branch=job.branch)
                     ),
                 )
             if self.config.runner.open_pull_request:
@@ -1827,30 +1866,29 @@ class Runner:
         values.update(self._measures(outcome))
         self._set(ticket, **values)
 
-        counted = said.count(commits, "commit")
+        # Where the work is comes first, because it is what you act on: the
+        # pull request when there is one, and the branch when there is not.
+        facts = (
+            _pull_request(said, pull_request) or said.say("on-branch", branch=job.branch),
+            said.count(commits, "commit"),
+            *said.spent(outcome.seconds, outcome.cost_usd),
+        )
+        brief = said.brief(outcome.summary)
         self._comment(
             ticket,
             said.report(
-                self.agent_label,
-                "done",
-                outcome.summary,
-                said.say(
-                    "after-code" if pull_request else "after-code-alone",
-                    commits=counted,
-                    branch=job.branch,
-                    url=pull_request,
-                ),
-                *job.notes,
-                said.spent(outcome.turns, outcome.seconds, outcome.cost_usd),
-                trace,
+                said.verdict("review", *facts),
+                brief,
+                pull_request,
+                *(said.brief(note) for note in job.notes),
             ),
         )
         self.say(f"    ✓ {ticket.title} — {pull_request or job.branch}")
         self._tell(
             "done",
             ticket,
-            said.say("headline-review", title=ticket.title),
-            pull_request or said.say("branch-only", commits=counted, branch=job.branch),
+            "review",
+            said.report(said.facts(*facts), brief, pull_request),
         )
         return {
             "ticket": ticket.title,

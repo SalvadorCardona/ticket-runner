@@ -902,36 +902,66 @@ def a_conversation_is_told_the_language_too_and_so_is_its_next_turn():
 
 
 @case
-def a_report_says_what_happened_rather_than_listing_what_ran():
-    """The facts are the same in both languages; what changed is that they read."""
-    for language, expected in (
-        ("", "3 commits on `ticket/x`"),
-        ("fr", "3 commits sur `ticket/x`"),
+def a_report_opens_on_what_is_expected_of_you_and_says_it_in_three_lines():
+    """The first line is a notification: it has eighty characters, and that is
+    the whole of the design.
+
+    Nothing in front of it — the host that used to sign every report spent its
+    first forty-four characters saying which laptop was talking — and nothing
+    under it but the sentence and the link.
+    """
+    for language, verdict, expected in (
+        ("", "To review", "PR #1 · 3 commits · 18 minutes · $6.41"),
+        ("fr", "À relire", "PR #1 · 3 commits · 18 minutes · 6,41 $"),
     ):
         said = voice.Voice(language)
         report = said.report(
-            "ticket-runner@laptop",
-            "done",
-            "Le header est parti.",
-            said.say(
-                "after-code",
-                commits=said.count(3, "commit"),
-                branch="ticket/x",
-                url="https://github.com/x/y/pull/1",
+            said.verdict(
+                "review",
+                said.say("pull-request", number="1"),
+                said.count(3, "commit"),
+                *said.spent(1092.0, 6.405),
             ),
-            said.spent(182, 1092.0, 6.405),
-            said.trace("claude --resume s-1", "/logs/x.jsonl"),
+            "Le header est parti.",
+            "https://github.com/x/y/pull/1",
         )
-        assert report.startswith("ticket-runner@laptop — "), "the signature is never translated"
-        assert expected in report
-        assert "https://github.com/x/y/pull/1" in report
-        # Last, and in one sentence: it is what you need on the rare day
-        # something went wrong, not what you came to the ticket to read.
-        assert report.rindex("claude --resume s-1") > report.rindex("Le header est parti.")
+        first = report.splitlines()[0]
+        assert first == f"✅ {verdict} — {expected}", first
+        assert len(first) <= 80, "a phone shows about that much, and then stops"
+        assert len(report.splitlines()) == 3
+        assert report.endswith("https://github.com/x/y/pull/1")
+        assert "ticket-runner@" not in report and "claude --resume" not in report
 
-    assert "$6.41" in voice.Voice().spent(182, 1092.0, 6.405)
-    assert "6,41 $" in voice.Voice("fr").spent(182, 1092.0, 6.405)
-    assert "cost" not in voice.Voice().spent(4, 90.0, 0.0), "no price, nothing to say about one"
+    assert voice.Voice().spent(90.0, 0.0) == ("2 minutes", ""), "no price, nothing to say"
+    assert voice.Voice().verdict("failed") == "⚠️ Failed", "and no facts, no dash"
+
+
+@case
+def a_sentence_a_session_wrote_too_long_is_cut_on_a_word():
+    """The prompt asks for one sentence and mostly gets one. Mostly is not a
+    length, and a report is not where to find that out."""
+    said = voice.Voice()
+    assert said.brief("Le header est parti.") == "Le header est parti."
+    assert said.brief("  two\n lines  ") == "two lines", "and a paragraph is one line"
+    long = "ajoute la commande app:search:diagnose " * 10
+    cut = said.brief(long)
+    assert len(cut) <= voice.BRIEF and cut.endswith("…")
+    assert not cut.rstrip("…").endswith(" "), "cut on a word, not mid-syllable"
+
+
+@case
+def a_report_is_told_from_an_answer_by_the_mark_it_opens_with():
+    """Three places used to recognise the runner by the host it signed with, so
+    dropping the host without putting something in its place would have had the
+    next run read its own words back as an instruction."""
+    assert voice.is_report("✅ To review — PR #1 · 2 commits")
+    assert voice.is_report("🙋 Bloqué — quel en-tête ?")
+    assert not voice.is_report("Celui du dashboard, pas du site public.")
+    # A board does not start over when the runner is updated: the reports
+    # already on it opened with a host, and are still ours.
+    assert voice.is_report("ticket-runner@laptop — done.\nFait.")
+    assert voice.plain("ticket-runner@laptop — done.\nFait.") == "done.\nFait."
+    assert voice.plain("✅ To review — PR #1") == "✅ To review — PR #1"
 
 
 @case
@@ -943,7 +973,7 @@ def a_measurement_is_rounded_to_something_a_person_would_say():
     assert said.minutes(20.0) == "under a minute"
     assert voice.Voice("fr").minutes(20.0) == "moins d'une minute"
     assert said.count(1, "commit") == "1 commit" and said.count(3, "commit") == "3 commits"
-    assert voice.Voice("fr").count(1, "turn") == "1 échange"
+    assert voice.Voice("fr").count(1, "block") == "1 bloc"
 
 
 @case
@@ -1021,6 +1051,7 @@ def _bare_runner(client) -> Runner:
     """A Runner with its Notion replaced, and nothing else touched."""
     runner = Runner.__new__(Runner)
     runner.client = client
+    runner.config = _config("")
     runner.agent_label = "ticket-runner@laptop"
     runner.quiet = True
     runner._comments = {}
@@ -1065,15 +1096,18 @@ def comments_the_integration_cannot_read_are_not_a_failure():
     assert lines == []
 
 
-def _answered(texts: list[str], error: str = "") -> bool:
+def _answered(texts: list[str], error: str = "", agent: str = "") -> bool:
     """Would a reply on that ticket put it back in the queue?"""
     runner = _bare_runner(_CommentClient(texts, error))
-    ticket = type("T", (), {"page": notion.Page(id="p-ticket", url="", title="t")})()
-    return runner._answered(ticket)
+    properties = {}
+    if agent:
+        properties["Runner"] = {"type": "rich_text", "rich_text": [{"plain_text": agent}]}
+    page = notion.Page(id="p-ticket", url="", title="t", properties=properties)
+    return runner._answered(type("T", (), {"page": page})())
 
 
-REPORT = "ticket-runner@laptop — blocked.\nThe ticket does not say which header."
-DONE = "ticket-runner@laptop — done.\nFait."
+REPORT = "🙋 Stuck — the ticket does not say which header"
+DONE = "✅ To review — PR #1 · 1 commit\nFait."
 
 
 @case
@@ -1096,9 +1130,12 @@ def a_ticket_wakes_only_once_per_answer():
 @case
 def a_ticket_no_run_of_ours_ever_touched_is_left_alone():
     assert not _answered(["Une question posée avant qu'aucun run n'y touche."])
-    assert not _answered(["ticket-runner@vps — done.\nFait.", "et pour le footer ?"]), (
+    # A report no longer says which machine wrote it — the board's own Runner
+    # column does, and it is what a second machine reads to leave this alone.
+    assert not _answered([DONE, "et pour le footer ?"], agent="ticket-runner@vps"), (
         "a ticket handled by another host is that host's to pick up"
     )
+    assert _answered([DONE, "et pour le footer ?"], agent="ticket-runner@laptop")
     assert not _answered([REPORT, "réponse"], error="403 API token does not have access")
 
 
@@ -2444,8 +2481,72 @@ def a_ticket_the_credits_ran_out_on_goes_back_to_ready_rather_than_failing():
     assert runner.client.written == [("p-doc", {"Status": "Ready"})]
     assert result["status"] == "waiting", "neither done nor failed"
     said = runner.client.comments_written[0]
-    assert "usage limit" in said and "back to “Ready”" in said
+    assert said.startswith("⏸️ Waiting — out of credit, back in “Ready” until "), said
     assert "?" not in said, "a wait asks nothing of anybody"
+
+
+def _that_failed(page: notion.Page, *, folded: bool) -> tuple[Runner, list[str], dict]:
+    """A document ticket whose session stopped, run to its report."""
+    runner = _board_runner([page], {})
+    runner.config.runner.auto_update = False
+    runner.config.runner.keep_worktree_on_failure = False
+
+    def stopped(job, template):
+        # Half an answer written, and then the session died: a failure rather
+        # than a question, which is the road a trace is actually read on.
+        (job.workdir / "ANSWER.md").write_text("La moitié d'une réponse.")
+        return session.Outcome(
+            ok=False, blocked=False, session_id="s-1", summary="",
+            error="npm test exited 1", log=Path("/logs/x.jsonl"), seconds=90.0, turns=4,
+        )
+
+    runner._run_session = stopped
+    filed: list[str] = []
+    job = runner_module.Job(
+        runner_module.Ticket(page),
+        projects.Project(name="", path=None),
+        branch="",
+        base="",
+        workdir=Path(tempfile.mkdtemp()) / "doc",
+    )
+    if folded:
+        job.live = type(
+            "L", (), {"detail": lambda self, text: bool(filed.append(text)) or True}
+        )()
+    return runner, filed, runner._execute_document(job)
+
+
+@case
+def a_run_that_failed_says_what_to_do_and_folds_the_rest_into_the_page():
+    """A report used to end on the session id, the log path and the directory
+    to resume from — three lines of machinery pushed to a phone every time.
+
+    They are not gone, they are folded: the block the run already wrote its
+    steps into takes them, and the report spends its lines on the verdict.
+    """
+    runner, filed, result = _that_failed(_reviewed("p-doc", "In progress", None), folded=True)
+    assert result["status"] == "failed"
+    said = runner.client.comments_written[0]
+    assert said.splitlines() == [
+        "⚠️ Failed — The session did not make it to the end.",
+        "npm test exited 1",
+        "What it did is in the folded block at the bottom of the page.",
+    ], said
+    assert "claude --resume s-1" not in said
+    assert filed == [
+        "To pick the session back up: `claude --resume s-1`. Its log is `/logs/x.jsonl`."
+    ]
+
+
+@case
+def a_ticket_whose_run_wrote_no_block_keeps_the_trace_under_its_verdict():
+    """`runner.progress = false`, or a Notion that refused: the trace has
+    nowhere to be folded into, so it stays where it can be read."""
+    runner, filed, _ = _that_failed(_reviewed("p-none", "In progress", None), folded=False)
+    said = runner.client.comments_written[0]
+    assert filed == []
+    assert said.endswith("Its log is `/logs/x.jsonl`.")
+    assert said.startswith("⚠️ Failed — ")
 
 
 @case
@@ -2634,7 +2735,9 @@ def a_merged_pull_request_moves_its_ticket_to_done():
     )
     assert closed == 1
     assert client.written == [("p-merged", {"Status": "Done"})]
-    assert "merged" in client.comments_written[0]
+    assert client.comments_written[0] == (
+        "✅ Merged — PR #1\nhttps://github.com/x/y/pull/1"
+    )
 
 
 @case
@@ -2652,8 +2755,8 @@ def a_board_told_to_answer_in_french_is_answered_in_french():
     with _github({"https://github.com/x/y/pull/1": "MERGED"}):
         assert runner.close_merged() == 1
     said = runner.client.comments_written[0]
-    assert said.startswith("ticket-runner@laptop — c'est fait.")
-    assert "a été fusionnée" in said and "https://github.com/x/y/pull/1" in said
+    assert said.startswith("✅ Fusionnée — PR #1"), said
+    assert "https://github.com/x/y/pull/1" in said
 
 
 @case
@@ -2725,7 +2828,7 @@ def validating_a_ticket_is_what_merges_its_pull_request():
     assert merges == [("https://github.com/x/y/pull/1", "squash")]
     assert client.written == [("p-validated", {"Status": "Done"})]
     assert results and results[0]["status"] == "done"
-    assert "Validated, so the pull request went in" in client.comments_written[0]
+    assert client.comments_written[0].startswith("✅ Merged — PR #1 · squash merge")
 
 
 @case
@@ -2738,7 +2841,7 @@ def a_pull_request_already_merged_only_moves_its_ticket():
     )
     assert merges == []
     assert client.written == [("p-validated", {"Status": "Done"})]
-    assert "already been merged" in client.comments_written[0]
+    assert client.comments_written[0].startswith("✅ Merged — PR #1 · already merged")
 
 
 @case
@@ -2837,7 +2940,9 @@ def a_validated_ticket_on_a_repository_with_no_pull_request_asks_rather_than_pub
     runner._project_of = lambda ticket: projects.Project(name="Site", path=Path("/repo"))
     results = runner.deliver()
     assert runner.client.written == [("p-code", {"Status": "Blocked"})]
-    assert "no pull request to merge" in runner.client.comments_written[0]
+    assert runner.client.comments_written[0].startswith(
+        "🙋 Stuck — This ticket was validated but carries no pull request."
+    )
     assert results and results[0]["status"] == "blocked"
 
 
@@ -2972,7 +3077,8 @@ def a_publication_a_crash_interrupted_comes_back_as_a_question():
     assert recovered == 1
     assert runner.client.written == [("ppost", {"Status": "Blocked"})]
     said = runner.client.comments_written[0]
-    assert "may well have gone out" in said and "“Validated”" in said
+    assert said.startswith("🙋 Stuck — its publication was interrupted")
+    assert "“Validated”" in said and "An answer here" in said
 
 
 @case
@@ -3542,9 +3648,49 @@ def what_is_still_waiting_is_written_when_the_session_ends():
     live.close("removed the header")
 
     assert client.blocks == ["Edit  src/x.py"]
-    assert client.titles[-1] == "✓ 1 step(s) · 2 min · removed the header"
+    assert client.titles[-1] == "✓ 1 step · 2 minutes · removed the header"
     # A finished ticket no longer claims to be doing anything.
     assert client.properties[-1] == ""
+
+
+@case
+def a_run_that_went_wrong_calls_its_block_a_trace_and_keeps_it_there():
+    """The report is two lines and says where the rest is; the rest is here.
+
+    Which is the whole move: what every comment used to end on — the command
+    that resumes the session, the log, the worktree that was kept — is worth
+    exactly one click on the day a run failed, and nothing at all on every
+    other day.
+    """
+    live, client, clock = _reporting()
+    live.add(progress.Step("Edit", "src/x.py"))
+    clock.now += 120
+    live.close("it asked a question", ok=False)
+    assert client.titles[-1] == "⚠️ Trace — 1 step · 2 minutes · it asked a question"
+
+    assert live.detail("To pick the session back up: `claude --resume s-1`.")
+    assert client.blocks[-1].startswith("To pick the session back up")
+    assert not live.detail("  "), "nothing to file is not something to file"
+
+
+@case
+def a_ticket_with_no_block_to_file_a_trace_in_keeps_it_in_the_report():
+    """A trace nobody can find is a trace nobody has."""
+    live, client, _ = _reporting()
+    assert not live.detail("`claude --resume s-1`"), "no step, no toggle, nowhere to put it"
+    assert client.blocks == []
+
+
+@case
+def the_block_a_run_leaves_speaks_the_language_the_report_does():
+    """“⏳ Live — 16 step(s)” under a French verdict is one glance, two languages."""
+    clock, client = _Clock(), _Live()
+    live = progress.Live(client, "page", words=voice.Voice("fr"), clock=clock)
+    live.add(progress.Step("Edit", "src/x.py"))
+    clock.now += 120
+    live.close()
+    assert client.titles[0].startswith("⏳ En cours")
+    assert client.titles[-1] == "✓ 1 étape · 2 minutes"
 
 
 @case
@@ -4674,7 +4820,7 @@ def a_blocked_ticket_travels_with_its_question_and_its_link():
     channels.announce = lambda settings, text, **rest: sent.append({"text": text, **rest})
     try:
         runner._tell(
-            "blocked", ticket, "Blocked · Le header",
+            "blocked", ticket, "blocked",
             "Which header — the dashboard one or the public site?",
             ask=True,
         )
@@ -4683,6 +4829,7 @@ def a_blocked_ticket_travels_with_its_question_and_its_link():
 
     assert len(sent) == 1
     message = sent[0]
+    assert message["text"].startswith("🙋 Stuck · Le header"), "the comment's own verdict"
     assert "Which header" in message["text"], "the agent's question, not the runner's summary"
     assert "https://notion.so/t" in message["text"], "a notification you have to go and find"
     assert "An answer here" in message["text"]
@@ -4702,7 +4849,7 @@ def nothing_is_sent_anywhere_during_a_dry_run():
     original = channels.announce
     channels.announce = lambda settings, text, **rest: sent.append(text)
     try:
-        runner._tell("done", ticket, "Ready to review · t", "branch")
+        runner._tell("done", ticket, "review", "branch")
     finally:
         channels.announce = original
     assert sent == []
@@ -4829,10 +4976,10 @@ def a_ticket_notification_carries_its_page_to_the_screen_too():
     original = notify.send
     notify.send = lambda title, body, **rest: seen.append({"title": title, **rest})
     try:
-        runner._tell("done", ticket, "Ready to review · t", "branch")
+        runner._tell("done", ticket, "review", "branch")
     finally:
         notify.send = original
-    assert seen == [{"title": "Ready to review · t", "urgent": False,
+    assert seen == [{"title": "To review · t", "urgent": False,
                      "link": "https://notion.so/t"}]
 
 

@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import config as config_module
-from .. import conversation, credits, notion, session, state, systemd
+from .. import conversation, credits, notion, session, state, systemd, voice
 from .. import schedules as schedules_module
 from .. import update as update_module
 from ..config import Config
@@ -482,23 +482,18 @@ class Api:
         return "\n".join(lines)
 
 
-# How every report the runner writes opens, whichever host wrote it. Only ever
-# read as a fallback — see `_voice`.
-REPORT = "ticket-runner@"
-
-
 def _voice(comment: notion.Comment, me: str) -> str:
     """Who said this: the runner, or you.
 
     `conversation.ours` is the answer wherever Notion will say who we are. Where
     it will not — an integration without the *Read user information* capability —
-    the runner's reports still open with the name it signs them with, which is
-    enough to *read* a discussion. It is not enough to answer one, which is why
-    `converse` stays silent in that case and this does not.
+    the mark a report opens with is enough to *read* a discussion. It is not
+    enough to answer one, which is why `converse` stays silent in that case and
+    this does not.
     """
     if me:
         return "runner" if conversation.ours(comment, me) else "you"
-    return "runner" if comment.text.startswith(REPORT) else "you"
+    return "runner" if voice.is_report(comment.text) else "you"
 
 
 def _thread(comments: list[notion.Comment], me: str) -> str:

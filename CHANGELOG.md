@@ -86,6 +86,30 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Changed
 
+- **A report is a notification now, and it is three lines long.** The comment
+  the runner writes under a ticket *is* what Notion pushes to your phone, cut
+  after two or three lines — and it used to spend its first forty-four
+  characters on `ticket-runner@salva-Inspiron-16-Plus-7620 — ` and the five
+  after that on `done.`, so the notification stopped roughly where the
+  information began. It now opens on a mark and a verdict that says what is
+  expected of you — **To review**, **To read**, **Stuck**, **Failed**,
+  **Waiting**, **Merged**, **Published** — followed by the figures that place
+  it: `✅ To review — PR #12 · 3 commits · 18 minutes · $1.20`. Under it, one
+  sentence, cut at two hundred characters whatever the session wrote, and the
+  link on its own line. A blocked ticket puts the **question** on that first
+  line, because that is the thing to read. Nothing is lost: which machine ran
+  it was always in the board's *Runner* column, the session is a click in its
+  *Session* column, and the command that resumes it — with the log path and the
+  worktree kept — is folded into the block the run already writes its steps
+  into, which on a failed run is renamed `⚠️ Trace` and is the only place it
+  appears. On a run that went right it appears nowhere, because nobody has ever
+  needed to resume a session that finished. The desktop notification and the
+  Telegram or Slack message now say the same words as the comment rather than
+  words of their own, and the folded block's title follows `runner.language`
+  like everything else. Two things the runner used to recognise itself by the
+  signature — a ticket that wakes on your answer, and the console's
+  reading of a discussion — read the mark instead, and the reports already on
+  your board keep being recognised by their old signature.
 - **A pass fills its free places as they free, instead of running a batch and
   waiting.** `max_concurrent` used to be the size of the first handful: the
   tickets that happened to be ready at the pass's first second were prepared,
