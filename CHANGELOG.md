@@ -86,6 +86,27 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Changed
 
+- **A pass fills its free places as they free, instead of running a batch and
+  waiting.** `max_concurrent` used to be the size of the first handful: the
+  tickets that happened to be ready at the pass's first second were prepared,
+  and the pass then waited for every one of them before ending — so a ticket
+  made ready at 14:10 waited for the two-hour session that started at 14:04,
+  and for the timer after it, however many places were sitting empty. Measured
+  on a real board: a pass with two tickets, one done in minutes and one still
+  running twenty minutes later, while four tickets reached the ready column and
+  not one agent was started. `max_concurrent` is now a number of **places**: a
+  session that ends frees one, the board is read again on the spot, and the
+  ticket that goes in is whichever is top of the queue *then* — same priority,
+  date and age order as at the start. The pass ends when nothing is ready and
+  nothing is in flight, and each ticket is written into `ticket-runner history`
+  as it finishes rather than at the end. Nothing changed about the run lock or
+  the timer: it is the pass that became continuous, not the number of runs. Two
+  consequences worth knowing — `ticket-runner run --limit 3` means three
+  tickets for that pass, not three at a time; and a comment *addressed* to the
+  runner during a long pass is still answered by the next pass, because
+  answering starts a session of its own, while an answer to a blocked ticket —
+  typed in Notion, Telegram or Slack — is picked up by the pass itself at the
+  next freed place.
 - The web console has been redrawn. Every page opens the same way — where you
   are, said as a path; a heading you can read from across the room; and the one
   line that says what the page is for — and the accent is a lime, so the button
