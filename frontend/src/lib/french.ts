@@ -438,8 +438,8 @@ export const FRENCH: Record<string, string> = {
   "Behind this port sits a runner that starts Claude Code sessions with `bypassPermissions`. Anything that can reach it can run code on this machine, as you — which is why the bind is loopback and why widening it is a decision you have to take on purpose, token included.":
     "Derrière ce port se tient un runner qui démarre des sessions Claude Code en `bypassPermissions`. Tout ce qui peut l'atteindre peut exécuter du code sur cette machine, en votre nom — c'est pourquoi l'écoute est en loopback, et pourquoi l'ouvrir plus largement est une décision à prendre exprès, jeton compris.",
   "Bind address": "Adresse d'écoute",
-  "Anything but `127.0.0.1` is refused unless a token is set below. The answer that does not depend on a token never leaking is an ssh tunnel: `ssh -L 8787:127.0.0.1:8787 <this machine>`.":
-    "Tout autre chose que `127.0.0.1` est refusé tant qu'aucun jeton n'est renseigné plus bas. La réponse qui ne dépend pas d'un jeton qui ne fuite jamais, c'est un tunnel ssh : `ssh -L 8787:127.0.0.1:8787 <cette machine>`.",
+  "Anything but `127.0.0.1` is refused unless a token, or a sign-in, is set below. The answer that does not depend on a secret never leaking is an ssh tunnel: `ssh -L 8787:127.0.0.1:8787 <this machine>`.":
+    "Tout autre chose que `127.0.0.1` est refusé tant qu'aucun jeton, ni aucune connexion, n'est renseigné plus bas. La réponse qui ne dépend pas d'un secret qui ne fuite jamais, c'est un tunnel ssh : `ssh -L 8787:127.0.0.1:8787 <cette machine>`.",
   "the console has to be restarted": "la console doit être redémarrée",
   Port: "Port",
   "Console token": "Jeton de la console",
@@ -447,6 +447,12 @@ export const FRENCH: Record<string, string> = {
     "Vide : un jeton est tiré une fois et gardé dans `~/.local/state/ticket-runner/web/token`. En renseigner un ici est ce qui autorise une écoute hors loopback.",
   "the console has to be restarted, and this page reopened with the new token":
     "la console doit être redémarrée, et cette page rouverte avec le nouveau jeton",
+  "Sign in with this email": "Se connecter avec cette adresse e-mail",
+  "Set it with a password and the console asks for the two instead of for the token — a page you open from a bookmark rather than from a secret. `TICKET_RUNNER_WEB_EMAIL` says the same thing and wins over this.":
+    "Renseignez-la avec un mot de passe et la console demande les deux plutôt que le jeton — une page qu'on ouvre depuis un marque-page et non depuis un secret. `TICKET_RUNNER_WEB_EMAIL` dit la même chose et l'emporte sur ce champ.",
+  "And this password": "Et ce mot de passe",
+  "Kept in the file beside the other secrets, or in `TICKET_RUNNER_WEB_PASSWORD`, which wins over it. Changing it signs out every browser at once; the token keeps working, for scripts.":
+    "Gardé dans le fichier à côté des autres secrets, ou dans `TICKET_RUNNER_WEB_PASSWORD`, qui l'emporte sur lui. Le changer déconnecte tous les navigateurs d'un coup ; le jeton, lui, continue de marcher, pour les scripts.",
   "Reread the board every (seconds)": "Relire le tableau toutes les (secondes)",
   "Only while a browser is connected.": "Seulement tant qu'un navigateur est connecté.",
   "A chat turn may take (minutes)": "Un tour de conversation peut prendre (minutes)",

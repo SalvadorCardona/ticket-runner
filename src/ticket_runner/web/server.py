@@ -11,9 +11,9 @@ Anything that can talk to this server can run code on this machine as you. That
 is why:
 
 - the default bind is `127.0.0.1`, and a non-loopback host without a configured
-  token is refused rather than served;
-- every request carries a token — as a header, or as the cookie the first
-  `?token=` sets;
+  token — or a configured sign-in — is refused rather than served;
+- every request carries a token — as a header, as the cookie the first `?token=`
+  sets, or as the cookie signing in with an email and a password sets;
 - a request from a browser page that is not the console is rejected: writes
   demand a header a cross-origin form cannot set, and the `Host` header must
   name the address the console was reached on, which is what stops a hostile
@@ -23,6 +23,7 @@ is why:
 from __future__ import annotations
 
 import errno
+import hashlib
 import hmac
 import json
 import mimetypes
@@ -31,6 +32,8 @@ import re
 import secrets
 import socket
 import threading
+import time
+from dataclasses import dataclass
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -83,14 +86,50 @@ def token(config: Config) -> str:
     return fresh
 
 
+@dataclass(frozen=True)
+class SignIn:
+    """An email, a password, and the cookie a browser that typed them carries.
+
+    The cookie is *derived* from the two rather than drawn at random, and that
+    is the whole of the session handling: a console that restarts — and its unit
+    restarts with the machine — does not sign you out, while changing the
+    password signs out every browser that ever held one, without anything to
+    keep or to expire. It is an HMAC under the console's own token, so the value
+    in the cookie says nothing about the password it came from.
+    """
+
+    email: str
+    password: str
+    cookie: str
+
+
+def sign_in(config: Config, secret: str) -> SignIn | None:
+    """How this console is opened, when it is not opened with its token.
+
+    None unless both halves are set: an email without a password is somebody
+    half-way through configuring one, and it must not be a way in.
+    """
+    email = config.web.email.strip()
+    password = config.web.password
+    if not email or not password:
+        return None
+    proof = hmac.new(
+        secret.encode(), f"{email.lower()}\n{password}".encode(), hashlib.sha256
+    ).hexdigest()
+    return SignIn(email=email, password=password, cookie=proof)
+
+
 class Console(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, address, handler, api: Api, secret: str) -> None:
+    def __init__(
+        self, address, handler, api: Api, secret: str, entry: SignIn | None = None
+    ) -> None:
         super().__init__(address, handler)
         self.api = api
         self.secret = secret
+        self.entry = entry
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -105,6 +144,10 @@ class Handler(BaseHTTPRequestHandler):
     @property
     def api(self) -> Api:
         return self.server.api  # type: ignore[attr-defined]
+
+    @property
+    def entry(self) -> SignIn | None:
+        return self.server.entry  # type: ignore[attr-defined]
 
     def _send(self, code: int, body: bytes, kind: str, extra: dict | None = None) -> None:
         self.send_response(code)
@@ -178,9 +221,23 @@ class Handler(BaseHTTPRequestHandler):
         return ""
 
     def _authorised(self, query: dict) -> bool:
-        secret = self.server.secret  # type: ignore[attr-defined]
+        """The token, or the cookie a sign-in left. Either is this console's.
+
+        The token does not go away when an email and a password are set: it is
+        what a script, the dev server's proxy and `--print-token` carry. What
+        changes is that a person no longer has to.
+        """
         offered = (query.get("token") or [""])[0] or self._presented()
-        return bool(offered) and hmac.compare_digest(offered, secret)
+        if not offered:
+            return False
+        known = [self.server.secret]  # type: ignore[attr-defined]
+        if self.entry:
+            known.append(self.entry.cookie)
+        # Compared as bytes: `compare_digest` refuses two strings when either
+        # holds a character outside ASCII, and what is offered here came from a
+        # browser — a cookie somebody pasted an accent into would be a 500
+        # rather than the "no" it is.
+        return any(hmac.compare_digest(offered.encode(), value.encode()) for value in known)
 
     # -- routing --------------------------------------------------------------
 
@@ -257,7 +314,11 @@ class Handler(BaseHTTPRequestHandler):
 
         if not self._host_is_ours():
             return self._fail(421, "this console is not served under that name")
-        if not self._authorised(parse_qs(parsed.query)):
+        # Signing in is the one write that cannot be authorised beforehand: it
+        # is what produces the authorisation. Everything else about it holds —
+        # the name it is reached under, and the header below.
+        signing_in = route == "/api/login"
+        if not signing_in and not self._authorised(parse_qs(parsed.query)):
             return self._fail(401, "token missing or wrong")
         # A cookie alone is not consent: a page you have open elsewhere can post
         # a form to this port with your cookie attached, but it cannot set a
@@ -266,6 +327,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._fail(403, "this request did not come from the console")
 
         payload = self._body()
+        if signing_in:
+            return self._sign_in(payload)
         try:
             if route == "/api/tickets":
                 return self._json(
@@ -320,10 +383,40 @@ class Handler(BaseHTTPRequestHandler):
             kind = f"{kind}; charset=utf-8"
         self._send(200, target.read_bytes(), kind)
 
+    def _sign_in(self, payload: dict) -> None:
+        """An email and a password against the configured ones. Nothing else."""
+        entry = self.entry
+        if entry is None:
+            return self._fail(404, "this console is opened with its token")
+        email = str(payload.get("email", "")).strip().lower()
+        password = str(payload.get("password", ""))
+        # Both compared before either is looked at: an early return here would
+        # answer "that email does not exist" by taking less time to say so. And
+        # as bytes, because a password with an accent in it is a password.
+        known_email = hmac.compare_digest(email.encode(), entry.email.lower().encode())
+        known_password = hmac.compare_digest(password.encode(), entry.password.encode())
+        if not (known_email and known_password):
+            # Behind this port sits `bypassPermissions`, and a password is
+            # guessable in a way a 32-character token is not. A second per
+            # attempt is nothing to type through and a wall to grind against.
+            time.sleep(1)
+            return self._fail(401, "wrong email or password")
+        self._send(
+            200,
+            b'{"ok": true}',
+            "application/json",
+            {
+                "Set-Cookie": (
+                    f"{COOKIE}={entry.cookie}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000"
+                )
+            },
+        )
+
     def _unauthorised(self, route: str) -> None:
         if route.startswith("/api/"):
             return self._fail(401, "token missing or wrong")
-        self._send(401, GATE.encode(), "text/html; charset=utf-8")
+        page = SIGN_IN if self.entry else GATE
+        self._send(401, page.encode(), "text/html; charset=utf-8")
 
     def _stream(self) -> None:
         """One Server-Sent Events connection, for as long as the tab is open."""
@@ -368,28 +461,82 @@ class Handler(BaseHTTPRequestHandler):
         self.do_GET()
 
 
-GATE = """<!doctype html>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ticket-runner — token</title>
-<style>
+_STYLE = """<style>
  body{background:#0f1115;color:#e7e9ee;font:15px/1.6 ui-sans-serif,system-ui,sans-serif;
       display:grid;place-items:center;min-height:100vh;margin:0}
  form{width:min(28rem,90vw);background:#171a21;border:1px solid #262b36;border-radius:14px;padding:1.6rem}
  h1{font-size:1.1rem;margin:0 0 .4rem} p{color:#98a2b3;margin:.2rem 0 1.2rem;font-size:.9rem}
  input{width:100%;box-sizing:border-box;background:#0f1115;border:1px solid #2c3240;color:inherit;
        border-radius:9px;padding:.7rem .8rem;font:inherit}
+ input+input{margin-top:.6rem}
  button{margin-top:.9rem;width:100%;background:#3b82f6;color:#fff;border:0;border-radius:9px;
         padding:.7rem;font:inherit;font-weight:600;cursor:pointer}
  code{background:#0f1115;padding:.15rem .4rem;border-radius:6px;color:#c8cedb}
+ .said{color:#f97066;margin:.9rem 0 0;min-height:1.2em}
 </style>
-<form onsubmit="location='/?token='+encodeURIComponent(this.t.value.trim());return false">
+"""
+
+
+def _page(title: str, body: str) -> str:
+    """The way in, drawn by this server rather than by the bundle.
+
+    A browser that has not got in cannot load the console, so these two pages
+    are the only HTML written in Python — and, like everything else served
+    here, they reach for nothing that is not on this machine.
+    """
+    return (
+        '<!doctype html>\n<meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">\n'
+        f"<title>ticket-runner — {title}</title>\n" + _STYLE + body
+    )
+
+
+GATE = _page(
+    "token",
+    """<form onsubmit="location='/?token='+encodeURIComponent(this.t.value.trim());return false">
   <h1>ticket-runner</h1>
   <p>This console needs its token. <code>ticket-runner serve</code> prints it,
      and it is kept in <code>~/.local/state/ticket-runner/web/token</code>.</p>
   <input name="t" autofocus placeholder="token" autocomplete="off" spellcheck="false">
   <button type="submit">Open the console</button>
 </form>
-"""
+""",
+)
+
+# The same door, with a lock somebody can remember. It posts rather than
+# navigates — a form that navigated could not set the header that tells a
+# request from the console apart from a request from a page you had open.
+SIGN_IN = _page(
+    "sign in",
+    """<form onsubmit="enter(this);return false">
+  <h1>ticket-runner</h1>
+  <p>Sign in to open the console.</p>
+  <input name="email" type="email" autofocus placeholder="email" autocomplete="username"
+         spellcheck="false">
+  <input name="password" type="password" placeholder="password" autocomplete="current-password">
+  <button type="submit">Open the console</button>
+  <p class="said" id="said"></p>
+</form>
+<script>
+async function enter(form){
+  const said = document.getElementById('said');
+  said.textContent = '';
+  try {
+    const answer = await fetch('/api/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-Ticket-Runner': '1'},
+      body: JSON.stringify({email: form.email.value, password: form.password.value}),
+    });
+    if (answer.ok) { location = '/'; return; }
+    const body = await answer.json().catch(() => ({}));
+    said.textContent = body.error || 'wrong email or password';
+  } catch (error) {
+    said.textContent = String(error);
+  }
+}
+</script>
+""",
+)
 
 
 def serve(
@@ -403,27 +550,34 @@ def serve(
     host = host or config.web.host
     port = port or config.web.port
     secret = token(config)
+    entry = sign_in(config, secret)
 
-    if host not in LOOPBACK and not config.web.token:
+    if host not in LOOPBACK and not config.web.token and entry is None:
         print(
             f"refusing to listen on {host}: behind this port sits a runner that starts\n"
             "Claude Code sessions with bypassPermissions, and a generated token is not a\n"
             "decision you took. Either keep the default 127.0.0.1 and reach it over ssh\n"
             "  ssh -L 8787:127.0.0.1:8787 <this machine>\n"
-            "or set web.token in your configuration on purpose."
+            "or say so on purpose: web.token, or web.email and web.password."
         )
         return 2
 
+    # What to print as the way in. A console with a sign-in is opened by typing
+    # an address, which is the whole point of having one — putting the token
+    # back in that line would be telling you to paste a secret anyway.
+    def opening(address: str) -> str:
+        return f"{address}  —  sign in as {entry.email}" if entry else f"{address}/?token={secret}"
+
     api = Api(config)
     try:
-        server = Console((host, port), Handler, api, secret)
+        server = Console((host, port), Handler, api, secret, entry)
     except OSError as error:
         if error.errno == errno.EADDRINUSE:
             # The console's unit starts with the machine, so a taken port is the
             # ordinary answer to `serve` rather than a failure: somebody typing
             # it wants the console, and the one already listening is it.
             print(f"already listening on http://{host}:{port} — the console is running")
-            print(f"  open  http://{host}:{port}/?token={secret}")
+            print(f"  open  {opening(f'http://{host}:{port}')}")
             print("  stop  systemctl --user stop ticket-runner-web")
             return 0
         print(f"cannot listen on {host}:{port} — {error}")
@@ -433,7 +587,7 @@ def serve(
     shown = f"http://{address[0]}:{address[1]}"
     if announce:
         print(f"ticket-runner console on {shown}")
-        print(f"  open  {shown}/?token={secret}")
+        print(f"  open  {opening(shown)}")
         print(f"  stop  Ctrl-C\n")
 
     thread = threading.Thread(target=server.serve_forever, name="tr-console", daemon=True)

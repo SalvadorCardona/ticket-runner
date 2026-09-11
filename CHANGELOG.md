@@ -18,6 +18,22 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Added
 
+- **The console opens with an email and a password, not with a token.** Set
+  `web.email` and `web.password` — in the configuration, in the *This console*
+  section of the Settings tab, or in `TICKET_RUNNER_WEB_EMAIL` and
+  `TICKET_RUNNER_WEB_PASSWORD` for a server where a secret has no business being
+  written down, the environment winning over the file — and
+  `http://127.0.0.1:8787` becomes a bookmark that works: the page asks for the
+  two instead of for a token you had to find again on every browser. The cookie
+  it leaves is derived from them rather than drawn, so a console that restarts
+  does not sign you out, and changing the password signs out every browser at
+  once. Setting the two also unlocks a non-loopback bind, exactly as a token
+  does, and deserves the same suspicion — behind that port sits
+  `bypassPermissions`, and a wrong answer costs a second on purpose. The token
+  does not go away: it stays what a script carries, what `serve --print-token`
+  prints, and what the dev server's proxy borrows. It just stops being what
+  *you* carry.
+
 - **The console speaks French, and asks nobody which.** It reads the browser first —
   `Accept-Language` is a setting somebody actually made — and where that says nothing
   useful the time zone answers for it: a machine on Europe/Paris opens in French. The

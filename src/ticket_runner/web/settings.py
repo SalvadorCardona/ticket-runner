@@ -337,9 +337,9 @@ SECTIONS: tuple[Section, ...] = (
         ),
         fields=(
             Field("web", "host", "text", "Bind address",
-                  "Anything but `127.0.0.1` is refused unless a token is set below. The "
-                  "answer that does not depend on a token never leaking is an ssh tunnel: "
-                  "`ssh -L 8787:127.0.0.1:8787 <this machine>`.",
+                  "Anything but `127.0.0.1` is refused unless a token, or a sign-in, is set "
+                  "below. The answer that does not depend on a secret never leaking is an "
+                  "ssh tunnel: `ssh -L 8787:127.0.0.1:8787 <this machine>`.",
                   after="the console has to be restarted"),
             Field("web", "port", "int", "Port", minimum=1,
                   after="the console has to be restarted"),
@@ -348,6 +348,16 @@ SECTIONS: tuple[Section, ...] = (
                   "`~/.local/state/ticket-runner/web/token`. Setting one here is what "
                   "allows a non-loopback bind.",
                   after="the console has to be restarted, and this page reopened with the new token"),
+            Field("web", "email", "text", "Sign in with this email",
+                  "Set it with a password and the console asks for the two instead of for "
+                  "the token — a page you open from a bookmark rather than from a secret. "
+                  "`TICKET_RUNNER_WEB_EMAIL` says the same thing and wins over this.",
+                  after="the console has to be restarted"),
+            Field("web", "password", "secret", "And this password",
+                  "Kept in the file beside the other secrets, or in "
+                  "`TICKET_RUNNER_WEB_PASSWORD`, which wins over it. Changing it signs out "
+                  "every browser at once; the token keeps working, for scripts.",
+                  after="the console has to be restarted"),
             Field("web", "poll_seconds", "int", "Reread the board every (seconds)",
                   "Only while a browser is connected.", minimum=5),
             Field("web", "chat_timeout_minutes", "int", "A chat turn may take (minutes)",

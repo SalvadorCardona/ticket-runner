@@ -1,8 +1,12 @@
 """Reading and validating ~/.config/ticket-runner/config.toml.
 
-The file is the single source of truth: nothing is inferred from the
-environment, and a missing value is reported at install time rather than in the
-middle of a ticket.
+The file is the single source of truth, and a missing value is reported at
+install time rather than in the middle of a ticket. Two keys make an exception,
+and only because the file is not always where they belong: the console's
+`web.email` and `web.password` are also read from `TICKET_RUNNER_WEB_EMAIL` and
+`TICKET_RUNNER_WEB_PASSWORD`, so a unit file or a container can carry the
+credentials without a secret being written down. The environment wins over the
+file — that is what makes it worth setting.
 """
 
 from __future__ import annotations
@@ -15,6 +19,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 PLACEHOLDER = "ntn_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# Where the console's sign-in may be written instead of in the file.
+WEB_EMAIL_ENV = "TICKET_RUNNER_WEB_EMAIL"
+WEB_PASSWORD_ENV = "TICKET_RUNNER_WEB_PASSWORD"
 
 
 def config_dir() -> Path:
@@ -208,6 +216,13 @@ class Web:
     host: str = "127.0.0.1"
     port: int = 8787
     token: str = ""
+    # Who opens the console, and what they type. Both set, the page asks for
+    # them instead of for the token — which is the difference between a console
+    # you open from a bookmark and one you open by pasting a secret. The token
+    # is still what a script carries; it just stops being what *you* carry. Both
+    # are also read from the environment, see the module's docstring.
+    email: str = ""
+    password: str = ""
     # How often the console asks Notion what the board looks like — and only
     # while a browser is actually watching. Nobody is watching most of the time,
     # and a poll nobody reads spends the integration's rate limit for nothing.
@@ -687,6 +702,17 @@ def load(path: Path | None = None) -> Config:
         host=str(web_raw.get("host", web_defaults.host)).strip() or web_defaults.host,
         port=int(web_raw.get("port", web_defaults.port)),
         token=str(web_raw.get("token", web_defaults.token)).strip(),
+        # The environment first, so a unit file or a container can hold the
+        # credentials rather than the file. Stripped like every other secret
+        # here: a password read out of a file would otherwise carry the
+        # newline that file ends with, and lock you out of your own console.
+        email=(
+            os.environ.get(WEB_EMAIL_ENV) or str(web_raw.get("email", web_defaults.email))
+        ).strip(),
+        password=(
+            os.environ.get(WEB_PASSWORD_ENV)
+            or str(web_raw.get("password", web_defaults.password))
+        ).strip(),
         # Five seconds is the floor for the same reason as the live report's:
         # below that, a page left open in a tab becomes a second full-time
         # reader of the board.
