@@ -18,6 +18,21 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Added
 
+- **A project created from its GitHub link alone is cloned, not refused.** Until
+  now, a `Repository` property that matched none of the clones under
+  `workspace_root` put the project back with "no repository could be found" —
+  and the only way out was to go and `git clone` it yourself. Now the first
+  ticket that needs it makes the clone: `gh repo clone` where `gh` is there, so
+  a private repository comes down under the same authentication the pull
+  requests go out under, plain `git clone` otherwise, into `workspace_root`
+  under the repository's own name. The ticket then runs in it exactly as in one
+  you had all along, and its comment says where the folder came from. Nothing
+  else changed: every way of matching a clone you already have is still tried
+  first, a remote two clones answer to is still a question rather than a third
+  copy, and only the run about to work on a ticket downloads anything —
+  `ticket-runner projects`, `ticket-runner next` and a dry run read the board
+  and fetch nothing.
+
 - **The console opens with an email and a password, not with a token.** Set
   `web.email` and `web.password` — in the configuration, in the *This console*
   section of the Settings tab, or in `TICKET_RUNNER_WEB_EMAIL` and

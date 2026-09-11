@@ -13,6 +13,16 @@ Three ways, in this order, from the most explicit to the least:
 A project that declares none of them has no repository, and its tickets produce
 a document instead of a pull request.
 
+A project that declares one none of them finds is a fourth case, and the
+interesting one: a page created from a GitHub link alone, on a machine where
+that repository has never been cloned. Nothing is wrong there — the clone has
+simply not been made yet — so the ticket that needs it **makes it**, under
+`workspace_root`, rather than being put back for want of a `git clone` somebody
+has to type. Only the run that is about to work on a ticket does that, and only
+once every way of matching an existing clone has come up empty: listing the
+board downloads nothing, and nothing gets a second copy of a repository you
+already have.
+
 A way that fails does not stop the ones after it: a `path` that points nowhere
 is what a repository renamed on disk looks like, and the same page usually
 still names it correctly on the next line. The ticket runs on what the next way
@@ -46,6 +56,9 @@ class Project:
     github: str = ""
     brief: str = ""
     note: str = ""
+    # What this run had to fetch before the project existed here at all. Empty
+    # for a clone that was already on the machine, which is every ordinary case.
+    cloned: str = ""
 
     @property
     def is_code(self) -> bool:
@@ -149,7 +162,14 @@ class Resolver:
         except notion.NotionError:
             return ""
 
-    def resolve(self, client: notion.Client, page_id: str) -> Project:
+    def resolve(self, client: notion.Client, page_id: str, *, clone: bool = False) -> Project:
+        """The project behind that page, and the repository its tickets run on.
+
+        `clone` allows the last resort: a declared repository this machine does
+        not have is fetched under the root instead of failing the project. Off
+        by default, because reading the board must download nothing — only the
+        run that is about to work on a ticket asks for it.
+        """
         page = client.page(page_id)
         name = page.title or page_id
         github = str(_property(page, "Repository", "github", "repo") or "")
@@ -159,15 +179,18 @@ class Resolver:
         # of the error on a project none did.
         failed: list[str] = []
 
-        def found(path: Path, how: str) -> Project:
+        def found(path: Path, how: str, wrong: list[str] | None = None, fetched: str = "") -> Project:
+            wrong = failed if wrong is None else wrong
             note = ""
-            if failed:
+            if wrong:
                 note = (
                     f"Repository found {how}, but a more explicit declaration is wrong: "
-                    + "; ".join(failed)
+                    + "; ".join(wrong)
                     + ". Correct it: the fallback is what its tickets run on."
                 )
-            return Project(name, path, page_id, github, self.brief(client, page_id), note)
+            return Project(
+                name, path, page_id, github, self.brief(client, page_id), note, fetched
+            )
 
         for source, declared in (
             ("[projects] in your configuration", self._overrides.get(name)),
@@ -194,6 +217,11 @@ class Resolver:
             # merely happens to be named alike.
             return Project(name, None, page_id, "", self.brief(client, page_id))
 
+        # Only these are somebody's mistake. What the GitHub ways below add is
+        # "there is no clone here", which is not a wrong declaration and has no
+        # business appearing in the note of a repository that was just fetched.
+        wrong = list(failed)
+
         source = "the project's Repository property"
         declared = _normalise(github)
         match = self._match(declared)
@@ -208,12 +236,15 @@ class Resolver:
         # GitHub redirects a renamed repository, and only GitHub knows to what.
         # Asked last, because it is the one way that leaves the machine — and
         # only about a name that already failed to match anything here.
-        current = _normalise(git.current_name(declared)) if "/" in declared else ""
+        today = git.current_name(declared) if "/" in declared else ""
+        current = _normalise(today)
+        ambiguous = False
         if current and current != declared:
             match = self._match(current)
             if isinstance(match, Path):
                 failed[-1] = f"{source} says {declared}, which GitHub has renamed {current}"
                 return found(match, f"by its origin remote, {current}")
+            ambiguous = bool(match)
             failed.append(
                 match or f"GitHub renamed it {current}, which matches no origin remote either"
             )
@@ -224,7 +255,42 @@ class Resolver:
                 "GitHub gave no other name for it (no such repository, or gh not usable here)"
             )
 
+        # Declared, unambiguous, and nowhere on this machine: the clone has
+        # never been made here, which is exactly what a project created from a
+        # GitHub link alone looks like. Making it is the answer; refusing the
+        # ticket over a `git clone` is not. Ambiguity is the one thing that
+        # still stops it — two clones already answer to that remote, and a
+        # third would only make the question harder.
+        if clone and "/" in declared and not ambiguous:
+            fetch = today or declared
+            try:
+                path = self._clone(fetch)
+            except git.GitError as error:
+                failed.append(str(error))
+            else:
+                return found(
+                    path,
+                    f"by cloning {fetch} into {path}",
+                    wrong,
+                    f"`{fetch}` was nowhere under {self._root} — cloned into {path}.",
+                )
+
         raise LookupError(self._nowhere(name, failed))
+
+    def _clone(self, repository: str) -> Path:
+        """Bring that repository down under the root, and say where it landed.
+
+        Named after the repository and nothing else: the folder a clone makes
+        by default is the one everybody's muscle memory looks for, and the
+        project's Notion title — which may be “Jeu d'usine mobile” — is not a
+        directory name anybody would type twice.
+        """
+        path = self._root / repository.rsplit("/", 1)[-1]
+        git.clone(repository, path)
+        # The index was built before this existed. Dropping it is enough: it is
+        # rebuilt on the next question, and there is rarely one in the same run.
+        self._by_remote = None
+        return path
 
     def _match(self, remote: str) -> Path | str:
         """The one repository with that remote, or why there is not one.

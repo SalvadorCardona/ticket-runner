@@ -137,25 +137,46 @@ class _ProjectClient:
 
 
 @contextmanager
-def _workspace(remotes: dict[str, str], renamed: dict[str, str] | None = None):
+def _workspace(
+    remotes: dict[str, str],
+    renamed: dict[str, str] | None = None,
+    cloned: list[tuple[str, Path]] | None = None,
+):
     """A workspace_root of fake clones — folder name → origin remote — and a
     GitHub that answers `gh repo view` from `renamed`, old name → new name.
 
     Yields the resolver and the list of names GitHub was asked about, so a
     test can check that the network is the last thing tried, or not tried.
+
+    Pass `cloned` to let this workspace be downloaded into: every clone lands
+    there as (repository, path), and the folder it makes joins the remotes, so
+    what follows sees the repository exactly as if it had always been here.
+    Without it, cloning fails — which is what keeps a test that never meant to
+    download anything from doing so for real.
     """
     asked: list[str] = []
-    original = projects.git.remote_url, projects.git.current_name
+    original = projects.git.remote_url, projects.git.current_name, projects.git.clone
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         for folder, remote in remotes.items():
             (root / folder / ".git").mkdir(parents=True)
+
+        def clone(repository: str, into: Path) -> None:
+            if cloned is None:
+                raise projects.git.GitError(
+                    f"{repository} could not be cloned into {into} — no network in this test"
+                )
+            cloned.append((repository, into))
+            (into / ".git").mkdir(parents=True)
+            remotes[str(into.relative_to(root))] = f"git@github.com:{repository}.git"
+
         projects.git.remote_url = lambda repo: remotes.get(str(repo.relative_to(root)), "")
         projects.git.current_name = lambda name: (asked.append(name), (renamed or {}).get(name, ""))[1]
+        projects.git.clone = clone
         try:
             yield projects.Resolver(root, {}), asked
         finally:
-            projects.git.remote_url, projects.git.current_name = original
+            projects.git.remote_url, projects.git.current_name, projects.git.clone = original
 
 
 @case
@@ -283,6 +304,92 @@ def two_clones_of_one_remote_answer_for_neither():
             raise AssertionError("two candidates is no answer")
     assert "is the remote of 2 repositories" in message
     assert "trader-ia-copy" in message and "trader-ia" in message
+
+
+@case
+def a_project_made_of_its_github_link_alone_is_cloned():
+    """The whole of "I created the project with just its GitHub": nothing on
+    this machine answers for that remote, so the clone is made under the root
+    and the ticket runs on it, instead of the project being put back."""
+    cloned: list[tuple[str, Path]] = []
+    with _workspace(
+        {}, renamed={"salvadorcardona/trader-ia": "SalvadorCardona/trader-ia"}, cloned=cloned
+    ) as (resolver, asked):
+        client = _ProjectClient("Trader IA", Repository="https://github.com/SalvadorCardona/trader-ia")
+        project = resolver.resolve(client, "p-1", clone=True)
+        root = resolver._root  # noqa: SLF001
+    assert project.is_code and project.path == root / "trader-ia"
+    assert cloned == [("SalvadorCardona/trader-ia", root / "trader-ia")], "under the name GitHub uses"
+    assert not project.is_stale, "nothing on the page is wrong — the clone was only missing"
+    assert "cloned into" in project.cloned, "and the ticket's comment says where it came from"
+
+
+@case
+def reading_the_board_downloads_nothing():
+    """`resolve` only clones when it is asked to: listing the projects, or a
+    dry run, must not start pulling repositories down in the background."""
+    cloned: list[tuple[str, Path]] = []
+    with _workspace({}, cloned=cloned) as (resolver, asked):
+        client = _ProjectClient("Trader IA", Repository="SalvadorCardona/trader-ia")
+        try:
+            resolver.resolve(client, "p-1")
+        except LookupError as error:
+            assert "matches no origin remote" in str(error)
+        else:
+            raise AssertionError("without clone=True this is the refusal it always was")
+    assert cloned == []
+
+
+@case
+def a_clone_is_never_made_where_two_already_answer():
+    """Ambiguity is not something a third copy would settle."""
+    cloned: list[tuple[str, Path]] = []
+    with _workspace(
+        {
+            "trader-ia": "git@github.com:SalvadorCardona/trader-ia.git",
+            "labo/trader-ia-copy": "https://github.com/SalvadorCardona/trader-ia",
+        },
+        cloned=cloned,
+    ) as (resolver, asked):
+        client = _ProjectClient("Trader IA", Repository="SalvadorCardona/trader-ia")
+        try:
+            resolver.resolve(client, "p-1", clone=True)
+        except LookupError as error:
+            assert "is the remote of 2 repositories" in str(error)
+        else:
+            raise AssertionError("two candidates is still no answer")
+    assert cloned == []
+
+
+@case
+def a_wrong_path_is_still_reported_under_the_repository_that_was_cloned():
+    """The clone is the fallback the tickets now run on, so the page is still
+    wrong and the note still says which line of it to correct."""
+    cloned: list[tuple[str, Path]] = []
+    with _workspace({}, cloned=cloned) as (resolver, asked):
+        client = _ProjectClient(
+            "Trader IA",
+            Path=str(resolver._root / "trader-ia-elsewhere"),  # noqa: SLF001
+            Repository="SalvadorCardona/trader-ia",
+        )
+        project = resolver.resolve(client, "p-1", clone=True)
+    assert project.is_stale and "is not a git repository" in project.note
+    assert "matches no origin remote" not in project.note, "a missing clone is nobody's mistake"
+    assert cloned and project.cloned
+
+
+@case
+def a_clone_that_cannot_be_made_joins_the_ways_that_were_tried():
+    with _workspace({}) as (resolver, asked):
+        client = _ProjectClient("Trader IA", Repository="SalvadorCardona/trader-ia")
+        try:
+            resolver.resolve(client, "p-1", clone=True)
+        except LookupError as error:
+            message = str(error)
+        else:
+            raise AssertionError("a clone that fails leaves the project unresolved")
+    assert "matches no origin remote" in message, "every earlier way is still listed"
+    assert "could not be cloned" in message and "no network in this test" in message
 
 
 # -- configuration -----------------------------------------------------------
@@ -3302,7 +3409,7 @@ class _NamelessClient:
 class _OneRepository:
     """A resolver for a board whose single project is a repository."""
 
-    def resolve(self, client, page_id: str) -> projects.Project:
+    def resolve(self, client, page_id: str, *, clone: bool = False) -> projects.Project:
         return projects.Project(name="ticket-runner", path=Path("/repo"))
 
 
@@ -3369,7 +3476,7 @@ def a_project_found_by_a_fallback_says_so_on_the_ticket():
     the alternative is a page that stays wrong for as long as the fallback holds."""
 
     class _StaleRepository:
-        def resolve(self, client, page_id: str) -> projects.Project:
+        def resolve(self, client, page_id: str, *, clone: bool = False) -> projects.Project:
             return projects.Project(
                 name="ticket-runner",
                 path=Path("/repo"),
@@ -3384,6 +3491,36 @@ def a_project_found_by_a_fallback_says_so_on_the_ticket():
         job = runner.prepare(ticket)
     assert job is not None and job.project.path == Path("/repo"), "the ticket runs"
     assert len(job.notes) == 1 and "from the project's Path property" in job.notes[0]
+
+
+@case
+def a_repository_the_run_had_to_fetch_is_said_on_the_ticket():
+    """A ticket running on a folder nobody made by hand deserves the sentence
+    that says where it came from — and a dry run downloads nothing."""
+
+    class _Fetching:
+        def __init__(self) -> None:
+            self.asked: list[bool] = []
+
+        def resolve(self, client, page_id: str, *, clone: bool = False) -> projects.Project:
+            self.asked.append(clone)
+            return projects.Project(
+                name="ticket-runner",
+                path=Path("/repo"),
+                cloned="`Salva/site` was nowhere under ~/workspace — cloned into /repo.",
+            )
+
+    runner, ticket = _nameless("Retirer le shader", "Il coûte 12 % de CPU pour rien.")
+    runner.resolver = resolver = _Fetching()
+    with _state_home(), _naming_session(""):
+        job = runner.prepare(ticket)
+    assert resolver.asked == [True], "a run about to work on a ticket asks for the clone"
+    assert job is not None and len(job.notes) == 1 and "cloned into" in job.notes[0]
+
+    runner.dry_run = True
+    with _state_home(), _naming_session(""):
+        runner.prepare(ticket)
+    assert resolver.asked == [True, False], "a dry run says what it would do, and fetches nothing"
 
 
 @case

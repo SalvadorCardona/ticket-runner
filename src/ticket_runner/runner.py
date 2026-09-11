@@ -1398,7 +1398,13 @@ class Runner:
             project = Project(name="", path=None)
         else:
             try:
-                project = self.resolver.resolve(self.client, relation[0])
+                # The one caller allowed to fetch a repository that is declared
+                # but not on this machine: a ticket about to run needs the
+                # clone to exist, and a project created from its GitHub link
+                # alone has never had one made. A dry run stays a dry run.
+                project = self.resolver.resolve(
+                    self.client, relation[0], clone=not self.dry_run
+                )
             except (LookupError, notion.NotionError) as error:
                 self._fail(ticket, self.voice.say("no-project"), str(error), blocked=True)
                 return None
@@ -1462,12 +1468,15 @@ class Runner:
         said = f" · {len(job.comments)} comment(s)" if job.comments else ""
         role = f" · as {agent.name}" if agent else ""
         self.say(f"  → {ticket.title}\n    {project.name or 'no project'} · {where}{role}{said}")
-        if project.note:
-            # Found by a way of last resort: the ticket runs, and the ticket's
-            # comment says which declaration on the project page to correct —
-            # or the page stays wrong for as long as the fallback keeps working.
-            self.say("    · " + project.note)
-            job.notes.append(project.note)
+        # `cloned` says the repository was not here until a minute ago — worth a
+        # line, since the ticket is running on a folder nobody made by hand.
+        # `note` says it was found by a way of last resort: the ticket runs, and
+        # the ticket's comment says which declaration on the project page to
+        # correct — or the page stays wrong for as long as the fallback works.
+        for line in (project.cloned, project.note):
+            if line:
+                self.say("    · " + line)
+                job.notes.append(line)
         if not self.dry_run:
             # The session identifier is written now, not at the end: a ticket
             # still in progress is exactly the one you want to look into, and

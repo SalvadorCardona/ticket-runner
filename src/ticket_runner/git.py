@@ -59,6 +59,32 @@ def remote_url(repo: Path) -> str:
     return result.out if result.ok else ""
 
 
+def clone(repository: str, into: Path) -> None:
+    """Fetch `owner/name` into a folder this machine does not have yet.
+
+    Through `gh` when it is there, because that is already what knows how to
+    reach a private repository — the same authentication the pull requests go
+    out under. Plain HTTPS otherwise, which covers a public repository on a
+    machine with no `gh` at all.
+
+    Ten minutes, rather than the five a git command usually gets: this is the
+    one that may be pulling down a repository's whole history over a domestic
+    line, and a ticket refused because the clone was big is not a better
+    outcome than a ticket that started late.
+    """
+    into.parent.mkdir(parents=True, exist_ok=True)
+    if shutil.which("gh"):
+        result = run(["gh", "repo", "clone", repository, str(into)], timeout=600)
+    else:
+        result = run(
+            ["git", "clone", f"https://github.com/{repository}.git", str(into)], timeout=600
+        )
+    if not result.ok:
+        lines = [line.strip() for line in (result.err + "\n" + result.out).splitlines() if line.strip()]
+        why = lines[-1] if lines else "no reason given"
+        raise GitError(f"{repository} could not be cloned into {into} — {why}")
+
+
 def default_branch(repo: Path) -> str:
     """The branch the origin declares as default, else main/master."""
     result = git(["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"], repo)
