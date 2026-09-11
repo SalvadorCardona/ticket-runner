@@ -18,6 +18,18 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Added
 
+- **The console speaks French, and asks nobody which.** It reads the browser first —
+  `Accept-Language` is a setting somebody actually made — and where that says nothing
+  useful the time zone answers for it: a machine on Europe/Paris opens in French. The
+  select at the right of the bar, under the flag, is how you disagree with the guess, and
+  the choice is kept in `localStorage` like the theme. It holds everywhere: the menu, the
+  pills in the bar, a ticket's page, the discussion under it, and the settings tab down to
+  the sentence under each of its seventy fields. What stays in its own language is what
+  belongs to somebody else — a ticket's title and the columns of your board are Notion's,
+  the output of `> status` is the CLI's, and a report a run wrote follows `runner.language`
+  as it always did. English is unchanged: it is the language the console is written in, and
+  a console nobody switches is the console it was.
+
 - **An OpenRouter key, and every other model comes within reach.** `openrouter.key`
   in the configuration — or the *Every other model* section of the console's
   Settings tab, where it is a secret like any other — and every session the

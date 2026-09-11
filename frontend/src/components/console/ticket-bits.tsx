@@ -3,6 +3,7 @@ import { ExternalLink } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { useConsole } from "@/hooks/use-console"
+import { t, useT } from "@/lib/i18n"
 import type { Ticket } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -10,6 +11,9 @@ import { cn } from "@/lib/utils"
  * page: the column it is in, the tags, the links out, and the gestures it
  * offers where it stands. */
 
+/* What a column is called where the board has not named it itself. English
+ * here, and translated where it is drawn: the board's own words come from
+ * Notion and are repeated as they are. */
 export const LABEL: Record<string, string> = {
   ready: "Ready",
   running: "In progress",
@@ -58,13 +62,15 @@ export function ago(at: string): string {
   const then = new Date(at).getTime()
   if (Number.isNaN(then)) return ""
   const seconds = Math.max(0, Math.round((Date.now() - then) / 1000))
-  if (seconds < 90) return "just now"
+  if (seconds < 90) return t("just now")
   const minutes = Math.round(seconds / 60)
-  if (minutes < 60) return `${minutes} min ago`
+  if (minutes < 60) return t("{{count}} min ago", { count: String(minutes) })
   const hours = Math.round(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
+  if (hours < 24) return t("{{count}}h ago", { count: String(hours) })
   const days = Math.round(hours / 24)
-  return days < 30 ? `${days}d ago` : `${Math.round(days / 30)}mo ago`
+  return days < 30
+    ? t("{{count}}d ago", { count: String(days) })
+    : t("{{count}}mo ago", { count: String(Math.round(days / 30)) })
 }
 
 /** A tag: one word about a ticket, drawn small enough that five of them still read as one row. */
@@ -103,11 +109,12 @@ export function Away({ label, href }: { label: string; href: string }) {
 
 /** Notion, the pull request, the session — whichever the ticket has. */
 export function TicketLinks({ ticket }: { ticket: Ticket }) {
+  const t = useT()
   return (
     <>
       <Away label="Notion" href={ticket.url} />
-      {ticket.pull_request ? <Away label="pull request" href={ticket.pull_request} /> : null}
-      {ticket.session_link ? <Away label="session" href={ticket.session_link} /> : null}
+      {ticket.pull_request ? <Away label={t("pull request")} href={ticket.pull_request} /> : null}
+      {ticket.session_link ? <Away label={t("session")} href={ticket.session_link} /> : null}
     </>
   )
 }
@@ -128,10 +135,11 @@ export function TicketTags({ ticket }: { ticket: Ticket }) {
  * and the way out to Notion. All three are facts rather than prose, so all
  * three are set in the mono face and read as a single ruled row. */
 export function TicketFoot({ ticket }: { ticket: Ticket }) {
+  const t = useT()
   return (
     <div className="flex items-center gap-2 border-t pt-2.5 font-mono text-[0.7rem]">
       <span className="text-muted-foreground min-w-0 flex-1 truncate">
-        {ticket.project || "no project"}
+        {ticket.project || t("no project")}
       </span>
       {typeof ticket.cost === "number" && ticket.cost ? (
         <span className="tabular-nums">${ticket.cost.toFixed(2)}</span>
@@ -142,7 +150,7 @@ export function TicketFoot({ ticket }: { ticket: Ticket }) {
           target="_blank"
           rel="noreferrer noopener"
           className="text-muted-foreground hover:text-foreground shrink-0"
-          aria-label="open in Notion"
+          aria-label={t("open in Notion")}
           onClick={(event) => event.stopPropagation()}
         >
           <ExternalLink className="size-3.5" />
@@ -155,6 +163,7 @@ export function TicketFoot({ ticket }: { ticket: Ticket }) {
 /** The gestures a ticket offers where it stands, or nothing at all where it offers none. */
 export function TicketActions({ ticket, className }: { ticket: Ticket; className?: string }) {
   const { move, board } = useConsole()
+  const t = useT()
   const quiet = "text-muted-foreground hover:text-foreground"
   // A ticket the runner has in hand is not one you move: drawing an empty row
   // for it would leave a gap on the card where the gestures would have been.
@@ -163,7 +172,7 @@ export function TicketActions({ ticket, className }: { ticket: Ticket; className
     <div className={cn("flex flex-wrap items-center gap-x-1 gap-y-1", className)}>
       {ticket.column !== "ready" ? (
         <Button variant="ghost" size="xs" className={quiet} onClick={() => move(ticket, "ready")}>
-          {ticket.column === "review" ? "run again" : "make ready"}
+          {ticket.column === "review" ? t("run again") : t("make ready")}
         </Button>
       ) : null}
       {/* Validating is the gesture the runner acts on — it merges the pull
@@ -176,17 +185,17 @@ export function TicketActions({ ticket, className }: { ticket: Ticket; className
           className="text-tr-pink hover:text-tr-pink"
           onClick={() => move(ticket, "validated")}
         >
-          validate
+          {t("validate")}
         </Button>
       ) : null}
       {ticket.column === "review" ? (
         <Button variant="ghost" size="xs" className={quiet} onClick={() => move(ticket, "done")}>
-          done
+          {t("done")}
         </Button>
       ) : null}
       {ticket.column === "ready" ? (
         <Button variant="ghost" size="xs" className={quiet} onClick={() => move(ticket, "blocked")}>
-          hold
+          {t("hold")}
         </Button>
       ) : null}
     </div>

@@ -29,6 +29,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useConsole } from "@/hooks/use-console"
 import { useTheme } from "@/hooks/use-theme"
+import { useT } from "@/lib/i18n"
 import { visible, type PaneMenuItem } from "@/lib/menu"
 import { pageHref, type Route } from "@/lib/router"
 import { cn } from "@/lib/utils"
@@ -48,6 +49,7 @@ export function AppSidebar({ route }: { route: Route }) {
   const { board, runner, sessions, connection, refresh } = useConsole()
   const { theme, toggle } = useTheme()
   const { state, isMobile, setOpenMobile } = useSidebar()
+  const t = useT()
 
   const ready = board.tickets.filter((item) => item.column === "ready").length
   const running = board.tickets.filter((item) => item.column === "running").length
@@ -55,49 +57,59 @@ export function AppSidebar({ route }: { route: Route }) {
 
   const items: PaneMenuItem[] = [
     {
-      name: "Board",
+      name: t("Board"),
       href: boardHref(),
       icon: LayoutGrid,
       priority: 50,
       badge: board.tickets.length || undefined,
-      detail: [ready && `${ready} ready`, review && `${review} in review`]
+      detail: [
+        ready && t("{{count}} ready", { count: String(ready) }),
+        review && t("{{count}} in review", { count: String(review) }),
+      ]
         .filter(Boolean)
         .join(" · "),
     },
     {
-      name: "Console",
+      name: t("Console"),
       href: pageHref("console"),
       page: "console",
       icon: Terminal,
       priority: 30,
-      detail: runner?.chat.session_id ? `${runner.chat.turns} turn(s)` : "no conversation yet",
+      detail: runner?.chat.session_id
+        ? t("{{count}} turn(s)", { count: String(runner.chat.turns) })
+        : t("no conversation yet"),
     },
     {
-      name: "Live",
+      name: t("Live"),
       href: pageHref("live"),
       page: "live",
       icon: Activity,
       priority: 20,
       badge: sessions.length || undefined,
-      detail: running ? `${running} running` : "",
+      detail: running ? t("{{count}} running", { count: String(running) }) : "",
     },
     {
-      name: "Schedules",
+      name: t("Schedules"),
       href: pageHref("schedules"),
       page: "schedules",
       icon: CalendarClock,
       priority: 15,
       // No count and no badge: the only way to know is to ask Notion, and this
       // menu is redrawn every time the board moves.
-      detail: "what comes back on its own",
+      detail: t("what comes back on its own"),
     },
     {
-      name: "Settings",
+      name: t("Settings"),
       href: pageHref("settings"),
       page: "settings",
       icon: Settings2,
       priority: 10,
-      detail: runner?.timer === "enabled" ? "timer on" : `timer ${runner?.timer ?? ""}`.trim(),
+      detail:
+        runner?.timer === "enabled"
+          ? t("timer on")
+          : runner?.timer
+            ? t("timer {{state}}", { state: runner.timer })
+            : "",
     },
   ]
 
@@ -132,7 +144,7 @@ export function AppSidebar({ route }: { route: Route }) {
               {runner?.version ? (
                 <div className="text-muted-foreground truncate font-mono text-[0.65rem]">
                   v{runner.version}
-                  {runner.update ? ` · ${runner.update} waiting` : ""}
+                  {runner.update ? ` · ${t("{{version}} waiting", { version: runner.update })}` : ""}
                 </div>
               ) : null}
             </div>
@@ -145,7 +157,7 @@ export function AppSidebar({ route }: { route: Route }) {
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupLabel className="font-mono text-[0.65rem] font-semibold tracking-[0.14em] uppercase">
-            workspace
+            {t("workspace")}
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -204,21 +216,21 @@ export function AppSidebar({ route }: { route: Route }) {
           <SidebarMenuItem>
             <SidebarMenuButton
               onClick={refresh}
-              tooltip="reread the board now"
+              tooltip={t("reread the board now")}
               className="group-data-[collapsible=icon]:justify-center"
             >
               <RefreshCw />
-              <span>Refresh</span>
+              <span>{t("Refresh")}</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton
               onClick={toggle}
-              tooltip={theme === "dark" ? "go light" : "go dark"}
+              tooltip={theme === "dark" ? t("go light") : t("go dark")}
               className="group-data-[collapsible=icon]:justify-center"
             >
               {theme === "dark" ? <Sun /> : <Moon />}
-              <span>{theme === "dark" ? "Light" : "Dark"}</span>
+              <span>{theme === "dark" ? t("Light") : t("Dark")}</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -241,15 +253,15 @@ export function AppSidebar({ route }: { route: Route }) {
               {!collapsed ? (
                 <span className="truncate">
                   {connection === "live"
-                    ? "live"
+                    ? t("live")
                     : connection === "connecting"
-                      ? "connecting…"
-                      : "reconnecting…"}
+                      ? t("connecting…")
+                      : t("reconnecting…")}
                 </span>
               ) : null}
             </div>
           </TooltipTrigger>
-          <TooltipContent side="right">event stream</TooltipContent>
+          <TooltipContent side="right">{t("event stream")}</TooltipContent>
         </Tooltip>
       </SidebarFooter>
 

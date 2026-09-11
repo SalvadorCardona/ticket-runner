@@ -5,9 +5,11 @@ import { Button } from "@/components/ui/button"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useConsole } from "@/hooks/use-console"
+import { useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
 import { Eyebrow } from "./frame"
+import { LanguagePicker } from "./language-picker"
 
 /** An interval, as somebody would say it out loud. */
 function every(seconds: number): string {
@@ -20,8 +22,8 @@ function every(seconds: number): string {
  * Every pill here answers a question somebody would otherwise open a terminal
  * for: is the timer on, is something running now, is `claude` even installed,
  * what has this cost, is there a version waiting. At the right edge, the
- * switch that folds the second column away — a board of seven columns wants
- * the width more often than not.
+ * language the console is in and the switch that folds the second column away
+ * — a board of seven columns wants the width more often than not.
  *
  * The bar names where you are and nothing more: the page under it opens with
  * its own heading, and a title said twice is a title read neither time.
@@ -83,6 +85,10 @@ export function Header({
   onToggleAside: () => void
 }) {
   const { runner } = useConsole()
+  const t = useT()
+  const fold = aside
+    ? t("hide {{pane}}", { pane: asideLabel })
+    : t("show {{pane}}", { pane: asideLabel })
 
   return (
     <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-3 py-2">
@@ -104,13 +110,16 @@ export function Header({
         {runner ? (
           <>
             <Pill tone={runner.timer === "enabled" ? "green" : "amber"} dot>
+              {/* systemd's own word for anything but "on": it is the word
+                  `systemctl` would print, and translating it would be
+                  translating a state nobody but systemd names. */}
               {runner.timer === "enabled"
-                ? `timer on · ${every(runner.interval_seconds)}`
-                : `timer ${runner.timer}`}
+                ? `${t("timer on")} · ${every(runner.interval_seconds)}`
+                : t("timer {{state}}", { state: runner.timer })}
             </Pill>
             {runner.running ? (
               <Pill tone="blue" dot pulse>
-                a run is in progress
+                {t("a run is in progress")}
               </Pill>
             ) : null}
             {/* A timer that is on and a board that does not move: without this
@@ -120,36 +129,45 @@ export function Header({
                 <TooltipTrigger asChild>
                   <span>
                     <Pill tone="amber" dot>
-                      out of credit · back at {runner.credits_at}
+                      {t("out of credit · back at {{at}}", { at: runner.credits_at })}
                     </Pill>
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>
-                  The subscription's window is spent. Tickets stay where they are and the
-                  first run after {runner.credits_at} takes them again.
+                  {t(
+                    "The subscription's window is spent. Tickets stay where they are and the first run after {{at}} takes them again.",
+                    { at: runner.credits_at }
+                  )}
                 </TooltipContent>
               </Tooltip>
             ) : null}
-            {!runner.claude ? <Pill tone="amber">claude not found</Pill> : null}
+            {!runner.claude ? <Pill tone="amber">{t("claude not found")}</Pill> : null}
             <Pill>
-              <span className="font-mono tabular-nums">{runner.handled}</span> handled ·{" "}
+              <span className="font-mono tabular-nums">{runner.handled}</span> {t("handled")} ·{" "}
               <span className="font-mono tabular-nums">${runner.spend}</span>
             </Pill>
             {runner.update ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span>
-                    <Pill tone="amber">{runner.update} available · run update</Pill>
+                    <Pill tone="amber">
+                      {t("{{version}} available · run update", { version: runner.update })}
+                    </Pill>
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>
-                  v{runner.version} — {runner.update} is waiting, run: ticket-runner update
+                  {t("v{{version}} — {{waiting}} is waiting, run: ticket-runner update", {
+                    version: runner.version,
+                    waiting: runner.update,
+                  })}
                 </TooltipContent>
               </Tooltip>
             ) : null}
           </>
         ) : null}
       </div>
+
+      <LanguagePicker />
 
       <Tooltip>
         <TooltipTrigger asChild>
@@ -158,12 +176,12 @@ export function Header({
             size="icon-sm"
             className="text-muted-foreground max-[860px]:hidden"
             onClick={onToggleAside}
-            aria-label={aside ? `hide the ${asideLabel}` : `show the ${asideLabel}`}
+            aria-label={fold}
           >
             {aside ? <PanelRightClose /> : <PanelRightOpen />}
           </Button>
         </TooltipTrigger>
-        <TooltipContent>{aside ? `hide the ${asideLabel}` : `show the ${asideLabel}`}</TooltipContent>
+        <TooltipContent>{fold}</TooltipContent>
       </Tooltip>
     </header>
   )

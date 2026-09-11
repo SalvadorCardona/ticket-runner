@@ -4,6 +4,7 @@ import { Link } from "react-resource-view"
 
 import { Button } from "@/components/ui/button"
 import { api, why } from "@/lib/api"
+import { t, useT } from "@/lib/i18n"
 import type { Schedule, Schedules } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ticketHref } from "@/resources/tickets"
@@ -29,18 +30,21 @@ function when(at: string): string {
   if (Number.isNaN(moment.getTime())) return at
   const said = at.replace("T", " ").slice(0, 16)
   const hours = (moment.getTime() - Date.now()) / 3_600_000
-  if (hours < 0) return `${said} — overdue`
-  if (hours < 48) return `${said} — in ${Math.round(hours)} h`
-  return `${said} — in ${Math.round(hours / 24)} days`
+  if (hours < 0) return `${said} — ${t("overdue")}`
+  if (hours < 48) return `${said} — ${t("in {{count}} h", { count: String(Math.round(hours)) })}`
+  return `${said} — ${t("in {{count}} days", { count: String(Math.round(hours / 24)) })}`
 }
 
 /** The rhythm, in the words the row is written in: "Weekly · Monday 09:00". */
 function rhythm(schedule: Schedule): string {
   const clock = [schedule.day, schedule.at].filter(Boolean).join(" ")
-  return [schedule.cadence || "no cadence", clock].filter(Boolean).join(" · ")
+  // The cadence is the row's own word, as Notion holds it; only its absence is
+  // the console's to say.
+  return [schedule.cadence || t("no cadence"), clock].filter(Boolean).join(" · ")
 }
 
 function Row({ schedule }: { schedule: Schedule }) {
+  const t = useT()
   return (
     <Panel
       eyebrow={rhythm(schedule)}
@@ -69,7 +73,7 @@ function Row({ schedule }: { schedule: Schedule }) {
               schedule.active ? "bg-tr-green" : "bg-muted-foreground"
             )}
           />
-          {schedule.active ? "on" : "unticked"}
+          {schedule.active ? t("on") : t("unticked")}
         </span>
       }
     >
@@ -81,18 +85,18 @@ function Row({ schedule }: { schedule: Schedule }) {
         </p>
       ) : (
         <Facts>
-          <Fact label="next">
+          <Fact label={t("next")}>
             <span className="font-mono text-xs">
               {!schedule.active
-                ? "nothing is born"
+                ? t("nothing is born")
                 : schedule.next
                   ? when(schedule.next)
-                  : "at the next pass"}
+                  : t("at the next pass")}
             </span>
           </Fact>
-          <Fact label="last">
+          <Fact label={t("last")}>
             <span className="font-mono text-xs">
-              {schedule.last ? schedule.last.replace("T", " ").slice(0, 16) : "never"}
+              {schedule.last ? schedule.last.replace("T", " ").slice(0, 16) : t("never")}
             </span>
           </Fact>
         </Facts>
@@ -108,7 +112,7 @@ function Row({ schedule }: { schedule: Schedule }) {
               to={ticketHref(schedule.ticket)}
               className="text-muted-foreground hover:text-foreground text-xs underline-offset-2 hover:underline"
             >
-              its last ticket
+              {t("its last ticket")}
             </Link>
           ) : null}
         </div>
@@ -118,6 +122,7 @@ function Row({ schedule }: { schedule: Schedule }) {
 }
 
 export function SchedulesPane() {
+  const t = useT()
   const [drawn, setDrawn] = React.useState<Schedules | null>(null)
   const [problem, setProblem] = React.useState("")
 
@@ -140,19 +145,26 @@ export function SchedulesPane() {
   return (
     <div className="p-3.5 sm:p-5">
       <PageHead
-        crumbs={["workspace", "schedules"]}
-        title="What comes back on its own."
-        blurb="A row says what to make and how often; when the moment comes the runner writes the ticket into the ready column and steps back."
+        crumbs={[t("workspace"), t("schedules")]}
+        title={t("What comes back on its own.")}
+        blurb={t(
+          "A row says what to make and how often; when the moment comes the runner writes the ticket into the ready column and steps back."
+        )}
         action={
           <Button variant="outline" size="sm" onClick={() => void load()}>
             <RefreshCw />
-            Reread
+            {t("Reread")}
           </Button>
         }
       >
         <span className="text-muted-foreground inline-flex items-center gap-1.5 font-mono text-[0.7rem]">
           <CalendarClock className="size-3.5" />
-          {rows.length ? `${active} of ${rows.length} on` : "nothing yet"}
+          {rows.length
+            ? t("{{count}} of {{total}} on", {
+                count: String(active),
+                total: String(rows.length),
+              })
+            : t("nothing yet")}
         </span>
       </PageHead>
 
@@ -164,17 +176,22 @@ export function SchedulesPane() {
           {problem}
         </p>
       ) : !drawn ? (
-        <p className="text-muted-foreground text-sm">Reading the schedules…</p>
+        <p className="text-muted-foreground text-sm">{t("Reading the schedules…")}</p>
       ) : !drawn.database ? (
         <p className="text-muted-foreground rounded-xl border border-dashed px-4 py-10 text-center text-sm">
-          Nothing repeats here — this workspace has no “{drawn.page}” page.
+          {t("Nothing repeats here — this workspace has no “{{page}}” page.", {
+            page: drawn.page,
+          })}
           <br />
-          <code className="font-mono text-xs">ticket-runner init &lt;page-url&gt;</code> builds it.
+          <code className="font-mono text-xs">ticket-runner init &lt;page-url&gt;</code>{" "}
+          {t("builds it.")}
         </p>
       ) : !rows.length ? (
         <p className="text-muted-foreground rounded-xl border border-dashed px-4 py-10 text-center text-sm">
-          Nothing repeats here yet — the “{drawn.page}” database is empty. A row in it is a
-          ticket that comes back.
+          {t(
+            "Nothing repeats here yet — the “{{page}}” database is empty. A row in it is a ticket that comes back.",
+            { page: drawn.page }
+          )}
         </p>
       ) : (
         <div className="space-y-3">
@@ -188,7 +205,8 @@ export function SchedulesPane() {
           that never fire is the thing it would otherwise be read as. */}
       {drawn && drawn.database && !drawn.enabled ? (
         <p className="text-tr-amber mt-4 text-xs">
-          <Eyebrow className="text-tr-amber">runner.schedule = false</Eyebrow> — none of this runs.
+          <Eyebrow className="text-tr-amber">runner.schedule = false</Eyebrow> —{" "}
+          {t("none of this runs.")}
         </p>
       ) : null}
     </div>

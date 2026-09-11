@@ -5,6 +5,7 @@ import { Link, generateLinkByResource, useCurrentViewResourceContext } from "rea
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { useConsole } from "@/hooks/use-console"
+import { useT } from "@/lib/i18n"
 import type { TicketDetail } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -31,6 +32,7 @@ export function TicketPage() {
   const context = useCurrentViewResourceContext()
   const page = context.data as TicketDetail | undefined
   const { ticket: open, openTicket, board } = useConsole()
+  const t = useT()
 
   // The page is the ticket's terminal too: opening it loads the discussion.
   React.useEffect(() => {
@@ -43,7 +45,7 @@ export function TicketPage() {
   const back = generateLinkByResource({ resource: context.resource, resourceAction: ActionList.list })
   const column = ticket
     ? board.columns.find((item) => item.key === ticket.column)?.name ||
-      LABEL[ticket.column] ||
+      t(LABEL[ticket.column]) ||
       ticket.column
     : ""
 
@@ -55,7 +57,7 @@ export function TicketPage() {
           className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs"
         >
           <ArrowLeft className="size-3.5" />
-          board
+          {t("board")}
         </Link>
         <span className="flex-1" />
         {ticket ? (
@@ -104,35 +106,37 @@ export function TicketPage() {
               </div>
 
               <Facts className="mt-4">
-                <Fact label="project">{ticket.project || "no project — a document"}</Fact>
-                <Fact label="priority">{ticket.priority || "—"}</Fact>
-                <Fact label="model">{ticket.model || "—"}</Fact>
-                <Fact label="spent">
+                <Fact label={t("project")}>
+                  {ticket.project || t("no project — a document")}
+                </Fact>
+                <Fact label={t("priority")}>{ticket.priority || "—"}</Fact>
+                <Fact label={t("model")}>{ticket.model || "—"}</Fact>
+                <Fact label={t("spent")}>
                   {typeof ticket.cost === "number" && ticket.cost
                     ? `$${ticket.cost.toFixed(2)}`
                     : "—"}
                 </Fact>
-                <Fact label="created">{ago(ticket.created) || "—"}</Fact>
-                <Fact label="scheduled">
+                <Fact label={t("created")}>{ago(ticket.created) || "—"}</Fact>
+                <Fact label={t("scheduled")}>
                   {ticket.scheduled ? ticket.scheduled.replace("T", " ") : "—"}
                 </Fact>
               </Facts>
 
               <div className="mt-6">
-                <Eyebrow>the brief</Eyebrow>
+                <Eyebrow>{t("the brief")}</Eyebrow>
                 <div className="mt-2">
                   {ticket.content ? (
                     <Markdown text={ticket.content} />
                   ) : (
                     <p className="text-muted-foreground text-sm">
-                      The page is empty: the title is the whole brief.
+                      {t("The page is empty: the title is the whole brief.")}
                     </p>
                   )}
                 </div>
               </div>
             </>
           ) : context.error ? (
-            <p className="text-destructive text-sm">This ticket could not be read.</p>
+            <p className="text-destructive text-sm">{t("This ticket could not be read.")}</p>
           ) : (
             <div className="flex flex-col gap-2">
               <Skeleton className="h-8 w-2/3" />

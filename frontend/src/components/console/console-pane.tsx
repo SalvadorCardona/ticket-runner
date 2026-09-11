@@ -3,6 +3,7 @@ import * as React from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { useConsole } from "@/hooks/use-console"
+import { useT } from "@/lib/i18n"
 
 import { Eyebrow } from "./frame"
 import { Flow } from "./text"
@@ -17,6 +18,7 @@ const isCommand = (text: string) => text.trimStart().startsWith(">")
 
 export function ConsolePane() {
   const { transcript, busy, submit, resetChat, runner } = useConsole()
+  const t = useT()
   const [text, setText] = React.useState("")
 
   const send = () => {
@@ -27,19 +29,20 @@ export function ConsolePane() {
   }
 
   const hint = isCommand(text)
-    ? `a ticket-runner command · ${(runner?.commands ?? []).join(" · ")}`
-    : "a sentence talks to your workspace · > runs a ticket-runner command"
+    ? `${t("a ticket-runner command")} · ${(runner?.commands ?? []).join(" · ")}`
+    : t("a sentence talks to your workspace · > runs a ticket-runner command")
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="border-b px-3.5 py-2.5">
-        <Eyebrow>the workspace</Eyebrow>
+        <Eyebrow>{t("the workspace")}</Eyebrow>
         <h3 className="mt-1 text-base leading-tight font-semibold tracking-[-0.01em]">
-          Talking to your machine
+          {t("Talking to your machine")}
         </h3>
         <p className="text-muted-foreground mt-1 text-xs">
-          A sentence reaches your repositories and the board; a line that starts with{" "}
-          <code className="bg-muted rounded px-1 py-0.5 font-mono">&gt;</code> reaches the CLI.
+          {t("A sentence reaches your repositories and the board; a line that starts with")}{" "}
+          <code className="bg-muted rounded px-1 py-0.5 font-mono">&gt;</code>{" "}
+          {t("reaches the CLI.")}
         </p>
       </div>
 
@@ -77,7 +80,7 @@ export function ConsolePane() {
                       {"\n"}
                     </React.Fragment>
                   ))}
-                  {entry.code ? `\n[exit ${entry.code}]` : ""}
+                  {entry.code ? `\n[${t("exit {{code}}", { code: String(entry.code) })}]` : ""}
                 </pre>
               </div>
             </Line>
@@ -102,20 +105,20 @@ export function ConsolePane() {
           className={
             "max-h-50 min-h-9 " + (isCommand(text) ? "font-mono text-tr-amber" : "")
           }
-          placeholder="Ask the workspace, or type >status"
+          placeholder={t("Ask the workspace, or type >status")}
         />
         <div className="flex items-center gap-2">
           <Button onClick={send} disabled={busy || !text.trim()}>
-            {busy ? "working…" : "Send"}
+            {busy ? t("working…") : t("Send")}
           </Button>
-          <Button variant="outline" onClick={resetChat} title="start a new conversation">
-            new conversation
+          <Button variant="outline" onClick={resetChat} title={t("start a new conversation")}>
+            {t("new conversation")}
           </Button>
           <span className="flex-1" />
           <span className="text-muted-foreground truncate font-mono text-xs">
             {runner?.chat.session_id
-              ? `${runner.chat.turns} turn(s) · ${runner.chat.resume_command}`
-              : "no conversation yet"}
+              ? `${t("{{count}} turn(s)", { count: String(runner.chat.turns) })} · ${runner.chat.resume_command}`
+              : t("no conversation yet")}
           </span>
         </div>
       </div>

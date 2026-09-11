@@ -1,4 +1,5 @@
 import { Message, MessageContent, MessageHeader } from "@/components/ui/message"
+import { useT } from "@/lib/i18n"
 import type { Role } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -34,6 +35,7 @@ export function Turn({
   when?: string
   className?: string
 }) {
+  const t = useT()
   const mine = role === "you"
   return (
     <Message align={mine ? "end" : "start"} className={className}>
@@ -44,7 +46,7 @@ export function Turn({
             role === "error" && "text-destructive"
           )}
         >
-          {who ?? WHO[role] ?? role}
+          {who ?? t(WHO[role] ?? role)}
           {when ? <span className="font-normal normal-case">{` · ${when}`}</span> : null}
         </MessageHeader>
         <div

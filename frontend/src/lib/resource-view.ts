@@ -1,5 +1,3 @@
-import { setFormConfig } from "react-data-form"
-import { setTranslation } from "react-mini-i18n"
 import {
   configureApi,
   configurePorts,
@@ -7,6 +5,10 @@ import {
   type ApiDialectInterface,
 } from "react-resource-view"
 
+// The dictionary has to be in place before a resource is declared: the words
+// the views are built with go through it. See `i18n.ts`, which applies it on
+// import.
+import "./i18n"
 import { navigation } from "./router"
 
 /* Wiring react-resource-view into the console, once, before a resource is
@@ -64,24 +66,6 @@ export function configureConsoleViews() {
   })
 
   configureApi({ baseUrl: "", dialect: ticketDialect })
-
-  setFormConfig({
-    defaultForm: {
-      label: { success: "Written to Notion", error: "Some fields need another look" },
-    },
-  })
-
-  // The package speaks in its own words; these are the console's.
-  setTranslation({
-    "No data yet": "Nothing on the board.",
-    "Nothing here": "nothing",
-    Saved: "Moved",
-    create: "New ticket",
-    read: "Open",
-    "Une erreur est survenue": "Something went wrong",
-    Continuer: "Continue",
-    Fermer: "Close",
-  })
 }
 
 // On import, so that a resource declared in any module finds the dialect in place.
