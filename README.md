@@ -267,7 +267,7 @@ for reading rather than for filling in.
 | --- | --- | --- |
 | `runner.workspace_root` | `~/workspace` | where to look for repositories |
 | `runner.interval_seconds` | `1800` | seconds between two passes — `ticket-runner enable` applies a change |
-| `runner.max_concurrent` | `2` | tickets handled side by side in one run |
+| `runner.max_concurrent` | `2` | tickets handled side by side — a place that frees is refilled at once |
 | `runner.timeout_minutes` | `30` | past this, the session is killed and the ticket fails |
 | `runner.wait_for_credits` | `true` | a spent subscription window puts the runner to sleep instead of failing tickets — see *When the credits run out* below |
 | `runner.model` | `""` | `"opus"`, `"sonnet"`… empty = the CLI's default |
@@ -297,6 +297,22 @@ for reading rather than for filling in.
 | `openrouter.key` | `""` | one key in front of every other provider — see *Every other model* below |
 | `openrouter.route_sessions` | `false` | run the sessions themselves on it |
 | `openrouter.base_url` | `https://openrouter.ai/api/v1` | only for a gateway of your own |
+
+`max_concurrent` is a number of **places**, not a batch size. A pass keeps that many
+sessions running for as long as the ready column has anything in it: a session that ends
+frees a place, the board is read again on the spot, and what goes in is whichever ticket
+is top of the queue *then* — priority, date, age, exactly as at the start. So a ticket
+made ready at 14:10 starts at 14:10 rather than waiting on the two-hour session that
+began at 14:04, and the pass ends when nothing is ready and nothing is in flight.
+
+Two things follow. `ticket-runner run --limit 3` means three tickets for that pass, not
+three at a time — the limit caps what is taken off the board, `max_concurrent` caps what
+runs at once. And a comment addressed to the runner during a long pass is answered by the
+**next** pass, because answering starts a session of its own and that would put more
+sessions in flight than you allowed. An answer to a *blocked* ticket asks for work rather
+than for a reply, so that one is picked up by the pass itself at the next freed place —
+including one typed in Telegram or Slack, which is written onto its ticket at every
+refill.
 
 ### Every other model
 

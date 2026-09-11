@@ -199,7 +199,10 @@ workspace_root = "~/workspace"
 # cheap: 10 means a ticket starts being worked on within ten seconds.
 interval_seconds = 1800
 
-# Tickets handled side by side in one run. Each costs a full Claude session.
+# Places, not a batch size: this many sessions run side by side, and a place
+# that frees is filled from the board straight away — a ticket made ready while
+# a long session runs does not wait for it. Each place costs a full Claude
+# session. A pass ends when nothing is ready and nothing is in flight.
 max_concurrent = 2
 
 # Past this, the session is killed and the ticket goes back as failed.

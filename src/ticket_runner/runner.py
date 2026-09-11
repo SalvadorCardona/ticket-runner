@@ -11,6 +11,12 @@ sequentially keeps two tickets from racing over the same repository index.
 session, its branch and its pull request. A ticket that fails takes only itself
 down: it lands in "failed" — or in "blocked", when the agent asked a question
 rather than guessed — with the reason in a comment, while the others carry on.
+
+The two phases interleave, because the second one is long. `max_concurrent`
+sessions run at a time, and every session that ends frees a place the board is
+asked to fill straight away: a ticket made ready at 14:10 starts at 14:10, not
+when the session that began at 14:04 is finally done. A pass therefore ends
+when the ready column is empty and nothing is left in flight — see `_work`.
 """
 
 from __future__ import annotations
@@ -21,7 +27,7 @@ import socket
 import threading
 import unicodedata
 from datetime import datetime, timedelta, timezone
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -719,7 +725,15 @@ class Runner:
         return sorted(held, key=lambda pair: pair[1])
 
     def _publish_all(self, publishing: list[tuple[Ticket, Project]]) -> list[dict]:
-        """Every validated publication of this pass, up to `max_concurrent` at once."""
+        """Every validated publication of this pass, up to `max_concurrent` at once.
+
+        A batch, unlike the ticket queue in `_work`, and deliberately so: the
+        whole list is handed to `pool.map`, which starts the next publication as
+        soon as a worker frees, so no place is ever left idle. What it does not
+        do is look at the board again mid-list — and it has no reason to, since
+        a validated ticket is work you accepted before the pass began, and the
+        one you accept during it is published by the pass after.
+        """
         if not publishing:
             return []
         if len(publishing) == 1:
@@ -2206,20 +2220,110 @@ class Runner:
         for warning in self.workspace.warnings:
             self.say(f"  ! {warning}")
 
-        ceiling = limit if limit is not None else self.config.runner.max_concurrent
         replies = [] if reference else self.converse()
-
-        jobs = [job for job in (self.prepare(ticket) for ticket in tickets[:ceiling]) if job]
-        if not jobs:
-            return delivered + replies
-
-        if len(jobs) == 1:
-            results = [self.execute(jobs[0])]
-        else:
-            with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
-                results = list(pool.map(self.execute, jobs))
-
-        for result in results:
-            state.record(result)
+        # `--limit` caps the tickets this pass takes off the board, not how
+        # many run at once: that is `max_concurrent`, and a queue that refills
+        # itself would otherwise run the whole column on a `--limit 1`.
+        # No refilling for a named ticket — the pass is about that one — nor for
+        # a dry run, which claims nothing and would read the same column back.
+        results = self._work(tickets, limit, refill=not reference and not self.dry_run)
         state.prune_logs(self.config.runner.log_retention_days)
         return delivered + replies + results
+
+    def _work(self, ready: list[Ticket], ceiling: int | None, *, refill: bool) -> list[dict]:
+        """Run the ready tickets, `max_concurrent` sessions in flight throughout.
+
+        A queue rather than a batch. A pass used to prepare the first
+        `max_concurrent` tickets, wait for every one of them, and only then end
+        — so a ticket made ready while a two-hour session was running waited for
+        that session, then for the timer, however many places were free. The run
+        lock and the timer see no change: it is the *pass* that became
+        continuous, not the number of runs.
+
+        Here a completion is a place, and a place is filled from the board as it
+        is **now**: `queue()` is asked again, which is what keeps the priority
+        order honest — an urgent ticket written during the pass goes before a
+        normal one that was ready when it started. Tickets already begun are
+        held out by hand, because Notion may still be serving the status this
+        very pass wrote.
+
+        Results are recorded one by one rather than at the end, so
+        `ticket-runner history` shows a ticket that finished in four minutes
+        without waiting on the one that will take two hours.
+        """
+        width = max(1, self.config.runner.max_concurrent)
+        if ceiling is not None:
+            width = max(1, min(width, ceiling))
+        remaining = ceiling  # None: as many tickets as the board offers
+        results: list[dict] = []
+        started: set[str] = set()
+        queued = list(ready)
+        flight: set[Future] = set()
+
+        with ThreadPoolExecutor(max_workers=width) as pool:
+            while True:
+                while queued and len(flight) < width and (remaining is None or remaining > 0):
+                    ticket = queued.pop(0)
+                    if ticket.id in started:
+                        continue
+                    started.add(ticket.id)
+                    if remaining is not None:
+                        remaining -= 1
+                    # Claimed here, in the one thread that does it, so that two
+                    # tickets never race over the same repository index.
+                    job = self.prepare(ticket)
+                    if job:
+                        flight.add(pool.submit(self.execute, job))
+                if not flight:
+                    return results
+                done, flight = wait(flight, return_when=FIRST_COMPLETED)
+                for future in done:
+                    result = future.result()
+                    results.append(result)
+                    state.record(result)
+                if self.waiting_for_credits():
+                    # A session died on the quota while this pass was running.
+                    # Every one it could still start would die on the same
+                    # sentence, so nothing more is begun — what is in flight is
+                    # left to finish, and the first pass after the wait picks
+                    # the board up where it was.
+                    queued = []
+                    continue
+                if refill and (remaining is None or remaining > 0):
+                    queued = self._again(started)
+
+    def _again(self, started: set[str]) -> list[Ticket]:
+        """The tickets a freed place can be filled with, board read afresh.
+
+        Read afresh on purpose: a pass that lasts hours must not run on the
+        board it saw at the top of the hour. The comments are dropped so that a
+        ticket answered mid-pass wakes up (see `woken`), and the answers typed
+        in Telegram or Slack are written onto their tickets first, so a "yes"
+        sent five minutes ago is in that very reading.
+
+        `converse` is *not* called here, and that is deliberate rather than
+        forgotten: answering a comment starts a session of its own, and doing it
+        alongside a full pool would put more sessions in flight than
+        `max_concurrent` allows. A question asked during a long pass is
+        therefore still answered by the next pass — which is one ticket's worth
+        of work away, not the whole board's, now that a place is filled as soon
+        as it frees.
+
+        And a Notion that will not answer leaves the place empty rather than
+        failing the pass: the sessions in flight are hours of work, and a
+        refusal here is the next completion's problem.
+        """
+        self._comments.clear()
+        self.answers()
+        try:
+            tickets, waiting = self.queue()
+        except notion.NotionError as error:
+            self.say(f"  ! the board could not be read again: {_line(error)}")
+            return []
+        fresh = [ticket for ticket in tickets if ticket.id not in started]
+        # Queued or held for later, both are work about to happen: `converse`
+        # leaves them alone, because their comments are going into a prompt.
+        self._claimed |= {ticket.id for ticket in fresh} | {ticket.id for ticket, _ in waiting}
+        if fresh:
+            self.say(f"  ↺ {len(fresh)} ticket(s) ready since — filling the free place(s).")
+        return fresh

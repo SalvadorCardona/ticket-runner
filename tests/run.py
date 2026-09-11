@@ -3033,6 +3033,133 @@ def publishing_hands_the_page_as_it_stands_to_a_session_and_then_closes_it():
     assert "publié sur le compte Instagram" in runner.client.comments_written[0]
 
 
+# -- the queue that refills itself --------------------------------------------
+
+
+def _ready(page_id: str) -> notion.Page:
+    return notion.Page(
+        id=page_id,
+        url="",
+        title=page_id,
+        properties={"Status": {"type": "status", "status": {"name": "Ready"}}},
+    )
+
+
+@case
+def a_place_freed_mid_pass_is_filled_without_waiting_for_the_long_session():
+    """The whole point of `max_concurrent`, and what a batch used to lose.
+
+    A pass used to prepare the tickets that were ready at its first second and
+    wait for every one of them. Measured on a real board: a pass started at
+    14:04 with two tickets, one done in minutes and one still running at 14:23,
+    while four tickets reached the ready column and not one agent was started —
+    three free places and nothing in them.
+
+    Here: two places, a long ticket and a short one, and a third ticket made
+    ready while they run. It must start when the *short* one ends — which is
+    what the long session witnesses on its way out.
+    """
+    third_started = threading.Event()
+    started: list[str] = []
+    witnessed: list[str] = []
+    guard = threading.Lock()
+    flight = peak = 0
+
+    with _state_home():
+        runner = _board_runner([_ready("p-long"), _ready("p-short")], {})
+        runner.config.runner.max_concurrent = 2
+
+        def prepare(ticket):
+            return runner_module.Job(
+                ticket,
+                projects.Project(name="", path=None),
+                branch="",
+                base="",
+                workdir=Path(tempfile.mkdtemp()) / "doc",
+            )
+
+        def execute(job):
+            nonlocal flight, peak
+            name = job.ticket.page.id  # `Ticket.id` drops the dashes
+            with guard:
+                started.append(name)
+                flight += 1
+                peak = max(peak, flight)
+            if name == "p-long":
+                # Held until the third one has begun: what it sees when it
+                # wakes is the whole point of the test.
+                third_started.wait(10)
+                with guard:
+                    witnessed.extend(started)
+            elif name == "p-short":
+                # The board moves on while the long one is still in flight.
+                runner.client._pages.append(_ready("p-third"))
+            else:
+                third_started.set()
+            with guard:
+                flight -= 1
+            return {"ticket": name, "id": name, "status": "done"}
+
+        runner.prepare, runner.execute = prepare, execute
+        results = runner._work(runner.queue()[0], None, refill=True)
+
+    assert "p-third" in witnessed, "the freed place was filled while the long one ran"
+    assert len(witnessed) == 3, witnessed
+    assert peak == 2, "never more than max_concurrent sessions at once"
+    assert len(started) == 3, "and the pass ended only once the column was empty"
+    assert results[0]["id"] == "p-short", "recorded as it ended, not as it was queued"
+    assert sorted(result["id"] for result in results) == ["p-long", "p-short", "p-third"]
+
+
+@case
+def a_limit_caps_the_tickets_a_pass_takes_rather_than_the_column():
+    """`--limit` names a number of tickets, and a queue that refills itself
+    would otherwise run the whole board on a `--limit 1`."""
+    with _state_home():
+        runner = _board_runner([_ready("p-1"), _ready("p-2"), _ready("p-3")], {})
+        runner.config.runner.max_concurrent = 4
+        runner.prepare = lambda ticket: runner_module.Job(
+            ticket,
+            projects.Project(name="", path=None),
+            branch="",
+            base="",
+            workdir=Path(tempfile.mkdtemp()) / "doc",
+        )
+        runner.execute = lambda job: {"id": job.ticket.page.id, "status": "done"}
+        results = runner._work(runner.queue()[0], 2, refill=True)
+
+    assert sorted(result["id"] for result in results) == ["p-1", "p-2"]
+
+
+@case
+def a_pass_stops_filling_places_once_the_credits_run_out():
+    """A queue that refills itself would otherwise walk the whole column into
+    the same wall — one spent session, then every ticket on the board failed."""
+    started: list[str] = []
+
+    with _state_home():
+        runner = _board_runner([_ready("p-1"), _ready("p-2"), _ready("p-3")], {})
+        runner.config.runner.max_concurrent = 1
+        runner.prepare = lambda ticket: runner_module.Job(
+            ticket,
+            projects.Project(name="", path=None),
+            branch="",
+            base="",
+            workdir=Path(tempfile.mkdtemp()) / "doc",
+        )
+
+        def execute(job):
+            started.append(job.ticket.page.id)
+            credits.hold(time.time() + 300)  # what a spent session leaves behind
+            return {"id": job.ticket.page.id, "status": "waiting"}
+
+        runner.execute = execute
+        results = runner._work(runner.queue()[0], None, refill=True)
+
+    assert started == ["p-1"], "the ticket in flight finished, and nothing else began"
+    assert len(results) == 1
+
+
 # -- naming a ticket nobody titled -------------------------------------------
 
 
