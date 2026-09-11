@@ -278,7 +278,7 @@ session_host = ""
 notify = true
 
 # The steps of a running session, written into its own ticket while it happens.
-# The run opens one toggle on the page — “⏳ Live — 12 step(s) · 3 min” — and
+# The run opens one toggle on the page — “⏳ Live — 12 steps · 3 minutes” — and
 # drops a line under it per file read, per command run, per sentence the agent
 # says. The `Progress` column of the board carries the last one, so a glance at
 # the board is enough to see a ticket move.

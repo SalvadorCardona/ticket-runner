@@ -428,19 +428,21 @@ cadence.
 
 Two places, and they answer two different questions.
 
-- **The page** gets one toggle per run — `⏳ Live — 12 step(s) · 3 min` — and under it a
+- **The page** gets one toggle per run — `⏳ Live — 12 steps · 3 minutes` — and under it a
   bullet per file read and per command run, and what the agent *said* as a paragraph of
   its own, whole and in its own markdown, under a rule that keeps the two apart. Open it
   to watch the work; leave it collapsed and its title alone tells you it is moving. When the
-  run ends the toggle settles into `✓ 27 step(s) · 6 min · removed the header`, and stays
-  as the story of what happened.
+  run ends the toggle settles into `✓ 27 steps · 6 minutes · removed the header`, and
+  stays as the story of what happened — or into `⚠️ Trace — 27 steps · 6 minutes`, with the
+  command that resumes the session and the path of its log inside, on a run that did not
+  get there. Its title follows `runner.language` like everything else the runner says.
 - **The `Progress` column** carries the last line, so a glance at the board — from a
   phone, without opening anything — shows which ticket is on `Bash · npm test` and which
   is still reading. It is cleared when the run ends: the comment, the status and the pull
   request speak from then on.
 
 ```
-⏳ Live — 12 step(s) · 3 min
+⏳ Live — 12 steps · 3 minutes
    •  Read    src/app/header.component.html
    ──────────────────────────────────────────────────────────────────────
    I will remove the banner from the template and the stylesheet rules that
@@ -512,8 +514,10 @@ While a session runs, its worktree is also a normal repository —
 `git -C ~/.local/state/ticket-runner/worktrees/<name> diff` shows you what it has changed
 so far.
 
-The runner also posts a comment on the ticket when it finishes, carrying the summary, the
-branch, the pull request and the resume command. That one needs a capability the
+The runner also posts a comment on the ticket when it finishes. Notion pushes that
+comment to your phone as it stands, so it *is* the notification, and it is written as one:
+a verdict saying what is expected of you, the figures that place it, one sentence and the
+link — three lines, and never the machinery. That one needs a capability the
 integration does not get by default: **notion.so/my-integrations → your integration →
 Capabilities → Insert comments**. Without it the run still succeeds, and the log says the
 comment was refused with a 403.
@@ -525,17 +529,15 @@ it talks in. `"fr"` — or `"FR"`, or `"fr-FR"`, or `"français"` — and every 
 question a blocked ticket asks, every line that reaches your phone comes back in French:
 
 ```
-ticket-runner@laptop — c'est fait.
+✅ À relire — PR #12 · 3 commits · 18 minutes · 1,20 $
 Le header du tableau de bord a été retiré, les tests passent.
-
-3 commits sur `ticket/retirer-le-header-1a2b3c4d`, et la pull request attend une
-relecture : https://github.com/you/site/pull/12
-
-Ça a pris 18 minutes et 42 échanges, pour 1,20 $.
-
-Pour reprendre la session : `claude --resume 4f2e…`, ou depuis `claude` dans
-`~/workspace/site`. Son journal est `~/.local/state/ticket-runner/logs/…jsonl`.
+https://github.com/you/site/pull/12
 ```
+
+Where the rest went: the machine that ran it is the board's *Runner* column, the session
+is its *Session* column — a link you click rather than a command you copy — and the
+command that resumes it, with the log path, is folded into the block the run writes its
+steps into, on the days a run went wrong. On the other days nobody has ever needed them.
 
 The same line also travels into every prompt, so the summary at the top of a report, the
 document a ticket with no repository produces and the answers given in the comments are
@@ -680,7 +682,7 @@ instruction:
 
 - only tickets **the runner has already reported on** wake up. A comment on a ticket no
   run of ours ever touched is a conversation of yours, and one handled by another machine
-  is that machine's to pick up — a report is signed `ticket-runner@<host>`;
+  is that machine's to pick up — which machine ran it is the board's *Runner* column;
 - only when **someone else has had the last word** since that report. The report the next
   run posts is also what closes the ticket again;
 - and never a ticket that came back with its pull request. *In review*, *Validated* and
@@ -711,10 +713,9 @@ something that has just written code on one's behalf.
 So a comment can also simply be **answered**. Reply under one of its reports and it
 replies, in the same thread, in the language you wrote in:
 
-> **ticket-runner@laptop — done.** Removed the header from the dashboard.
->
-> 2 commits on `ticket/supprimer-l-entete-9d2cb790`, and the pull request is waiting to
-> be read: <https://github.com/…/pull/12>
+> **✅ To review — PR #12 · 2 commits · 9 minutes · $0.74**
+> Removed the header from the dashboard.
+> <https://github.com/…/pull/12>
 >
 > > **you** — pourquoi une nouvelle branche plutôt que celle d'hier ?
 > >
