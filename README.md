@@ -293,7 +293,7 @@ for reading rather than for filling in.
 | `[notion.properties]` | | if your columns have other names |
 | `[notion.status]` | | if your statuses have other names |
 | `[projects]` | | `"Notion name" = "/path"` for repositories that cannot be guessed |
-| `[web]` | | the console's host, port and token — see *The web console* |
+| `[web]` | | the console's host, port, and how it is opened — a token, or an email and a password. See *The web console* |
 | `openrouter.key` | `""` | one key in front of every other provider — see *Every other model* below |
 | `openrouter.route_sessions` | `false` | run the sessions themselves on it |
 | `openrouter.base_url` | `https://openrouter.ai/api/v1` | only for a gateway of your own |
@@ -1339,11 +1339,12 @@ is why. `TR_NO_WEB=1 sh install.sh` installs the unit and leaves it stopped.
 Claude Code sessions with the same `bypassPermissions` the runner uses — that is what
 makes it useful, and it is the whole of the risk. So:
 
-- it binds **`127.0.0.1`** and `serve` **refuses any other host** unless `web.token` is
-  set in the configuration on purpose: a token drawn automatically is not a decision you
-  took;
+- it binds **`127.0.0.1`** and `serve` **refuses any other host** unless `web.token` — or
+  the sign-in below — is set in the configuration on purpose: a token drawn automatically
+  is not a decision you took;
 - every request carries that token — the `?token=` in the URL is moved into a cookie on
-  the first load, so it stops sitting in your history;
+  the first load, so it stops sitting in your history — or the cookie that signing in
+  leaves, which is the same guard reached by a different door;
 - writes demand a header a cross-origin form cannot set, and the `Host` header must name
   the address the console was reached on. Between them, a hostile page you have open in
   another tab can neither post to the console nor read from it.
@@ -1360,11 +1361,47 @@ but the tunnel is the answer that does not depend on the token never leaking.
 
 | Key | Default | Effect |
 | --- | --- | --- |
-| `web.host` | `127.0.0.1` | what to bind. Anything else needs `web.token` set |
+| `web.host` | `127.0.0.1` | what to bind. Anything else needs `web.token`, or a sign-in, set |
 | `web.port` | `8787` | |
 | `web.token` | `""` | empty: drawn once into `~/.local/state/ticket-runner/web/token` |
+| `web.email` | `""` | with a password: what the console asks for instead of the token |
+| `web.password` | `""` | kept in the file, or in the environment — see below |
 | `web.poll_seconds` | `15` | how often the board is reread — only while a browser is connected |
 | `web.chat_timeout_minutes` | `20` | past this, a chat turn is killed |
+
+### Signing in instead of pasting a token
+
+A token is right for a machine and tiring for a person: it has to be found again on every
+browser you open the console in, and the URL that carries it is a secret you paste into
+your address bar. So the console can also be opened the way everything else is — with an
+email and a password:
+
+```toml
+[web]
+email = "you@example.com"
+password = "the one you would actually remember"
+```
+
+Or, on a server, without writing either of them down anywhere:
+
+```sh
+TICKET_RUNNER_WEB_EMAIL=you@example.com TICKET_RUNNER_WEB_PASSWORD=… ticket-runner serve
+```
+
+The environment wins over the file, which is what makes it worth setting: a systemd
+drop-in or a container carries the credentials, and `config.toml` stays a file you can
+read out loud. Both halves are needed — an email without a password is somebody half-way
+through configuring one, and it is not a way in.
+
+With them set, `http://127.0.0.1:8787` is a bookmark that works: the page asks for the
+two, and the cookie it leaves is derived from them rather than drawn, so a console that
+restarts does not sign you out and **changing the password signs out every browser at
+once**. A wrong answer costs a second, which is nothing to type through and a wall to
+grind against.
+
+The token does not go away. It stays what a script carries in `Authorization: Bearer`,
+what `serve --print-token` prints, and what the dev server's proxy borrows — it just
+stops being what *you* carry.
 
 ---
 

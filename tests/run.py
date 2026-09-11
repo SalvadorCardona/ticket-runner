@@ -3641,7 +3641,91 @@ def the_console_only_listens_beyond_localhost_when_told_to():
     explained = io.StringIO()
     with contextlib.redirect_stdout(explained):
         assert web_server.serve(configuration, announce=False) == 2, "must refuse, not serve"
-    assert "bypassPermissions" in explained.getvalue(), "and say why, not just refuse"
+    said = explained.getvalue()
+    assert "bypassPermissions" in said, "and say why, not just refuse"
+    assert "web.email" in said, "and name both ways of saying it on purpose"
+
+
+def _web_config(**web) -> C.Config:
+    """A configuration that is nothing but its [web] table."""
+    return C.Config(
+        notion=C.Notion(token="ntn_x", tickets_database="a" * 32),
+        runner=C.Runner(),
+        projects={},
+        path=Path("/nowhere/config.toml"),
+        web=C.Web(**web),
+    )
+
+
+@case
+def an_email_and_a_password_are_a_way_into_the_console():
+    """A token is right for a script and tiring for a person.
+
+    The cookie a sign-in leaves is derived from the two rather than drawn, and
+    that is the whole of the session handling: the console's unit restarts with
+    the machine, and a browser that had to sign in again every morning would be
+    the token all over again.
+    """
+    from ticket_runner.web import server as web_server
+
+    assert web_server.sign_in(_web_config(), "tok") is None
+    assert web_server.sign_in(_web_config(email="me@example.com"), "tok") is None, (
+        "half a sign-in is somebody configuring one, not a way in"
+    )
+    assert web_server.sign_in(_web_config(password="hunter2"), "tok") is None
+
+    entry = web_server.sign_in(_web_config(email="Me@Example.com", password="hunter2"), "tok")
+    assert entry is not None and entry.email == "Me@Example.com"
+    again = web_server.sign_in(_web_config(email="me@example.com", password="hunter2"), "tok")
+    assert entry.cookie == again.cookie, "a restart, or a capital, must not sign anybody out"
+    assert "hunter2" not in entry.cookie and entry.cookie != "tok"
+    changed = web_server.sign_in(_web_config(email="me@example.com", password="hunter3"), "tok")
+    assert changed.cookie != entry.cookie, "a new password signs every browser out"
+    elsewhere = web_server.sign_in(_web_config(email="me@example.com", password="hunter2"), "other")
+    assert elsewhere.cookie != entry.cookie, "the cookie belongs to this console's token"
+
+
+@case
+def the_sign_in_page_asks_the_way_the_console_does():
+    """It posts rather than navigates, and carries the header every write does.
+
+    A form that navigated could not set `X-Ticket-Runner`, which is what tells a
+    request from the console apart from one a page you had open made — so the
+    page written here has to agree with the constant the server checks.
+    """
+    from ticket_runner.web import server as web_server
+
+    assert web_server.GUARD_HEADER in web_server.SIGN_IN, "the login would be refused as CSRF"
+    assert "/api/login" in web_server.SIGN_IN
+    assert 'type="password"' in web_server.SIGN_IN
+    for page in (web_server.GATE, web_server.SIGN_IN):
+        assert "src=\"http" not in page and "href=\"http" not in page, "it reaches off the machine"
+
+
+@case
+def the_consoles_sign_in_may_live_in_the_environment_rather_than_the_file():
+    """A server has somewhere better to put a password than a file you read out.
+
+    The environment wins, which is what makes it worth setting — and what comes
+    out of it is stripped, because a password read out of a file carries the
+    newline that file ends with and would lock you out of your own console.
+    """
+    path, config = _saved('\n[web]\nemail = "file@example.com"\npassword = "written down"\n')
+    assert config.web.email == "file@example.com" and config.web.password == "written down"
+
+    previous = {name: os.environ.get(name) for name in (C.WEB_EMAIL_ENV, C.WEB_PASSWORD_ENV)}
+    os.environ[C.WEB_EMAIL_ENV] = "unit@example.com"
+    os.environ[C.WEB_PASSWORD_ENV] = "from the unit\n"
+    try:
+        fresh = C.load(path)
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+    assert fresh.web.email == "unit@example.com"
+    assert fresh.web.password == "from the unit"
 
 
 class _TalkClient:

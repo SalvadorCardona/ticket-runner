@@ -457,6 +457,25 @@ port = 8787
 # Setting it here is also what unlocks a non-loopback host.
 token = ""
 
+# Or open it the way you open everything else: with an address and a password.
+# Both set, the page asks for them instead of for the token, and a bookmark on
+# http://127.0.0.1:8787 is enough — no secret to paste, nothing in the history.
+#
+#   email = "you@example.com"
+#   password = "the one you would actually remember"
+#
+# Neither has to be written here. The same two are read from the environment,
+# which is where they belong on a server — a systemd drop-in, a container:
+#   TICKET_RUNNER_WEB_EMAIL   TICKET_RUNNER_WEB_PASSWORD
+# and the environment wins over this file.
+#
+# Setting the two unlocks a non-loopback host, exactly as a token does — and
+# deserves the same suspicion: read what [web] says above before widening.
+# Changing the password signs out every browser at once. The token does not go
+# away: it stays what a script, and the dev server's proxy, carry.
+email = ""
+password = ""
+
 # How often the console asks Notion what the board looks like — and only while a
 # browser is actually connected. Five seconds is the floor.
 poll_seconds = 15
