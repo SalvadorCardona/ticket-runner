@@ -3,6 +3,7 @@ import { toast } from "sonner"
 
 import { api, why } from "@/lib/api"
 import { patchTicket, publishBoard } from "@/lib/board-store"
+import { t } from "@/lib/i18n"
 import type {
   Board,
   ChatEvent,
@@ -48,9 +49,10 @@ export interface Session {
 let counter = 0
 const nextId = () => ++counter
 
+/* One literal rather than two joined: it is also the key it is looked up by,
+ * and a key nobody can search for is a key nobody translates. */
 const WELCOME =
-  "Ask me anything about your workspace — I can read your repositories, look at the board " +
-  "and create tickets. Type > followed by a command (>status, >list, >run) to use the CLI directly."
+  "Ask me anything about your workspace — I can read your repositories, look at the board and create tickets. Type > followed by a command (>status, >list, >run) to use the CLI directly."
 
 interface ConsoleValue {
   connection: Connection
@@ -136,7 +138,9 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
       setMention(payload.mention)
     } catch (error) {
       if (openId.current !== open.id) return
-      setTalk([{ role: "error", text: `could not read the discussion: ${why(error)}` }])
+      setTalk([
+        { role: "error", text: t("could not read the discussion: {{why}}", { why: why(error) }) },
+      ])
     } finally {
       setTalkLoading(false)
     }
@@ -215,7 +219,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
 
     chat: (event: ChatEvent) => {
       if (event.stage === "reset") {
-        setTranscript([{ id: nextId(), kind: "turn", role: "workspace", text: WELCOME }])
+        setTranscript([{ id: nextId(), kind: "turn", role: "workspace", text: t(WELCOME) }])
         setBusy(false)
         return
       }
@@ -363,7 +367,9 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
       try {
         await api.setStatus(target.id, column)
       } catch (error) {
-        toast.error(`could not move “${target.title}”`, { description: why(error) })
+        toast.error(t("could not move “{{title}}”", { title: target.title }), {
+          description: why(error),
+        })
       }
     },
     []
@@ -372,7 +378,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const createTicket = React.useCallback(
     async (fresh: { title: string; body: string; project: string; ready: boolean }) => {
       await api.createTicket(fresh)
-      toast.success("Ticket created", { description: fresh.title })
+      toast.success(t("Ticket created"), { description: fresh.title })
     },
     []
   )
@@ -401,7 +407,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
                 role: message.role,
                 text: message.text,
               }))
-            : [{ id: nextId(), kind: "turn", role: "workspace", text: WELCOME }]
+            : [{ id: nextId(), kind: "turn", role: "workspace", text: t(WELCOME) }]
         )
         if (payload.busy) setBusy(true)
       })

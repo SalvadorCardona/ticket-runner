@@ -1,6 +1,7 @@
 import { Activity, Gauge, Timer } from "lucide-react"
 
 import { useConsole } from "@/hooks/use-console"
+import { useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
 import { Eyebrow, PageHead, Panel } from "./frame"
@@ -55,14 +56,17 @@ function Tile({
 
 export function LivePane() {
   const { sessions, runner, board } = useConsole()
+  const t = useT()
   const running = board.tickets.filter((item) => item.column === "running").length
 
   return (
     <div className="p-3.5 sm:p-5">
       <PageHead
-        crumbs={["workspace", "live"]}
-        title="See the work happen."
-        blurb="What the running tickets are doing, straight from their session logs — no Notion in the way."
+        crumbs={[t("workspace"), t("live")]}
+        title={t("See the work happen.")}
+        blurb={t(
+          "What the running tickets are doing, straight from their session logs — no Notion in the way."
+        )}
         action={
           <span
             className={cn(
@@ -78,7 +82,7 @@ export function LivePane() {
                 sessions.length ? "bg-tr-green animate-pulse" : "bg-muted-foreground"
               )}
             />
-            {sessions.length ? "writing now" : "quiet"}
+            {sessions.length ? t("writing now") : t("quiet")}
           </span>
         }
       />
@@ -86,23 +90,31 @@ export function LivePane() {
       <div className="mb-5 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))]">
         <Tile
           icon={Activity}
-          label="sessions"
+          label={t("sessions")}
           value={String(sessions.length)}
-          note={running ? `${running} ticket(s) in progress` : "nothing in progress"}
+          note={
+            running
+              ? t("{{count}} ticket(s) in progress", { count: String(running) })
+              : t("nothing in progress")
+          }
           tone={sessions.length ? "text-tr-green" : undefined}
         />
         <Tile
           icon={Timer}
-          label="timer"
-          value={runner?.timer === "enabled" ? every(runner.interval_seconds) : "off"}
-          note={runner?.timer === "enabled" ? "between two runs" : `timer ${runner?.timer ?? "—"}`}
+          label={t("timer")}
+          value={runner?.timer === "enabled" ? every(runner.interval_seconds) : t("off")}
+          note={
+            runner?.timer === "enabled"
+              ? t("between two runs")
+              : t("timer {{state}}", { state: runner?.timer || "—" })
+          }
           tone={runner?.timer === "enabled" ? undefined : "text-tr-amber"}
         />
         <Tile
           icon={Gauge}
-          label="handled"
+          label={t("handled")}
           value={String(runner?.handled ?? 0)}
-          note={`$${runner?.spend ?? 0} spent so far`}
+          note={t("${{amount}} spent so far", { amount: String(runner?.spend ?? 0) })}
         />
       </div>
 
@@ -111,11 +123,11 @@ export function LivePane() {
           {sessions.map((session) => (
             <Panel
               key={session.source}
-              eyebrow="session"
+              eyebrow={t("session")}
               title={<span className="font-mono text-sm">{session.source}</span>}
               action={
                 <span className="text-muted-foreground font-mono text-[0.7rem]">
-                  {session.steps.length} step(s)
+                  {t("{{count}} step(s)", { count: String(session.steps.length) })}
                 </span>
               }
             >
@@ -125,7 +137,7 @@ export function LivePane() {
         </div>
       ) : (
         <p className="text-muted-foreground rounded-xl border border-dashed px-4 py-10 text-center text-sm">
-          Nothing is running. A session that starts writes here as it works.
+          {t("Nothing is running. A session that starts writes here as it works.")}
         </p>
       )}
     </div>

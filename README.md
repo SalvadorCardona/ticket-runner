@@ -1219,6 +1219,17 @@ Telegram and Slack, `> enable` to write a new interval into the systemd timer �
 CLI already knows how to say whether a token works, and a settings page does not need a
 second opinion. A setting that needs more than saving says so, once, and only when it moved.
 
+**In English, or in French.** The console reads the browser before it says anything —
+`Accept-Language` is a setting somebody actually made — and where the browser says nothing
+useful, the time zone answers for it: a machine set to Europe/Paris is a machine whose owner
+reads French. So there is nothing to choose, and the select at the right of the bar, under
+the flag of the two, is how you disagree with the guess. The choice is one line in
+`localStorage`, like the theme, and it holds for every page of the console: the menu, the
+board's own words, a ticket's page, and the settings tab down to the sentence under each
+field. What is *not* translated is what belongs to somebody else — a ticket's title and the
+columns of your board are Notion's, the output of `> status` is the CLI's, and a report a run
+wrote is in the language [`runner.language`](#4-the-rest-of-the-file) asked for.
+
 ### The console's own code
 
 The page is a **React** application — TypeScript, [Vite](https://vite.dev) and
@@ -1279,6 +1290,17 @@ dialect in twenty lines, because every read and write of the resource is its own
 come off the stream, a ticket off `/api/tickets/<id>`, a drop is `POST …/status`). The
 two transcripts — the workspace's and a ticket's — are shadcn's `message` and
 `message-scroller`.
+
+**Adding a sentence.** The console is written in English and the sentence *is* the key:
+`t("Nothing is running.")` through
+[react-mini-i18n](https://github.com/SalvadorCardona/react-mini-i18n), whose dictionary for
+French is `frontend/src/lib/french.ts` — one line per sentence, and a key nobody has
+translated is drawn as it was written rather than as a name nobody meant to read. The
+machinery is `frontend/src/lib/i18n.ts`: which language, how it was guessed, and `useT()`,
+which is `t` plus the redraw. Two of the sentences the console shows are not written in it —
+what a setting is called and the line of help under it come from `web/settings.py` — and they
+are looked up by those very words, so a sentence reworded on the Python side has to be
+reworded here too. A test says so by name.
 
 Two rules the console keeps, and they predate React:
 

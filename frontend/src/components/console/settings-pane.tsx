@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/select"
 import { useConsole } from "@/hooks/use-console"
 import { api, why } from "@/lib/api"
+import { t as translate, useT } from "@/lib/i18n"
 import type { ProjectPath, SettingField, Settings, SettingValue } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -42,6 +43,12 @@ import { Rich } from "./text"
  * Down the left is the list of sections, which is how a page of seventy fields
  * stops being a file: it says what is in here, which parts are open, and how
  * many of your unsaved changes are hiding in a part you have folded away.
+ *
+ * What a field is called and the sentence under it are the server's — one entry
+ * per key in `web/settings.py` — and they go through the dictionary on their
+ * way to the page, like everything else the console says. A description nobody
+ * has translated is drawn as it was written, which is the file's own words and
+ * no worse than what was there before.
  */
 
 /** Radix has no empty-string value, and "the file says nothing" needs one. */
@@ -74,6 +81,7 @@ function Field({
   edited: Map<string, SettingValue>
   remember: (name: string, value: SettingValue, initial: SettingValue) => void
 }) {
+  const t = useT()
   const [forgotten, setForgotten] = React.useState(false)
   const touched = edited.has(field.name)
   const id = `setting-${field.name}`
@@ -98,9 +106,11 @@ function Field({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={UNSET}>default · {field.fallback ? "yes" : "no"}</SelectItem>
-            <SelectItem value="true">yes</SelectItem>
-            <SelectItem value="false">no</SelectItem>
+            <SelectItem value={UNSET}>
+              {t("default · {{value}}", { value: field.fallback ? t("yes") : t("no") })}
+            </SelectItem>
+            <SelectItem value="true">{t("yes")}</SelectItem>
+            <SelectItem value="false">{t("no")}</SelectItem>
           </SelectContent>
         </Select>
       )
@@ -120,7 +130,12 @@ function Field({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={UNSET}>default · {String(field.fallback)}</SelectItem>
+            <SelectItem value={UNSET}>
+              {/* A default nobody wrote is still a line in the list, and an
+                  empty `{{value}}` would be read as a key rather than as
+                  nothing at all. */}
+              {t("default · {{value}}", { value: String(field.fallback) || "—" })}
+            </SelectItem>
             {field.choices.map((choice) => (
               <SelectItem key={choice} value={choice}>
                 {choice}
@@ -183,7 +198,9 @@ function Field({
             spellCheck={false}
             value={typeof shown === "string" ? shown : ""}
             placeholder={
-              forgotten ? "not set" : field.preview ? `set · ends ${field.preview}` : "not set"
+              forgotten || !field.preview
+                ? t("not set")
+                : t("set · ends {{preview}}", { preview: field.preview })
             }
             onChange={(event) => {
               setForgotten(false)
@@ -202,7 +219,7 @@ function Field({
                 remember(field.name, null, "")
               }}
             >
-              forget
+              {t("forget")}
             </Button>
           ) : null}
         </div>
@@ -220,8 +237,8 @@ function Field({
         value={held === null || held === undefined ? "" : String(held)}
         placeholder={
           field.fallback === "" || field.fallback === null
-            ? "nothing"
-            : `default · ${String(field.fallback)}`
+            ? t("nothing")
+            : t("default · {{value}}", { value: String(field.fallback) })
         }
         onChange={(event) => {
           const text = event.target.value.trim()
@@ -237,25 +254,25 @@ function Field({
     <div className={cn("min-w-0", field.kind === "events" && "col-span-full")}>
       <div className="mb-1.5 flex items-center gap-1.5">
         <Label htmlFor={id} className="text-sm font-medium">
-          {field.label}
+          {t(field.label)}
         </Label>
         {/* Where you changed something, said where you changed it: on a page
             this long, a diff you have to hunt for is a diff you distrust. */}
         {touched ? (
           <span className="bg-primary/15 text-primary rounded px-1.5 py-0.5 font-mono text-[0.6rem] font-semibold tracking-wide uppercase">
-            edited
+            {t("edited")}
           </span>
         ) : null}
       </div>
       {control()}
       {field.help ? (
         <p className="text-muted-foreground mt-1.5 text-xs leading-relaxed">
-          <Rich text={field.help} />
+          <Rich text={t(field.help)} />
         </p>
       ) : null}
       {field.after ? (
         <p className="text-muted-foreground mt-1 text-xs">
-          takes effect once <Rich text={field.after} />
+          {t("takes effect once")} <Rich text={t(field.after)} />
         </p>
       ) : null}
     </div>
@@ -269,6 +286,7 @@ function ProjectRows({
   rows: ProjectPath[]
   setRows: (rows: ProjectPath[]) => void
 }) {
+  const t = useT()
   const change = (index: number, patch: Partial<ProjectPath>) =>
     setRows(rows.map((row, at) => (at === index ? { ...row, ...patch } : row)))
 
@@ -276,8 +294,8 @@ function ProjectRows({
     <div className="space-y-2">
       {rows.length ? (
         <div className="text-muted-foreground hidden gap-2 px-1 sm:flex">
-          <Eyebrow className="flex-1">the project, as Notion names it</Eyebrow>
-          <Eyebrow className="flex-1">where it is on this machine</Eyebrow>
+          <Eyebrow className="flex-1">{t("the project, as Notion names it")}</Eyebrow>
+          <Eyebrow className="flex-1">{t("where it is on this machine")}</Eyebrow>
           <span className="w-8" />
         </div>
       ) : null}
@@ -286,7 +304,7 @@ function ProjectRows({
           <Input
             className="min-w-40 flex-1"
             value={row.name}
-            placeholder="the project, as Notion names it"
+            placeholder={t("the project, as Notion names it")}
             onChange={(event) => change(index, { name: event.target.value })}
           />
           <Input
@@ -299,7 +317,7 @@ function ProjectRows({
             variant="ghost"
             size="icon-sm"
             className="text-muted-foreground hover:text-destructive shrink-0"
-            aria-label={`remove ${row.name || "this project"}`}
+            aria-label={t("remove {{project}}", { project: row.name || t("this project") })}
             onClick={() => setRows(rows.filter((_, at) => at !== index))}
           >
             <X />
@@ -308,7 +326,7 @@ function ProjectRows({
       ))}
       {!rows.length ? (
         <p className="text-muted-foreground rounded-lg border border-dashed px-3 py-6 text-center text-sm">
-          No mapping here — the project pages carry it.
+          {t("No mapping here — the project pages carry it.")}
         </p>
       ) : null}
       <Button
@@ -316,7 +334,7 @@ function ProjectRows({
         size="sm"
         onClick={() => setRows([...rows, { name: "", path: "" }])}
       >
-        add a project
+        {t("add a project")}
       </Button>
     </div>
   )
@@ -324,6 +342,7 @@ function ProjectRows({
 
 export function SettingsPane({ onCheck }: { onCheck: (verb: string) => void }) {
   const { say, reloadState } = useConsole()
+  const t = useT()
   const [drawn, setDrawn] = React.useState<Settings | null>(null)
   const [edited, setEdited] = React.useState<Map<string, SettingValue>>(new Map())
   const [rows, setRows] = React.useState<ProjectPath[] | null>(null)
@@ -338,7 +357,7 @@ export function SettingsPane({ onCheck }: { onCheck: (verb: string) => void }) {
       setEdited(new Map())
       setRows(null)
     } catch (error) {
-      say("error", `could not read the configuration: ${why(error)}`)
+      say("error", translate("could not read the configuration: {{why}}", { why: why(error) }))
     }
   }, [say])
 
@@ -410,26 +429,33 @@ export function SettingsPane({ onCheck }: { onCheck: (verb: string) => void }) {
       // A 200 is the server saying it wrote; what it wrote is a courtesy, and a
       // save is not going to be reported as a failure over a missing list.
       const written = result.saved ?? []
-      const after = result.after ?? []
+      // The server says what has to happen in the same words the fields do, so
+      // the sentence is translated the same way they are.
+      const after = (result.after ?? []).map((one) => translate(one))
+      const how =
+        written.length === 1
+          ? translate("one setting")
+          : translate("{{count}} settings", { count: String(written.length) })
       setNote({
         bad: false,
         text: written.length
-          ? `Saved ${written.length === 1 ? "one setting" : `${written.length} settings`}: ` +
-            `${written.join(", ")}.` +
-            (after.length ? ` Takes effect once ${after.join("; ")}.` : "")
-          : "Nothing to save — the file already said that.",
+          ? translate("Saved {{how}}: {{names}}.", { how, names: written.join(", ") }) +
+            (after.length
+              ? " " + translate("Takes effect once {{after}}.", { after: after.join("; ") })
+              : "")
+          : translate("Nothing to save — the file already said that."),
       })
     } catch (error) {
       // On the settings tab, not in the transcript: on a phone the console is a
       // tab away, and a save you have to go looking for is a save you doubt.
-      setNote({ bad: true, text: `Not saved: ${why(error)}` })
+      setNote({ bad: true, text: translate("Not saved: {{why}}", { why: why(error) }) })
     } finally {
       setSaving(false)
     }
   }
 
   if (!drawn)
-    return <p className="text-muted-foreground p-3.5 text-sm">Reading the configuration…</p>
+    return <p className="text-muted-foreground p-3.5 text-sm">{t("Reading the configuration…")}</p>
 
   /** How many of your unsaved changes are in this section. */
   const changed = (key: string) => {
@@ -443,9 +469,11 @@ export function SettingsPane({ onCheck }: { onCheck: (verb: string) => void }) {
     <div className="flex h-full min-h-0 flex-col">
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-3.5 sm:p-5">
         <PageHead
-          crumbs={["workspace", "settings"]}
-          title="Configure the runner."
-          blurb="A field left blank says nothing, and the runner’s own default answers — shown greyed beside it. Your tokens stay on the machine: they are never sent to this page."
+          crumbs={[t("workspace"), t("settings")]}
+          title={t("Configure the runner.")}
+          blurb={t(
+            "A field left blank says nothing, and the runner’s own default answers — shown greyed beside it. Your tokens stay on the machine: they are never sent to this page."
+          )}
           action={<span className="text-muted-foreground font-mono text-xs">{drawn.path}</span>}
         />
 
@@ -468,7 +496,7 @@ export function SettingsPane({ onCheck }: { onCheck: (verb: string) => void }) {
               is no column to spare for it — the sections themselves are the
               same list, only taller. */}
           <nav className="sticky top-0 hidden flex-col gap-0.5 lg:flex">
-            <Eyebrow className="mb-2 px-2">sections</Eyebrow>
+            <Eyebrow className="mb-2 px-2">{t("sections")}</Eyebrow>
             {drawn.sections.map((section) => {
               const count = changed(section.key)
               return (
@@ -483,7 +511,7 @@ export function SettingsPane({ onCheck }: { onCheck: (verb: string) => void }) {
                       : "text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  <span className="min-w-0 flex-1 truncate">{section.title}</span>
+                  <span className="min-w-0 flex-1 truncate">{t(section.title)}</span>
                   {count ? (
                     <span className="bg-primary/15 text-primary rounded px-1.5 font-mono text-[0.65rem] font-semibold tabular-nums">
                       {count}
@@ -517,7 +545,7 @@ export function SettingsPane({ onCheck }: { onCheck: (verb: string) => void }) {
                           <Eyebrow className="mb-1 block">{section.key}</Eyebrow>
                         ) : null}
                         <span className="block text-base leading-tight font-semibold tracking-[-0.01em]">
-                          {section.title}
+                          {t(section.title)}
                         </span>
                       </span>
                     </CollapsibleTrigger>
@@ -531,7 +559,7 @@ export function SettingsPane({ onCheck }: { onCheck: (verb: string) => void }) {
                         variant="outline"
                         size="xs"
                         className="mt-0.5 shrink-0 font-mono"
-                        title={check[1]}
+                        title={t(check[1])}
                         onClick={() => onCheck(check[0])}
                       >
                         &gt; {check[0]}
@@ -540,7 +568,7 @@ export function SettingsPane({ onCheck }: { onCheck: (verb: string) => void }) {
                   </div>
                   <CollapsibleContent className="space-y-4 px-4 pb-4">
                     <p className="text-muted-foreground max-w-prose text-xs leading-relaxed">
-                      <Rich text={section.blurb} />
+                      <Rich text={t(section.blurb)} />
                     </p>
                     {section.pairs === "projects" ? (
                       <ProjectRows
@@ -570,14 +598,16 @@ export function SettingsPane({ onCheck }: { onCheck: (verb: string) => void }) {
       {dirty ? (
         <div className="bg-card flex items-center gap-2 border-t px-3.5 py-2.5 sm:px-5">
           <span className="text-muted-foreground text-xs">
-            {dirty === 1 ? "one change, unsaved" : `${dirty} changes, unsaved`}
+            {dirty === 1
+              ? t("one change, unsaved")
+              : t("{{count}} changes, unsaved", { count: String(dirty) })}
           </span>
           <span className="flex-1" />
           <Button variant="outline" onClick={load} disabled={saving}>
-            revert
+            {t("revert")}
           </Button>
           <Button onClick={save} disabled={saving}>
-            {saving ? "saving…" : "Save"}
+            {saving ? t("saving…") : t("Save")}
           </Button>
         </div>
       ) : null}

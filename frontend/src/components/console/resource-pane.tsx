@@ -5,6 +5,7 @@ import {
   type ViewResourceContextParams,
 } from "react-resource-view"
 
+import { useLanguage, useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { TICKETS, tickets } from "@/resources/tickets"
 
@@ -18,6 +19,8 @@ import { TICKETS, tickets } from "@/resources/tickets"
 const ACTIONS = new Set<string>(Object.values(ActionList))
 
 export function ResourcePane({ params }: { params: ViewResourceContextParams }) {
+  const t = useT()
+  const language = useLanguage()
   const action =
     params.resourceAction && ACTIONS.has(params.resourceAction)
       ? params.resourceAction
@@ -28,15 +31,18 @@ export function ResourcePane({ params }: { params: ViewResourceContextParams }) 
     resourceAction: action,
   })
   if (!resolved.resource) {
-    return <p className="text-muted-foreground p-3.5 text-sm">No such page.</p>
+    return <p className="text-muted-foreground p-3.5 text-sm">{t("No such page.")}</p>
   }
   return (
     // A ticket's page is a pane of its own — its own bar, its own scroller,
     // its own margins — so the room around a view is given to the views that
     // want it and withheld from the one that does not.
     <div className={cn("h-full", action !== ActionList.read && "p-3.5 sm:p-5")}>
+      {/* The language is part of the key: what the package draws — the view's
+          name, a column header, the words on a form — it reads from the
+          dictionary as it builds, not as it renders. */}
       <ViewResourceContextProvider
-        key={`${action}:${String(resolved.id ?? "")}`}
+        key={`${language}:${action}:${String(resolved.id ?? "")}`}
         {...resolved}
       />
     </div>

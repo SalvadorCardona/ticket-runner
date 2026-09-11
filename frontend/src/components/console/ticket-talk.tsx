@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { useConsole } from "@/hooks/use-console"
 import { why } from "@/lib/api"
+import { currentLanguage, t as translate, useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
 import { Eyebrow } from "./frame"
@@ -11,13 +12,13 @@ import { Steps } from "./steps"
 import { Line, Transcript } from "./transcript"
 import { Turn } from "./turn"
 
-/** An instant as this browser would write it, or nothing at all. */
+/** An instant as the language the console is in would write it, or nothing at all. */
 function moment(at?: string): string {
   if (!at) return ""
   const date = new Date(at)
   return Number.isNaN(date.getTime())
     ? ""
-    : date.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })
+    : date.toLocaleString(currentLanguage(), { dateStyle: "short", timeStyle: "short" })
 }
 
 /* One ticket's terminal.
@@ -38,6 +39,7 @@ export function TicketTalk({
   bounded?: boolean
 }) {
   const { ticket, talk, mention, ticketSteps, tell, rereadTalk, talkLoading } = useConsole()
+  const t = useT()
   const [text, setText] = React.useState("")
   const [sending, setSending] = React.useState(false)
   const [problem, setProblem] = React.useState("")
@@ -50,7 +52,7 @@ export function TicketTalk({
       await tell(text)
       setText("")
     } catch (error) {
-      setProblem(`not written: ${why(error)}`)
+      setProblem(translate("not written: {{why}}", { why: why(error) }))
     } finally {
       setSending(false)
     }
@@ -59,20 +61,20 @@ export function TicketTalk({
   return (
     <div className={cn("flex min-h-0 flex-col", bounded ? "h-[70svh]" : "h-full", className)}>
       <div className="border-b px-3.5 py-2.5">
-        <Eyebrow>the ticket</Eyebrow>
+        <Eyebrow>{t("the ticket")}</Eyebrow>
         <h3 className="mt-1 text-base leading-tight font-semibold tracking-[-0.01em]">
           {ticket ? (
             <>
-              Talking to <span className="text-primary font-mono">#{ticket.short}</span>
+              {t("Talking to")} <span className="text-primary font-mono">#{ticket.short}</span>
             </>
           ) : (
-            "No ticket open"
+            t("No ticket open")
           )}
         </h3>
         <p className="text-muted-foreground mt-1 text-xs">
           {ticket
-            ? "Everything said on the ticket, oldest first. What you type is a comment on it."
-            : "Open a ticket from the board."}
+            ? t("Everything said on the ticket, oldest first. What you type is a comment on it.")
+            : t("Open a ticket from the board.")}
         </p>
       </div>
 
@@ -83,7 +85,11 @@ export function TicketTalk({
               role={message.role}
               text={message.text}
               who={
-                message.role === "you" ? "you" : message.role === "error" ? "problem" : "the runner"
+                message.role === "you"
+                  ? t("you")
+                  : message.role === "error"
+                    ? t("problem")
+                    : t("the runner")
               }
               when={moment(message.at)}
             />
@@ -91,12 +97,14 @@ export function TicketTalk({
         ))}
         {!talk.length && ticket && !talkLoading ? (
           <Line id="talk-none">
-            <p className="text-muted-foreground text-sm">Nothing has been said on this ticket yet.</p>
+            <p className="text-muted-foreground text-sm">
+              {t("Nothing has been said on this ticket yet.")}
+            </p>
           </Line>
         ) : null}
         {talkLoading && !talk.length ? (
           <Line id="talk-loading">
-            <p className="text-muted-foreground text-sm">reading the discussion…</p>
+            <p className="text-muted-foreground text-sm">{t("reading the discussion…")}</p>
           </Line>
         ) : null}
         {/* The steps of a running session are not part of the discussion and
@@ -111,9 +119,9 @@ export function TicketTalk({
       <div className="flex flex-col gap-2 border-t p-3">
         {ticket ? (
           <p className="text-muted-foreground text-xs">
-            an answer to its question runs it again ·{" "}
-            <code className="bg-muted rounded px-1 py-0.5 font-mono">{mention}</code> asks it for
-            words instead
+            {t("an answer to its question runs it again")} ·{" "}
+            <code className="bg-muted rounded px-1 py-0.5 font-mono">{mention}</code>{" "}
+            {t("asks it for words instead")}
           </p>
         ) : null}
         {problem ? <p className="text-destructive text-xs">{problem}</p> : null}
@@ -131,19 +139,19 @@ export function TicketTalk({
           spellCheck={false}
           autoComplete="off"
           className="max-h-50 min-h-9"
-          placeholder="Answer the ticket, or ask it something"
+          placeholder={t("Answer the ticket, or ask it something")}
         />
         <div className="flex items-center gap-2">
           <Button onClick={send} disabled={!ticket || sending || !text.trim()}>
-            {sending ? "sending…" : "Send"}
+            {sending ? t("sending…") : t("Send")}
           </Button>
           <Button
             variant="outline"
             onClick={rereadTalk}
             disabled={!ticket || talkLoading}
-            title="read the discussion again"
+            title={t("read the discussion again")}
           >
-            {talkLoading ? "reading…" : "reread"}
+            {talkLoading ? t("reading…") : t("reread")}
           </Button>
         </div>
       </div>

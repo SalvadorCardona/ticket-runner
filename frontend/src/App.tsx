@@ -14,6 +14,7 @@ import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { ConsoleProvider, useConsole } from "@/hooks/use-console"
 import { useBoard } from "@/lib/board-store"
+import { useT } from "@/lib/i18n"
 import { go, pageHref, useRoute, type Page } from "@/lib/router"
 import { cn } from "@/lib/utils"
 
@@ -40,6 +41,7 @@ const ASIDE = "ticket-runner-aside"
 function Console() {
   const route = useRoute()
   const board = useBoard()
+  const t = useT()
   const { ticket, openTicket, closeTicket, runCommand } = useConsole()
 
   // The address says which ticket is open; the board says what it is, so the
@@ -86,10 +88,10 @@ function Console() {
   // — the short thing that fits a breadcrumb — rather than by its sentence.
   const crumbs =
     route.kind === "page"
-      ? ["workspace", CRUMB[route.page]]
+      ? [t("workspace"), t(CRUMB[route.page])]
       : ticketId
-        ? ["workspace", "board", `#${ticket?.short ?? String(ticketId).slice(-8)}`]
-        : ["workspace", "board"]
+        ? [t("workspace"), t("board"), `#${ticket?.short ?? String(ticketId).slice(-8)}`]
+        : [t("workspace"), t("board")]
 
   // Each pane keeps its place while another is shown, so a ticket half-read
   // and a setting half-typed survive a trip through the menu.
@@ -119,7 +121,7 @@ function Console() {
           <Header
             crumbs={crumbs}
             aside={aside}
-            asideLabel={ticketId ? "discussion" : "console"}
+            asideLabel={ticketId ? t("the discussion") : t("the console")}
             onToggleAside={toggleAside}
           />
 

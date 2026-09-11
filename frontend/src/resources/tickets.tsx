@@ -32,6 +32,7 @@ import {
 import { TicketPage } from "@/components/console/ticket-page"
 import { api } from "@/lib/api"
 import { addTicket, boardOnce, currentBoard, patchTicket, subscribeBoard, useBoard } from "@/lib/board-store"
+import { t } from "@/lib/i18n"
 import { SCOPE } from "@/lib/resource-view"
 import type { ColumnKey, Ticket, TicketDetail } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -76,31 +77,50 @@ const item = (ticket: Ticket | TicketDetail): TicketItem => ({
 
 /** The column's name, as the board spells it. */
 export function columnName(key: string): string {
-  return currentBoard()?.columns.find((column) => column.key === key)?.name || LABEL[key] || key
+  return (
+    currentBoard()?.columns.find((column) => column.key === key)?.name || t(LABEL[key] ?? "") || key
+  )
 }
 
 /* -- the forms ------------------------------------------------------------ */
-/** What a new ticket asks for. Drawn by react-data-form, submitted to `createItem`. */
+/* What a new ticket asks for. Drawn by react-data-form, submitted to
+ * `createItem`.
+ *
+ * A label and the button are translated by the package as it draws them; the
+ * sentence under a field and the greyed example in it are not — they are used
+ * as they are given. Those two are read from the dictionary here, as the field
+ * is drawn, which is what the getters are for: the declaration is built once,
+ * and the language can change after it.
+ */
 const createForm: FormInterface = {
   // The dialog already says "New ticket" over it.
   label: { submit: "Create" },
   inputs: {
     title: {
       label: "Title",
-      description: "What has to be done, in one line. It is what the board shows.",
+      get description() {
+        return t("What has to be done, in one line. It is what the board shows.")
+      },
       required: true,
       placeholder: "Retirer le bandeau du dashboard",
     },
     body: {
       label: "The brief",
-      description:
-        "The whole of what the runner is told. Written on the ticket's page, and read from there.",
-      placeholder: "What must change, where, and how you will know it is done.",
+      get description() {
+        return t(
+          "The whole of what the runner is told. Written on the ticket's page, and read from there."
+        )
+      },
+      get placeholder() {
+        return t("What must change, where, and how you will know it is done.")
+      },
       controller: TextAreaInputController,
     },
     project: {
       label: "Project",
-      description: "A project with a repository gets a pull request; none at all gets a document.",
+      get description() {
+        return t("A project with a repository gets a pull request; none at all gets a document.")
+      },
       controller: SelectInputController,
       getValueOptions: async () => {
         const { projects } = await api.projects().catch(() => ({ projects: [] }))
@@ -115,14 +135,17 @@ const createForm: FormInterface = {
     },
     ready: {
       label: "Ready to run",
-      description: "Off, and the ticket is a draft the runner leaves alone.",
+      get description() {
+        return t("Off, and the ticket is a draft the runner leaves alone.")
+      },
       controller: BooleanInputController,
       defaultValue: true,
     },
   },
 }
 
-/** The columns of the table layout. Read only: the board is Notion's. */
+/* The columns of the table layout. Read only: the board is Notion's. The
+ * headings go through the dictionary on their way to the page. */
 const rowForm: FormInterface = {
   inputs: {
     title: { label: "Ticket", readonly: true },
@@ -235,7 +258,7 @@ function BoardColumns({ rows = [] }: ListComponentPropsInterface) {
           identifierKey="column"
           valueIdentifier={{
             value: column.key,
-            label: heading(column.key, column.name || LABEL[column.key]),
+            label: heading(column.key, column.name || t(LABEL[column.key] ?? "")),
           }}
           isDragging={dragging}
           handleDragging={setDragging}
@@ -321,14 +344,28 @@ export const tickets = createViewResource<TicketItem, TicketItem, TicketWrite>(T
   view: {
     name: "Board",
     form: rowForm,
+    /* The two tabs over the list. A variant's name is drawn as it is given and
+     * its id is slugged from it where none is said, so the id is said here and
+     * the name read from the dictionary as the tab is drawn: the address stays
+     * `board` in every language. */
     viewVariants: [
-      columnViewOptionFactory({
-        name: "board",
-        listComponent: BoardColumns,
-        rowComponent: TicketCard,
-        identifierKey: "column",
-      }),
-      tableViewOptionFactory({ name: "table", behavior: { rowActions: [ActionList.read] } }),
+      {
+        ...columnViewOptionFactory({
+          id: "board",
+          listComponent: BoardColumns,
+          rowComponent: TicketCard,
+          identifierKey: "column",
+        }),
+        get name() {
+          return t("board")
+        },
+      },
+      {
+        ...tableViewOptionFactory({ id: "table", behavior: { rowActions: [ActionList.read] } }),
+        get name() {
+          return t("table")
+        },
+      },
     ],
     components: { top: BoardTop },
   },

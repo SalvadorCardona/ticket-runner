@@ -5200,6 +5200,43 @@ def the_console_asks_for_nothing_it_did_not_ship():
 
 
 @case
+def the_console_says_the_configuration_in_french_too():
+    """Every sentence this module writes about a setting has a French entry.
+
+    The settings page is the one place where what the console shows comes from
+    Python: a label, the line of help under it, the section it sits in. They
+    reach the browser in the words written here and are looked up in
+    `frontend/src/lib/french.ts` by those very words — so a sentence reworded
+    on this side and not on that one would quietly go back to English on a
+    console somebody set to French.
+    """
+    dictionary = (FRONTEND / "src/lib/french.ts").read_text(encoding="utf-8")
+    for section in web_settings.SECTIONS:
+        said = [section.title, section.blurb]
+        for field in section.fields:
+            said += [field.label, field.help, field.after]
+        for sentence in said:
+            assert not sentence or sentence in dictionary, (
+                f"nothing translates “{sentence}” — add it to french.ts"
+            )
+
+
+@case
+def the_console_offers_the_two_languages_it_has():
+    """The header carries the switch, and the browser is asked before you are.
+
+    Read from the React source rather than from the bundle: the bundle is
+    minified, and what is being checked here is a decision, not a symbol.
+    """
+    i18n = (FRONTEND / "src/lib/i18n.ts").read_text(encoding="utf-8")
+    assert '"en"' in i18n and '"fr"' in i18n, "the console no longer offers both"
+    assert "navigator.languages" in i18n, "the browser's own languages are not read"
+    assert "resolvedOptions().timeZone" in i18n, "the time zone no longer answers for it"
+    header = (FRONTEND / "src/components/console/header.tsx").read_text(encoding="utf-8")
+    assert "LanguagePicker" in header, "the bar has nowhere to change the language"
+
+
+@case
 def the_version_is_rewritten_where_the_product_reads_it():
     """`__version__` is what --version and the console header print.
 
