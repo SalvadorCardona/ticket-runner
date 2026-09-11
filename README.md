@@ -265,7 +265,7 @@ for reading rather than for filling in.
 
 | Key | Default | Effect |
 | --- | --- | --- |
-| `runner.workspace_root` | `~/workspace` | where to look for repositories |
+| `runner.workspace_root` | `~/workspace` | where to look for repositories — and where one you have not cloned yet is cloned |
 | `runner.interval_seconds` | `1800` | seconds between two passes — `ticket-runner enable` applies a change |
 | `runner.max_concurrent` | `2` | tickets handled side by side — a place that frees is refilled at once |
 | `runner.timeout_minutes` | `30` | past this, the session is killed and the ticket fails |
@@ -578,6 +578,16 @@ bounded, though: a repository is only ever taken on the strength of its `origin`
 never because its folder is named like the project, and never when two clones answer to
 the same remote. A project none of its declarations lead to is put back, with every way
 that was tried and why it failed in a comment.
+
+**A repository you have never cloned is cloned, not refused.** Creating a project with
+its GitHub link and nothing else is enough: the first ticket that needs it runs
+`gh repo clone` — or `git clone` on a machine with no `gh` — into `workspace_root`, under
+the repository's own name, and works in it as if it had always been there. Its comment
+says where it came from. That only ever happens for the run that is about to work on a
+ticket: `ticket-runner projects`, `ticket-runner next` and a dry run download nothing,
+and nothing is cloned twice — every way of matching a clone you already have is tried
+first, and a remote two clones already answer to is still a question rather than a third
+copy.
 
 A project that names none — and **a ticket with no project at all** — is **document work**.
 It gets a disposable scratch directory instead of a worktree, and the agent's answer is

@@ -140,7 +140,8 @@ last_run = "Last"
 last_ticket = "Last ticket"
 
 # On the projects database, two columns are read by name, either capitalisation:
-#   Repository  the GitHub URL or owner/name — matched against your clones
+#   Repository  the GitHub URL or owner/name — matched against your clones, and
+#               cloned into workspace_root when you have none of it yet
 #   Path        an explicit path, when the repository is not under workspace_root
 # A project with neither is a project without code: its tickets become documents.
 
@@ -190,7 +191,9 @@ blocked = "Blocked"
 #   failed = "Needs you"
 
 [runner]
-# Where to look for repositories. Projects are matched by their origin remote.
+# Where to look for repositories. Projects are matched by their origin remote —
+# and one that matches nothing here is cloned into this folder, so a project
+# created from its GitHub link alone needs no `git clone` from you.
 workspace_root = "~/workspace"
 
 # Seconds between two passes. Changing this takes effect on the next
@@ -489,6 +492,7 @@ chat_timeout_minutes = 20
 
 # Projects whose repository cannot be guessed: exact Notion name = local path.
 # Without an entry here, the runner matches the project's Repository property
-# against the remotes found under workspace_root.
+# against the remotes found under workspace_root — and clones it there when it
+# matches none of them.
 [projects]
 # "Trader Ia" = "~/workspace/labo/trader-ia"
