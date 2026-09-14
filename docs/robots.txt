@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://cardona.digital/ticket-runner/sitemap.xml
