@@ -14,6 +14,31 @@
 <meta property="og:url" content="https://cardona.digital/ticket-runner/">
 <meta property="og:image" content="https://cardona.digital/ticket-runner/architecture.png">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="ticket-runner — your Notion tickets, played by Claude Code">
+<meta name="twitter:image" content="https://cardona.digital/ticket-runner/architecture.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "ticket-runner",
+  "description": "Write a ticket in Notion, move it to Ready, and a few minutes later a pull request is waiting — or the page itself is written. One Claude Code session per ticket, on your machine, in the background.",
+  "url": "https://cardona.digital/ticket-runner/",
+  "codeRepository": "https://github.com/SalvadorCardona/ticket-runner",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Linux",
+  "license": "https://github.com/SalvadorCardona/ticket-runner/blob/main/LICENSE",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "author": {
+    "@type": "Person",
+    "name": "Salvador Cardona",
+    "url": "https://cardona.digital"
+  }
+}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -505,7 +530,10 @@
     </div>
 
     <figure class="fig">
-      <img src="architecture.png" alt="The pieces of ticket-runner and how they fit together" width="2048" height="1320" loading="lazy">
+      <picture>
+        <source srcset="architecture.webp" type="image/webp">
+        <img src="architecture.png" alt="The pieces of ticket-runner and how they fit together" width="2048" height="1320" loading="lazy">
+      </picture>
       <figcaption>Everything inside the dotted frame runs on your machine. It reaches three things outside it: the Notion board, GitHub, and the channel you chose to be asked on.</figcaption>
     </figure>
   </div>

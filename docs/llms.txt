@@ -1,0 +1,16 @@
+# ticket-runner
+
+> Your Notion tickets, played by Claude Code. Move a ticket to Ready, and a few minutes later a pull request is waiting — or the page itself is written.
+
+A systemd timer reads a Notion board, claims every ticket in *Ready*, and starts one
+[Claude Code](https://claude.com/claude-code) session per ticket on a disposable git worktree of its own. A project
+that names a repository gets a pull request; a project that names none gets its answer
+written back into the ticket as Notion blocks. Nothing reaches the outside world until a
+human moves the ticket to *Validated*. Python 3.11+, standard library only — no dependency
+to install, no build step.
+
+## Docs
+
+- [Documentation](https://cardona.digital/ticket-runner/): installation, the board, the web console, configuration, safety, troubleshooting
+- [Repository](https://github.com/SalvadorCardona/ticket-runner): source code, README
+- [Changelog](https://github.com/SalvadorCardona/ticket-runner/blob/main/CHANGELOG.md): what changed, release by release
