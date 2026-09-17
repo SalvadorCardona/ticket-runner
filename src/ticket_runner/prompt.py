@@ -314,6 +314,19 @@ def follow_up(message: str, language: str = "") -> str:
     return FOLLOW_UP.format(message=message, language=_language(language))
 
 
+def message_of(prompt_text: str) -> str:
+    """The message a built conversation prompt is about to answer.
+
+    A resumed session has the whole frame already; sending it again would cost
+    the ticket's body and the project's brief on every turn and teach it
+    nothing. What it has not seen is the last section.
+    """
+    marker = "# The message to answer\n\n"
+    if marker in prompt_text:
+        return prompt_text.split(marker, 1)[1].split("\n# What is expected", 1)[0].strip()
+    return prompt_text.strip()
+
+
 def _language(instruction: str) -> str:
     """The language a session is asked to write in, as a paragraph of its own.
 

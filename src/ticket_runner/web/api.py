@@ -23,7 +23,9 @@ from .. import conversation, credits, notion, session, state, systemd, voice
 from .. import schedules as schedules_module
 from .. import update as update_module
 from ..config import Config
-from ..runner import Runner, scheduled_for, short_id
+from ..runner import Runner
+from ..schedules import scheduled_for
+from ..ticket import short_id
 from . import console, live
 from . import settings as settings_module
 

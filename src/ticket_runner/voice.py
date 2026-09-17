@@ -40,6 +40,8 @@ language six months later.
 
 from __future__ import annotations
 
+import re
+
 # The two the runner speaks. English is less a default than the language the
 # tool was written in: everything it says was written there first.
 LANGUAGES = ("en", "fr")
@@ -101,6 +103,11 @@ def plain(text: str) -> str:
     if first.lstrip().startswith(SIGNATURE):
         first = first.split("—", 1)[-1].strip()
     return first + newline + rest
+
+
+def line(error: object) -> str:
+    """The first line of an error, which is the part meant for a human."""
+    return str(error).splitlines()[0] if str(error).strip() else ""
 
 
 def understood(raw: str) -> str:
@@ -505,6 +512,16 @@ class Voice:
         own column, and a notification has room for what changes a decision.
         """
         return (self.minutes(seconds), self.money(cost) if cost else "")
+
+    def pull_request(self, url: str) -> str:
+        """“PR #19”, which is how anybody refers to one out loud.
+
+        The URL says the same thing in seventy characters, and a verdict line has
+        about eighty in all — so the number goes on that line and the URL goes on
+        its own, where it is a link to click rather than a fact to read.
+        """
+        found = re.search(r"/pull/(\d+)", str(url or ""))
+        return self.say("pull-request", number=found.group(1)) if found else ""
 
     def trace(self, resume: str, log: object, home: object = "") -> str:
         """Where to go when the report is not enough: the session, then the log."""

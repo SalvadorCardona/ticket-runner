@@ -55,9 +55,19 @@ que sur un tag.
 
 ## Arborescence utile
 
-- `src/ticket_runner/` — le cœur : `runner.py` (boucle principale), `config.py`,
-  `notion.py`, `git.py`, `session.py`, `channels/` (Telegram, Slack),
-  `web/` (serveur de la console et API).
+- `src/ticket_runner/` — le cœur. Un run reste **un seul objet**, découpé par
+  responsabilité : `base.py` porte son état (client Notion, caches, voix) et
+  son docstring explique la forme choisie ; `runner.py` ne garde que la passe
+  (`tick`, `_work`) ; chaque chapitre a son module — `board.py` (lire le
+  tableau, le remettre d'aplomb), `preparation.py` (localiser le projet,
+  réclamer le ticket), `execution.py` (la session, et ce qu'un ticket en
+  rapporte), `delivery.py` (la colonne validée : fusionner, publier),
+  `recurrence.py` (les tickets qui reviennent seuls), `replies.py` (répondre
+  aux commentaires), `reports.py` (ce qui s'écrit sur un ticket et ce qui
+  atteint ton téléphone), `ticket.py` (`Ticket` et `Job`, sans dépendance).
+- `src/ticket_runner/` — autour du run : `config.py`, `notion.py`, `git.py`,
+  `session.py`, `voice.py` (les mots et la langue), `channels/` (Telegram,
+  Slack), `web/` (serveur de la console et API).
 - `src/ticket_runner/web/static/` — **généré**, pas du code source à modifier
   à la main (voir Pièges connus).
 - `frontend/` — sous-projet React/TypeScript/Vite de la console web.
@@ -107,8 +117,13 @@ que sur un tag.
   `diagrams/ticket-runner.architecture.json`, qui est le fichier à modifier.
 - **Ne jamais toucher au dépôt principal de l'utilisateur.** Chaque ticket
   travaille sur un `git worktree` jetable et sa propre branche ; le code du
-  runner qui manipule des worktrees (`git.py`, `runner.py`) doit préserver
+  runner qui manipule des worktrees (`git.py`, `execution.py`) doit préserver
   cette isolation.
+- **Une méthode nouvelle va dans son chapitre, pas dans `runner.py`.** Les
+  classes de `board.py`, `execution.py` et consorts s'assemblent sur `Base` et
+  partagent le `self` d'un run : ajouter une méthode, c'est l'écrire dans le
+  module dont elle relève. `runner.py` n'a que la passe, et tient sous
+  300 lignes pour cette raison.
 - **Deux phrases identiques, deux endroits.** Certaines chaînes affichées par
   la console (nom d'un réglage, texte d'aide) viennent de `web/settings.py`
   côté Python et sont recherchées par leur texte exact côté React — renommer
