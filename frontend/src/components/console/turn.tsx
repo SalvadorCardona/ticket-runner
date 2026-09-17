@@ -1,9 +1,10 @@
+import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Message, MessageContent, MessageHeader } from "@/components/ui/message"
 import { useT } from "@/lib/i18n"
 import type { Role } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-import { Flow } from "./text"
+import { Markdown } from "./markdown"
 
 const WHO: Record<Role, string> = {
   you: "you",
@@ -12,12 +13,25 @@ const WHO: Record<Role, string> = {
   command: "command",
 }
 
+/** The surface a turn is said on, in shadcn's own palette. */
+const SURFACE: Record<Role, "tinted" | "outline" | "destructive"> = {
+  you: "tinted",
+  workspace: "outline",
+  error: "destructive",
+  command: "outline",
+}
+
 /* One thing that was said, by you or by the other side.
  *
- * shadcn's `Message` lays it out — yours against the right edge, theirs
- * against the left — and the bubble inside is the console's own, because the
- * palette is: a problem reads red, the workspace reads as a card, and what you
- * said carries the accent so a transcript can be skimmed for your own turns.
+ * shadcn's `Message` lays it out — yours against the right edge, theirs against
+ * the left — and `Bubble` draws the surface it is said on, so the palette is the
+ * one the components already carry: a problem reads red, the workspace reads as
+ * a card, and what you said is tinted with the accent so a transcript can be
+ * skimmed for your own turns.
+ *
+ * What is inside is markdown, because both sides write markdown: a session
+ * answers in headings and lists and fenced code, and a bubble that showed the
+ * source of that would be asking a reader to parse it themselves.
  *
  * Who said it and when are one line, set in the mono face: they are a stamp on
  * the message, not a sentence in it.
@@ -39,7 +53,7 @@ export function Turn({
   const mine = role === "you"
   return (
     <Message align={mine ? "end" : "start"} className={className}>
-      <MessageContent className="max-w-[92%]">
+      <MessageContent>
         <MessageHeader
           className={cn(
             "font-mono text-[0.65rem] font-semibold tracking-[0.14em] uppercase",
@@ -49,16 +63,15 @@ export function Turn({
           {who ?? t(WHO[role] ?? role)}
           {when ? <span className="font-normal normal-case">{` · ${when}`}</span> : null}
         </MessageHeader>
-        <div
-          className={cn(
-            "rounded-lg border px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap",
-            mine && "bg-primary/10 border-primary/25",
-            role === "workspace" && "bg-card",
-            role === "error" && "bg-destructive/10 border-destructive/30"
-          )}
+        <Bubble
+          variant={SURFACE[role] ?? "outline"}
+          align={mine ? "end" : "start"}
+          className="max-w-[92%]"
         >
-          <Flow text={text} />
-        </div>
+          <BubbleContent>
+            <Markdown text={text} />
+          </BubbleContent>
+        </Bubble>
       </MessageContent>
     </Message>
   )

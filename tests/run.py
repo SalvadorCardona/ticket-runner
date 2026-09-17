@@ -5657,6 +5657,22 @@ def the_console_header_shows_the_version_it_is_given():
 
 
 @case
+def a_turn_is_drawn_as_markdown_on_a_shadcn_bubble():
+    """Both sides write markdown, so neither side is shown its source.
+
+    A session answers in headings, lists and fenced code, on a ticket and in
+    the workspace's transcript alike; a bubble that printed that as it arrived
+    would be asking a reader to parse the asterisks themselves. The surface it
+    is said on is shadcn's `Bubble` rather than a `div` this repository styles,
+    so the palette stays the components'.
+    """
+    turn = (FRONTEND / "src/components/console/turn.tsx").read_text(encoding="utf-8")
+    assert "<Markdown" in turn, "the transcript shows the markdown instead of drawing it"
+    assert "BubbleContent" in turn, "the bubble is hand-rolled again"
+    assert (FRONTEND / "src/components/ui/bubble.tsx").is_file(), "shadcn's bubble is gone"
+
+
+@case
 def the_console_scrolls_in_its_own_colours():
     """The bars the console scrolls on are drawn by the console, not the browser.
 

@@ -101,6 +101,18 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Changed
 
+- **What a session says in the console is read, not parsed.** Both transcripts —
+  the workspace's and a ticket's — showed a message exactly as it was written,
+  so an answer arrived as its own source: `##` in front of the headings,
+  asterisks around the emphasised words, a fence around the command it wanted
+  you to run. They now draw the markdown they are handed: headings, lists
+  nested as deep as they were written, the boxes a checklist ticks, quotes,
+  fenced code, and a word behind a link. The surface it is said on is
+  shadcn/ui's own chat bubble rather than one this console styled by hand, so a
+  problem still reads red, the workspace still reads as a card, and your own
+  turns still carry the accent. A ticket's page, which was already drawn this
+  way, gains the same additions.
+
 - **A report is a notification now, and it is three lines long.** The comment
   the runner writes under a ticket *is* what Notion pushes to your phone, cut
   after two or three lines — and it used to spend its first forty-four
