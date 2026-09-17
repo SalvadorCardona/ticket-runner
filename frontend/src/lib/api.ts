@@ -2,6 +2,7 @@ import type {
   Board,
   ChatState,
   Message,
+  Pair,
   Project,
   RunnerState,
   Saved,
@@ -78,7 +79,8 @@ export const api = {
   resetChat: () => request<unknown>("/api/chat/reset", {}),
   saveSettings: (payload: {
     settings: Record<string, SettingValue>
-    projects?: { name: string; path: string }[]
+    projects?: Pair[]
+    github?: Pair[]
   }) => request<Saved>("/api/settings", payload),
   refresh: () => request<unknown>("/api/refresh", {}),
 }

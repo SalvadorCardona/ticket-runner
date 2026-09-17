@@ -69,8 +69,9 @@ class Section:
     title: str
     blurb: str
     fields: tuple[Field, ...] = ()
-    # The one section that is not a list of known keys: `[projects]` is a
-    # mapping you add rows to, and the console draws it as such.
+    # The sections that are not lists of known keys: `[projects]` and
+    # `[github]` are mappings you add rows to, and the console draws them as
+    # such. The name of the table is the name of the list `describe` sends.
     pairs: str = ""
 
 
@@ -241,6 +242,10 @@ SECTIONS: tuple[Section, ...] = (
             Field("runner", "push", "bool", "Push the branch"),
             Field("runner", "open_pull_request", "bool", "Open a pull request",
                   "Needs `gh` to be installed and logged in."),
+            Field("runner", "rebase", "bool", "Replay the branch before the pull request",
+                  "A session takes an hour and the base branch does not wait for it. The "
+                  "branch is put back on top of it before the push, and a validated merge "
+                  "refused for being behind is retried once after the same gesture."),
             Field("runner", "merge_method", "choice", "Merge a validated ticket by",
                   "What `gh pr merge` is told when you move a ticket to Validated.",
                   choices=MERGE_METHODS),
@@ -397,6 +402,20 @@ SECTIONS: tuple[Section, ...] = (
             "page keeps the mapping on the board, where every machine can read it."
         ),
         pairs="projects",
+    ),
+    Section(
+        key="github",
+        title="Your GitHub accounts",
+        blurb=(
+            "One machine often answers to two GitHubs — your own and a client's — and "
+            "`gh` only ever has one of them active, so a pull request on the other is "
+            "refused for reasons that read like a bug. On the left the owner, as GitHub "
+            "spells it in a repository's URL; on the right the account, as `gh auth "
+            "status` lists it. Log each one in once with `gh auth login` and they stay "
+            "signed in side by side. An owner nobody names here is worked under whichever "
+            "account `gh` is active as, which is what one GitHub has always done."
+        ),
+        pairs="github",
     ),
     Section(
         key="status",
@@ -579,8 +598,12 @@ def describe(config: Config) -> dict:
         "problem": problem,
         "sections": sections,
         "projects": [
-            {"name": name, "path": path}
+            {"name": name, "value": str(path)}
             for name, path in sorted(_table(raw, "projects").items())
+        ],
+        "github": [
+            {"name": owner, "value": str(account)}
+            for owner, account in sorted(_table(raw, "github").items())
         ],
     }
 
@@ -628,29 +651,36 @@ def _value(entry: Field, offered: object) -> object:
     return text or None
 
 
-def _projects(raw: dict, offered: object) -> list[tuple[str, str, object]]:
-    """The `[projects]` table as the browser now has it, against what is there."""
+def _pairs(raw: dict, table: str, offered: object) -> list[tuple[str, str, object]]:
+    """One `name = value` table as the browser now has it, against what is there.
+
+    The two the file holds: `[projects]`, a Notion name and a path, and
+    `[github]`, an owner and the account it is worked under. Both are mappings
+    you add rows to rather than lists of known keys, so both are saved by what
+    the browser sends *in full* — a row that is no longer there is a line that
+    goes away.
+    """
     if not isinstance(offered, list):
-        raise ValueError("projects: a list of {name, path}")
+        raise ValueError(f"{table}: a list of {{name, value}}")
     wanted: dict[str, str] = {}
     for row in offered:
         if not isinstance(row, dict):
-            raise ValueError("projects: a list of {name, path}")
+            raise ValueError(f"{table}: a list of {{name, value}}")
         name = str(row.get("name", "")).strip()
-        path = str(row.get("path", "")).strip()
-        if not name and not path:
+        value = str(row.get("value", "")).strip()
+        if not name and not value:
             continue  # a row somebody started and left
         if not name:
-            raise ValueError(f"a project mapped to {path} has no name")
-        if not path:
-            raise ValueError(f"“{name}” maps to nothing — give it a path, or remove the row")
+            raise ValueError(f"a {table} row set to {value} has no name")
+        if not value:
+            raise ValueError(f"“{name}” maps to nothing — fill it in, or remove the row")
         if name in wanted:
             raise ValueError(f"“{name}” is named twice")
-        wanted[name] = path
+        wanted[name] = value
     changes: list[tuple[str, str, object]] = [
-        ("projects", name, None) for name in _table(raw, "projects") if name not in wanted
+        (table, name, None) for name in _table(raw, table) if name not in wanted
     ]
-    changes += [("projects", name, path) for name, path in wanted.items()]
+    changes += [(table, name, value) for name, value in wanted.items()]
     return changes
 
 
@@ -674,8 +704,10 @@ def save(config: Config, payload: dict) -> dict:
         changes.append((entry.table, entry.key, _value(entry, value)))
         touched.append(entry)
 
-    if "projects" in payload:
-        changes += _projects(config_module.read_raw(config.path), payload["projects"])
+    raw = config_module.read_raw(config.path)
+    for table in ("projects", "github"):
+        if table in payload:
+            changes += _pairs(raw, table, payload[table])
 
     if not changes:
         return {"saved": [], "after": []}

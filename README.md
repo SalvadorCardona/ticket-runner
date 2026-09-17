@@ -302,6 +302,7 @@ for reading rather than for filling in.
 | `runner.base_branch` | `""` | empty = each repository's default branch |
 | `runner.push` | `true` | `false`: commits stay local |
 | `runner.open_pull_request` | `true` | `false`: the branch is pushed, without a PR |
+| `runner.rebase` | `true` | replay the branch onto its base before the pull request, and once more when a validated merge is refused for being behind |
 | `runner.merge_method` | `"squash"` | how a **validated** pull request is merged — `squash`, `merge`, `rebase` |
 | `runner.keep_worktree_on_failure` | `true` | keep enough around to understand a failure |
 | `runner.notify` | `true` | one desktop notification per finished ticket, clicked to open its Notion page — `[notify]` carries it to your phone |
@@ -318,6 +319,7 @@ for reading rather than for filling in.
 | `[notion.properties]` | | if your columns have other names |
 | `[notion.status]` | | if your statuses have other names |
 | `[projects]` | | `"Notion name" = "/path"` for repositories that cannot be guessed |
+| `[github]` | | `"owner" = "gh account"`, when this machine answers to more than one GitHub — see *Several GitHub accounts* below |
 | `[web]` | | the console's host, port, and how it is opened — a token, or an email and a password. See *The web console* |
 | `openrouter.key` | `""` | one key in front of every other provider — see *Every other model* below |
 | `openrouter.route_sessions` | `false` | run the sessions themselves on it |
@@ -388,6 +390,41 @@ of.
 Both switches are fields of the console's **Settings** tab, under *Every other model*; the
 key is a secret like any other, so it goes out to the page as “set, ending in …abcd” and
 comes back only when you type a new one.
+
+### Several GitHub accounts
+
+One machine often answers to two GitHubs — your own and a client's — and `gh` only ever
+has **one of them active**. Everything the runner asks it about a repository the other
+account owns is then refused for reasons that read like a bug: a pull request that cannot
+be created, a repository GitHub says does not exist, a merge nobody is allowed to make.
+
+Log each account in once — they stay signed in side by side — and say which owner is
+whose:
+
+```sh
+gh auth login      # then again, for the second account
+gh auth status     # lists what it knows
+```
+
+```toml
+[github]
+"animalink" = "dev-animalink"        # the owner in the URL = the gh account
+"salvadorcardona" = "salvadevme"
+```
+
+On the left the **owner**, as GitHub spells it in a repository's URL; on the right the
+**account**, as `gh auth status` lists it. Everything that leaves the machine about a
+repository — the clone, the push, the pull request, the merge, the question “has this been
+merged yet?” — then goes out under the account its owner names here, whichever account
+`gh` happens to be active as. The token never touches the configuration file: it is asked
+of `gh` when it is needed, and lives in your keyring as before.
+
+An owner this table does not name is worked under whichever account `gh` is signed in as,
+which is what one GitHub has always done — so a machine with one account leaves this out
+entirely. A line naming an account `gh` is *not* signed in as is not a ticket's problem
+either: the command runs as the active account, and `ticket-runner doctor` is what says
+the line is dead. The table is also a section of the console's **Settings** tab, *Your
+GitHub accounts*.
 
 ---
 
@@ -905,6 +942,31 @@ nothing is watched.
 Nothing is ever merged behind your back. The decision is yours; only its consequence is
 not — and if you would rather not make the merge itself either, the next column takes it
 off your hands.
+
+### Ten tickets on one repository
+
+The base branch does not wait for a session. Ten tickets aimed at one repository means ten
+sessions that started on the `main` of an hour ago, and the first merge makes the nine
+others conflict — which is how a board that was working becomes a morning of rebasing by
+hand. `runner.rebase`, on by default, is the answer, and it is the same gesture in two
+places.
+
+**Before the pull request.** The branch is replayed onto its base between the commits and
+the push, so what opens is a pull request on top of what the repository holds *now*. A
+rebase that hits a conflict changes nothing: the branch goes back exactly as the session
+left it, the pull request opens all the same, and the conflict is written on the ticket —
+where somebody will read it — rather than discovered on GitHub a day later.
+
+**When a validated merge is refused.** A pull request opened this morning is behind by
+noon. GitHub refuses the merge, and that refusal is about the *branch*, not about the
+work: the branch is replayed onto its base, pushed with a lease on the very commit that
+was replayed, and the merge is asked once more. The ticket says so and goes to *Done*. A
+refusal a rebase does not answer — a check still red, a review still missing, a branch
+whose policy forbids the merge — is left as it came: the ticket goes to *Blocked* with
+GitHub's own wording, and nothing is pushed a second time.
+
+Set `rebase = false` and both go away: the branch is pushed as it was written, and a merge
+refused is a question, as before.
 
 ### Validated, and what it sets off
 

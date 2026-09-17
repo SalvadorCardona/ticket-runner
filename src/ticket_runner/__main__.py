@@ -606,6 +606,16 @@ def command_doctor(args: argparse.Namespace) -> int:
         (ok if authed.returncode == 0 else warn)(
             "gh authenticated" if authed.returncode == 0 else "gh not authenticated: gh auth login"
         )
+        # The one place where a `[github]` line that names an account nobody
+        # logged in is worth saying out loud: everywhere else it falls back on
+        # the active account, which is deliberate — a ticket does not fail over
+        # a line of configuration — and silent by the same token.
+        for owner, account in sorted(configuration.github.items()):
+            if git.account_token(account):
+                ok(f"{owner}/* — worked as {account}")
+            else:
+                warn(f"{owner}/* — gh is not signed in as {account}: gh auth login")
+                problems += 1
 
     title("Version")
     print(f"  {DIM}ticket-runner {__version__} — releases: CHANGELOG.md{RESET}")
@@ -678,7 +688,7 @@ def command_doctor(args: argparse.Namespace) -> int:
     title("Repositories")
     root = configuration.runner.workspace_root
     if root.is_dir():
-        resolver = Resolver(root, configuration.projects)
+        resolver = Resolver(root, configuration.projects, configuration.github)
         index = resolver._index()  # noqa: SLF001 — diagnostics
         count = sum(len(repos) for repos in index.values())
         ok(f"{root} — {count} repository(ies) found")
@@ -1036,7 +1046,9 @@ def _pair(configuration: config_module.Config, settings: config_module.Notify) -
     return 0
 
 
-def _branch_kept(repo: Path, worktree: Path, branch: str, base: str) -> str:
+def _branch_kept(
+    repo: Path, worktree: Path, branch: str, base: str, accounts: dict[str, str] | None = None
+) -> str:
     """Why this branch must outlive its worktree — empty when nothing is lost.
 
     A branch is named after the ticket's ID, so it is the same one on every
@@ -1046,7 +1058,7 @@ def _branch_kept(repo: Path, worktree: Path, branch: str, base: str) -> str:
     established that nobody else holds what is on it.
     """
     if git.has_ref(repo, f"origin/{branch}"):
-        url = git.pull_request_on(repo, branch)
+        url = git.pull_request_on(repo, branch, accounts)
         if url:
             return f"it is pushed and its pull request is open — {url}"
     if not git.has_ref(repo, f"origin/{base}") and not git.has_ref(repo, base):
@@ -1079,9 +1091,10 @@ def command_clean(args: argparse.Namespace) -> int:
         print(f"\n{DIM}ticket-runner clean --force to remove them{RESET}")
         return 0
     try:
-        configured_base = config_module.load().runner.base_branch
+        configuration = config_module.load()
+        configured_base, accounts = configuration.runner.base_branch, configuration.github
     except config_module.ConfigError:
-        configured_base = ""
+        configured_base, accounts = "", {}
     for directory in directories:
         origin = git.git(["rev-parse", "--path-format=absolute", "--git-common-dir"], directory).out
         repo = Path(origin).parent if origin else None
@@ -1094,7 +1107,9 @@ def command_clean(args: argparse.Namespace) -> int:
         # there is nothing to remove afterwards.
         branch = "" if branch == "HEAD" else branch
         kept = (
-            _branch_kept(repo, directory, branch, configured_base or git.default_branch(repo))
+            _branch_kept(
+                repo, directory, branch, configured_base or git.default_branch(repo), accounts
+            )
             if branch
             else ""
         )

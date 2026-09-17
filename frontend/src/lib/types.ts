@@ -197,9 +197,11 @@ export interface SettingSection {
   fields: SettingField[]
 }
 
-export interface ProjectPath {
+/** One row of a `name = value` table: a project and its path, an owner and its
+ * GitHub account. Which table it belongs to is the section's `pairs`. */
+export interface Pair {
   name: string
-  path: string
+  value: string
 }
 
 export interface Settings {
@@ -207,7 +209,8 @@ export interface Settings {
   usable: boolean
   problem: string
   sections: SettingSection[]
-  projects: ProjectPath[]
+  projects: Pair[]
+  github: Pair[]
 }
 
 export interface Saved {

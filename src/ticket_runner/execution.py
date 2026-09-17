@@ -7,9 +7,11 @@ begin with.
 
 **A ticket on a repository** works in a worktree of its own, cut from the
 project's default branch, and comes back as commits, a push and a pull request.
-Nothing is written into the project itself, ever: the worktree is the isolation,
-and it is removed on the way out — kept only when a run failed and the
-configuration asked for it.
+The branch is replayed onto its base between the commits and the push, because
+a session takes an hour and a base branch does not wait for it: what opens is a
+pull request on top of what the repository holds now. Nothing is written into
+the project itself, ever: the worktree is the isolation, and it is removed on
+the way out — kept only when a run failed and the configuration asked for it.
 
 **A ticket with no repository** works in an empty scratch directory and comes
 back as `ANSWER.md`, appended to the Notion page it came from. Same session,
@@ -258,8 +260,41 @@ class Execution(Base):
             )
 
         pull_request = ""
+        replayed = False
+        if self.config.runner.push and self.config.runner.rebase:
+            # The base has moved under this session: the ticket started on the
+            # `main` of an hour ago, and one of the other nine tickets aimed at
+            # this repository has been merged since. Replaying the branch now is
+            # what makes the pull request open on top of what the repository
+            # actually holds rather than as a conflict somebody has to come and
+            # sort out by hand.
+            #
+            # A rebase that cannot be done is not a reason to keep the work
+            # here: `git.rebase` puts the branch back as it was, the pull
+            # request opens all the same, and the conflict is said on the ticket
+            # — which is the one place a person will look at it.
+            if self.config.runner.fetch:
+                git.fetch(project.path)
+            start = (
+                f"origin/{job.base}"
+                if git.has_ref(project.path, f"origin/{job.base}")
+                else job.base
+            )
+            was = git.head(job.workdir)
+            if failure := git.rebase(job.workdir, start):
+                self.say(f"    ! not replayed onto {start}: {failure}")
+                job.notes.append(said.say("rebase-refused", base=start, error=failure))
+            elif git.head(job.workdir) != was:
+                replayed = True
+                self.say(f"    · replayed onto {start}")
+                job.notes.append(said.say("rebased-onto", base=start))
         if self.config.runner.push:
-            pushed = git.push(job.workdir, job.branch, force=worktree.reused)
+            pushed = git.push(
+                job.workdir,
+                job.branch,
+                force=worktree.reused or replayed,
+                accounts=self.config.github,
+            )
             if not pushed.ok:
                 return self._fail(
                     ticket,
@@ -277,7 +312,9 @@ class Execution(Base):
                     f"Opened by ticket-runner ({commits} commit{'s' if commits > 1 else ''})."
                 )
                 try:
-                    pull_request = git.open_pull_request(job.workdir, ticket.title, body, job.base)
+                    pull_request = git.open_pull_request(
+                        job.workdir, ticket.title, body, job.base, accounts=self.config.github
+                    )
                 except git.GitError as error:
                     self.say(f"    ! pull request not opened: {error}")
                     job.notes.append(said.say("no-pull-request-opened", error=error))

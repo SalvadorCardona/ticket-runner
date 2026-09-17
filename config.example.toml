@@ -283,6 +283,17 @@ fetch = true              # git fetch before creating the branch
 push = true               # push the branch once commits are in
 open_pull_request = true  # gh pr create — opening one merges nothing
 
+# Replay the branch on top of its base before the pull request is opened, and
+# again when a validated merge is refused for being behind. A session takes an
+# hour and the base branch does not wait for it: ten tickets on one repository
+# means nine pull requests opened on a `main` that has moved. With this, each
+# one opens on what the repository holds now — and a merge GitHub refuses for
+# that reason is retried once, after the branch has been replayed and pushed.
+# A rebase that hits a conflict changes nothing: the branch goes back as it
+# was, the pull request opens all the same, and the conflict is said on the
+# ticket rather than discovered on GitHub.
+rebase = true
+
 # How a *validated* pull request is merged — see `validated` above. Nothing
 # is ever merged without that gesture; this only says what the gesture does.
 #   squash | merge | rebase
@@ -528,3 +539,23 @@ chat_timeout_minutes = 20
 # matches none of them.
 [projects]
 # "Trader Ia" = "~/workspace/labo/trader-ia"
+
+# Which of your GitHub accounts each owner is worked under. One machine often
+# answers to two GitHubs — your own and a client's — and `gh` only ever has one
+# of them active, so a pull request on the other is refused for reasons that
+# read like a bug. On the left the owner, as GitHub spells it in the URL of the
+# repository; on the right the `gh` account, as `gh auth status` lists it.
+#
+# Log each one in first, once, and they stay logged in side by side:
+#
+#     gh auth login          (then again, for the second account)
+#     gh auth status         lists what it knows
+#
+# Everything that leaves the machine about a repository — the clone, the push,
+# the pull request, the merge — then goes out under the account its owner names
+# here. An owner this table does not name is worked under whichever account `gh`
+# is signed in as, which is what one account has always done: a machine with one
+# GitHub leaves this empty.
+[github]
+# "animalink" = "dev-animalink"
+# "salvadorcardona" = "salvadevme"

@@ -21,7 +21,7 @@ import {
 import { useConsole } from "@/hooks/use-console"
 import { api, why } from "@/lib/api"
 import { t as translate, useT } from "@/lib/i18n"
-import type { ProjectPath, SettingField, Settings, SettingValue } from "@/lib/types"
+import type { Pair, SettingField, Settings, SettingValue } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 import { Eyebrow, PageHead } from "./frame"
@@ -279,23 +279,45 @@ function Field({
   )
 }
 
-function ProjectRows({
+/** The two sections that are a `name = value` table rather than known keys:
+ *  `[projects]` and `[github]`. Same rows, same gesture, their own words. */
+const PAIRS: Record<string, { left: string; right: string; hint: string; empty: string; add: string }> =
+  {
+    projects: {
+      left: "the project, as Notion names it",
+      right: "where it is on this machine",
+      hint: "~/workspace/that-repository",
+      empty: "No mapping here — the project pages carry it.",
+      add: "add a project",
+    },
+    github: {
+      left: "the owner, as GitHub spells it",
+      right: "the gh account it is worked under",
+      hint: "gh auth status lists them",
+      empty: "One GitHub here — everything goes out as whoever gh is signed in as.",
+      add: "add an account",
+    },
+  }
+
+function PairRows({
+  words,
   rows,
   setRows,
 }: {
-  rows: ProjectPath[]
-  setRows: (rows: ProjectPath[]) => void
+  words: (typeof PAIRS)[string]
+  rows: Pair[]
+  setRows: (rows: Pair[]) => void
 }) {
   const t = useT()
-  const change = (index: number, patch: Partial<ProjectPath>) =>
+  const change = (index: number, patch: Partial<Pair>) =>
     setRows(rows.map((row, at) => (at === index ? { ...row, ...patch } : row)))
 
   return (
     <div className="space-y-2">
       {rows.length ? (
         <div className="text-muted-foreground hidden gap-2 px-1 sm:flex">
-          <Eyebrow className="flex-1">{t("the project, as Notion names it")}</Eyebrow>
-          <Eyebrow className="flex-1">{t("where it is on this machine")}</Eyebrow>
+          <Eyebrow className="flex-1">{t(words.left)}</Eyebrow>
+          <Eyebrow className="flex-1">{t(words.right)}</Eyebrow>
           <span className="w-8" />
         </div>
       ) : null}
@@ -304,20 +326,20 @@ function ProjectRows({
           <Input
             className="min-w-40 flex-1"
             value={row.name}
-            placeholder={t("the project, as Notion names it")}
+            placeholder={t(words.left)}
             onChange={(event) => change(index, { name: event.target.value })}
           />
           <Input
             className="min-w-40 flex-1 font-mono text-xs"
-            value={row.path}
-            placeholder="~/workspace/that-repository"
-            onChange={(event) => change(index, { path: event.target.value })}
+            value={row.value}
+            placeholder={t(words.hint)}
+            onChange={(event) => change(index, { value: event.target.value })}
           />
           <Button
             variant="ghost"
             size="icon-sm"
             className="text-muted-foreground hover:text-destructive shrink-0"
-            aria-label={t("remove {{project}}", { project: row.name || t("this project") })}
+            aria-label={t("remove {{project}}", { project: row.name || t("this row") })}
             onClick={() => setRows(rows.filter((_, at) => at !== index))}
           >
             <X />
@@ -326,15 +348,11 @@ function ProjectRows({
       ))}
       {!rows.length ? (
         <p className="text-muted-foreground rounded-lg border border-dashed px-3 py-6 text-center text-sm">
-          {t("No mapping here — the project pages carry it.")}
+          {t(words.empty)}
         </p>
       ) : null}
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => setRows([...rows, { name: "", path: "" }])}
-      >
-        {t("add a project")}
+      <Button variant="outline" size="sm" onClick={() => setRows([...rows, { name: "", value: "" }])}>
+        {t(words.add)}
       </Button>
     </div>
   )
@@ -345,7 +363,9 @@ export function SettingsPane({ onCheck }: { onCheck: (verb: string) => void }) {
   const t = useT()
   const [drawn, setDrawn] = React.useState<Settings | null>(null)
   const [edited, setEdited] = React.useState<Map<string, SettingValue>>(new Map())
-  const [rows, setRows] = React.useState<ProjectPath[] | null>(null)
+  // Only the tables you have actually touched: a `[projects]` you never
+  // opened is a table the save must not send, and therefore not rewrite.
+  const [pairs, setPairs] = React.useState<Record<string, Pair[]>>({})
   const [note, setNote] = React.useState<{ text: string; bad: boolean } | null>(null)
   const [saving, setSaving] = React.useState(false)
   const [open, setOpen] = React.useState<Set<string>>(OPEN)
@@ -355,7 +375,7 @@ export function SettingsPane({ onCheck }: { onCheck: (verb: string) => void }) {
       const payload = await api.settings()
       setDrawn(payload)
       setEdited(new Map())
-      setRows(null)
+      setPairs({})
     } catch (error) {
       say("error", translate("could not read the configuration: {{why}}", { why: why(error) }))
     }
@@ -367,7 +387,7 @@ export function SettingsPane({ onCheck }: { onCheck: (verb: string) => void }) {
 
   // Another tab saved, or `ticket-runner config` did. Redraw — unless this tab
   // is in the middle of an edit, which is not something to take away from you.
-  const dirty = edited.size + (rows ? 1 : 0)
+  const dirty = edited.size + Object.keys(pairs).length
   const dirtyRef = React.useRef(dirty)
   dirtyRef.current = dirty
   React.useEffect(() => {
@@ -420,9 +440,11 @@ export function SettingsPane({ onCheck }: { onCheck: (verb: string) => void }) {
     try {
       const payload: {
         settings: Record<string, SettingValue>
-        projects?: ProjectPath[]
+        projects?: Pair[]
+        github?: Pair[]
       } = { settings: Object.fromEntries(edited) }
-      if (rows) payload.projects = rows
+      if (pairs.projects) payload.projects = pairs.projects
+      if (pairs.github) payload.github = pairs.github
       const result = await api.saveSettings(payload)
       await load()
       await reloadState()
@@ -461,9 +483,14 @@ export function SettingsPane({ onCheck }: { onCheck: (verb: string) => void }) {
   const changed = (key: string) => {
     const section = drawn.sections.find((item) => item.key === key)
     if (!section) return 0
-    if (section.pairs === "projects") return rows ? 1 : 0
+    if (section.pairs) return pairs[section.pairs] ? 1 : 0
     return section.fields.filter((field) => edited.has(field.name)).length
   }
+
+  /** One `name = value` table as the file has it, copied so editing a row
+   *  does not edit what was read. */
+  const saved = (table: string) =>
+    (table === "github" ? drawn.github : drawn.projects).map((row) => ({ ...row }))
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -570,10 +597,13 @@ export function SettingsPane({ onCheck }: { onCheck: (verb: string) => void }) {
                     <p className="text-muted-foreground max-w-prose text-xs leading-relaxed">
                       <Rich text={t(section.blurb)} />
                     </p>
-                    {section.pairs === "projects" ? (
-                      <ProjectRows
-                        rows={rows ?? drawn.projects.map((item) => ({ ...item }))}
-                        setRows={setRows}
+                    {section.pairs ? (
+                      <PairRows
+                        words={PAIRS[section.pairs]}
+                        rows={pairs[section.pairs] ?? saved(section.pairs)}
+                        setRows={(rows) =>
+                          setPairs((current) => ({ ...current, [section.pairs]: rows }))
+                        }
                       />
                     ) : (
                       <div className="grid gap-x-4 gap-y-5 [grid-template-columns:repeat(auto-fill,minmax(17rem,1fr))]">

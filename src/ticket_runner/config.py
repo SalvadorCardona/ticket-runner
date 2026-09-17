@@ -133,6 +133,12 @@ class Runner:
     fetch: bool = True
     push: bool = True
     open_pull_request: bool = True
+    # Replay the ticket's branch on top of its base before the pull request is
+    # opened, and again when a validated merge is refused for being behind. A
+    # board that sends ten tickets at one repository is a base branch that moves
+    # under every one of them: without this, the first merge makes the nine
+    # others conflict. See execution.py and delivery.py.
+    rebase: bool = True
     # How a validated pull request is merged. `gh` has to be told which of the
     # three it is, and the runner will not pick for you at the last moment: a
     # board that squashes wants every ticket squashed.
@@ -276,6 +282,10 @@ class Config:
     web: Web = field(default_factory=Web)
     notify: Notify = field(default_factory=Notify)
     openrouter: OpenRouter = field(default_factory=OpenRouter)
+    # `[github]`: which of your GitHub accounts each owner is worked under, as
+    # `owner = "the gh account"`. Empty is a machine with one account, which is
+    # every machine until it is not — see `git.token_for`.
+    github: dict[str, str] = field(default_factory=dict)
 
     def require_usable(self) -> None:
         """Raise ConfigError if the file is not complete enough to run."""
@@ -670,6 +680,7 @@ def load(path: Path | None = None) -> Config:
         open_pull_request=bool(
             runner_raw.get("open_pull_request", defaults.open_pull_request)
         ),
+        rebase=bool(runner_raw.get("rebase", defaults.rebase)),
         merge_method=(
             str(runner_raw.get("merge_method", "")).strip().lower()
             if str(runner_raw.get("merge_method", "")).strip().lower() in MERGE_METHODS
@@ -727,6 +738,14 @@ def load(path: Path | None = None) -> Config:
     projects = {
         str(name): os.path.expanduser(str(value))
         for name, value in raw.get("projects", {}).items()
+    }
+
+    # Lowercased on the way in: GitHub does not care how an owner is spelled,
+    # and a line that says `Animalink` must answer for `animalink/site`.
+    github = {
+        str(name).strip().lower(): str(value).strip()
+        for name, value in raw.get("github", {}).items()
+        if str(value).strip()
     }
 
     web_raw = raw.get("web", {})
@@ -793,6 +812,7 @@ def load(path: Path | None = None) -> Config:
         web=web,
         notify=notify,
         openrouter=openrouter,
+        github=github,
     )
 
 
