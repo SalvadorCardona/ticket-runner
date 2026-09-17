@@ -57,6 +57,35 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
   database, where an option on a real `status` can only be typed in by hand.
   Without it nothing breaks — the credit is waited out silently, as before.
 
+- **Ten tickets on one repository stop making nine conflicts.** The base branch
+  does not wait for a session: the first merge lands, and every session still
+  running is opening a pull request against a `main` of an hour ago. The branch
+  is now replayed onto its base between the commits and the push, so what opens
+  is a pull request on top of what the repository holds *now* — and a rebase
+  that hits a conflict changes nothing: the branch goes back as the session left
+  it, the pull request opens all the same, and the conflict is written on the
+  ticket instead of being discovered on GitHub. The same gesture answers a
+  *validated* merge GitHub refuses for being behind: the branch is replayed,
+  pushed with a lease on the very commit that was replayed, and the merge is
+  asked once more before the ticket is called stuck. A refusal a rebase cannot
+  answer — a check still red, a review still missing, a branch policy — is left
+  exactly as it came. `runner.rebase = false` gives back the old behaviour.
+
+- **A machine that answers to two GitHubs.** `gh` only ever has one account
+  active, so a pull request on the other one used to be refused for reasons that
+  read like a bug: a repository GitHub says does not exist, a merge nobody is
+  allowed to make. A new `[github]` table says which owner is worked under which
+  account — `"animalink" = "dev-animalink"` — and everything that leaves the
+  machine about that repository, the clone, the push, the pull request, the
+  merge, the question “has this been merged yet?”, goes out under it. Log each
+  account in once with `gh auth login` and they stay signed in side by side; no
+  token is written into the configuration, it is asked of `gh` when it is
+  needed. An owner nobody names is worked under whichever account `gh` is signed
+  in as, so one GitHub means nothing to configure — and a line naming an account
+  `gh` does not know is not a ticket's problem: the command runs as the active
+  account, and `ticket-runner doctor` says the line is dead. The table is a
+  section of the console's Settings tab, *Your GitHub accounts*.
+
 - **A project created from its GitHub link alone is cloned, not refused.** Until
   now, a `Repository` property that matched none of the clones under
   `workspace_root` put the project back with "no repository could be found" —

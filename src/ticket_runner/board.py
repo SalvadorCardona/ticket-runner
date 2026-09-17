@@ -390,7 +390,10 @@ class Board(Base):
         closed = 0
         for page in pages:
             url = str(notion.read(page, self.config.notion.prop("pull_request")) or "")
-            if not url.startswith("http") or git.pull_request_state(url) != "MERGED":
+            if (
+                not url.startswith("http")
+                or git.pull_request_state(url, self.config.github) != "MERGED"
+            ):
                 continue
             ticket = Ticket(page)
             said = self.voice

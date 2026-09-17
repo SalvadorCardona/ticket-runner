@@ -10,10 +10,12 @@ published because a session felt sure of itself, only because you moved a
 ticket one column to the right.
 
 The two are not carried out the same way, and the asymmetry is the module.
-A merge is two `gh` calls and is done in the pass's own thread. A publication
-is a Claude session, so publications run the way tickets run — side by side,
-never more than `max_concurrent` at once — and are claimed before they are
-done, because publishing twice is the one mistake this must not make.
+A merge is two `gh` calls and is done in the pass's own thread — three and a
+rebase when GitHub refuses it for being behind, which is what a repository
+taking ten tickets a day does to a pull request opened this morning. A
+publication is a Claude session, so publications run the way tickets run — side
+by side, never more than `max_concurrent` at once — and are claimed before they
+are done, because publishing twice is the one mistake this must not make.
 """
 
 from __future__ import annotations
@@ -169,7 +171,7 @@ class Delivery(Base):
 
     def _merge(self, ticket: Ticket, url: str) -> dict | None:
         """A validated pull request: merge it, and take the ticket to done."""
-        state_of = git.pull_request_state(url)
+        state_of = git.pull_request_state(url, self.config.github)
         if not state_of:
             # The same rule as `close_merged`: a ticket is never moved on an
             # answer GitHub did not give. The next run asks again.
@@ -186,17 +188,35 @@ class Delivery(Base):
             )
         method = self.config.runner.merge_method
         how = said.say("merged-before")
+        notes: list[str] = []
         if state_of != "MERGED":
             try:
-                git.merge_pull_request(url, method)
+                git.merge_pull_request(url, method, self.config.github)
             except git.GitError as error:
-                return self._fail(
-                    ticket,
-                    said.say("merge-refused"),
-                    f"{url}\n\n{error}",
-                    blocked=True,
-                    question=said.say("merge-refused-question", error=voice_module.line(error)),
-                )
+                replayed = self._replay(ticket, url, error)
+                if not replayed:
+                    return self._fail(
+                        ticket,
+                        said.say("merge-refused"),
+                        f"{url}\n\n{error}",
+                        blocked=True,
+                        question=said.say(
+                            "merge-refused-question", error=voice_module.line(error)
+                        ),
+                    )
+                notes.append(replayed)
+                try:
+                    git.merge_pull_request(url, method, self.config.github)
+                except git.GitError as error:
+                    return self._fail(
+                        ticket,
+                        said.say("merge-refused"),
+                        f"{url}\n\n{replayed}\n\n{error}",
+                        blocked=True,
+                        question=said.say(
+                            "merge-refused-question", error=voice_module.line(error)
+                        ),
+                    )
             how = said.say("merged-with", method=method)
         self.say(f"  ✓ {ticket.title} — pull request merged, moved to done")
         self._set(
@@ -205,9 +225,41 @@ class Delivery(Base):
         )
         self._comment(
             ticket,
-            said.report(said.verdict("merged", said.pull_request(url), how), url),
+            said.report(said.verdict("merged", said.pull_request(url), how), url, *notes),
         )
         return {"ticket": ticket.title, "id": ticket.id, "status": "done", "merged": url}
+
+    def _replay(self, ticket: Ticket, url: str, refusal: git.GitError) -> str:
+        """Put the branch back on top of its base, when that is what was wrong.
+
+        A pull request opened this morning is behind by noon on a repository
+        that takes ten tickets a day: GitHub refuses the merge, and the refusal
+        is about the *branch*, not about the work. So the branch is replayed
+        onto its base and pushed again, and the merge is asked a second time —
+        which is exactly the gesture you would make by hand, and the one nobody
+        should have to make ten times a day.
+
+        Only that refusal. A check still red and a review still missing are
+        refusals a rebase does not answer, and pushing the branch again would
+        only spend a CI run to be refused the same way. Says what was done, so
+        that the report carries it; empty means nothing was — and the caller
+        then reports the refusal as it came.
+        """
+        if not self.config.runner.rebase or not git.is_behind(refusal):
+            return ""
+        branch, base = git.pull_request_branches(url, self.config.github)
+        project = self._project_of(ticket)
+        if not branch or not project.is_code:
+            return ""
+        workdir = state_dir() / "scratch" / f"rebase-{short_id(ticket.id)}"
+        self.say(f"  · {ticket.title} — merge refused, replaying {branch} onto {base}")
+        failure = git.replay_pushed(
+            project.path, branch, base, workdir, self.config.github
+        )
+        if failure:
+            self.say(f"    ! {branch} not replayed: {failure}")
+            return ""
+        return self.voice.say("merge-rebased", branch=branch, base=base)
 
     def _publish_all(self, publishing: list[tuple[Ticket, Project]]) -> list[dict]:
         """Every validated publication of this pass, up to `max_concurrent` at once.

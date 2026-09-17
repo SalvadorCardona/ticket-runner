@@ -433,6 +433,22 @@ if refused:
     raise SystemExit(1)
 
 here = Path.cwd()
+
+# A second ticket landed on the base branch while this session was running.
+# `FAKE_CLAUDE_MOVES_BASE` names the clone it landed in: a commit on `main`,
+# pushed — which is what a merge on GitHub does under a session that started an
+# hour ago, and what the branch has to be replayed onto before its own pull
+# request is opened.
+moved = os.environ.get("FAKE_CLAUDE_MOVES_BASE", "")
+if moved and (here / ".git").exists():
+    clone = Path(moved)
+    (clone / "OTHER.md").write_text("un autre ticket est passé par là\\n", encoding="utf-8")
+    subprocess.run(["git", "add", "OTHER.md"], cwd=clone, check=True, capture_output=True)
+    subprocess.run(["git", "-c", "user.name=Autre", "-c", "user.email=autre@example.invalid",
+                    "-c", "commit.gpgsign=false", "commit", "-m", "Un autre ticket"],
+                   cwd=clone, check=True, capture_output=True)
+    subprocess.run(["git", "push", "origin", "main"], cwd=clone, check=True, capture_output=True)
+
 if (here / ".git").exists():
     (here / "FAKE.md").write_text("the session was here\\n", encoding="utf-8")
     subprocess.run(["git", "add", "FAKE.md"], cwd=here, check=True, capture_output=True)
@@ -455,11 +471,21 @@ GH = '''
 Opening a pull request is the one gesture of a code ticket that leaves the
 machine, so it is the one worth recording: what was asked, from where, and the
 URL handed back — which is what the ticket is then supposed to carry.
+
+Merging is the other one, and it is not recorded so much as *carried out*: the
+bare remote is here, so this asks it the very question GitHub asks — is the base
+branch an ancestor of this one? — and refuses the merge when it is not, in
+GitHub's own words. Which is what makes the replay worth testing: a branch that
+has been put back on top of `main` merges, one that has not does not.
 """
-import json, os, sys
+import json, os, subprocess, sys
 
 args = sys.argv[1:]
+# Two files, and the difference matters: the log says what this pass asked and
+# is emptied before each one, while the state is what GitHub would still know
+# next week — the pull requests that were opened, and those that were merged.
 log = os.environ.get("FAKE_GH_LOG", "")
+state = os.environ.get("FAKE_GH_STATE", "")
 
 
 def option(name):
@@ -467,29 +493,75 @@ def option(name):
 
 
 def recorded():
-    if not log or not os.path.exists(log):
+    if not state or not os.path.exists(state):
         return []
-    with open(log, encoding="utf-8") as handle:
+    with open(state, encoding="utf-8") as handle:
         return [json.loads(line) for line in handle if line.strip()]
+
+
+def write(entry):
+    for path in (log, state):
+        if path:
+            with open(path, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(entry) + "\\n")
+
+
+def git(*arguments, cwd=None):
+    return subprocess.run(["git", *arguments], cwd=cwd, capture_output=True, text=True)
+
+
+def pull_request(url):
+    return next(
+        (one for one in recorded() if one["command"] == "pr create" and one["url"] == url), {}
+    )
 
 
 if args[:2] == ["pr", "create"]:
     number = len([one for one in recorded() if one["command"] == "pr create"]) + 1
     url = "https://github.com/fake/repo/pull/" + str(number)
-    if log:
-        with open(log, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps({"command": "pr create", "cwd": os.getcwd(), "url": url,
-                                     "base": option("--base"), "title": option("--title"),
-                                     "body": option("--body")}) + "\\n")
+    # The branch and the remote it was made from: what GitHub knows of a pull
+    # request, and what every question below is answered out of.
+    write({"command": "pr create", "cwd": os.getcwd(), "url": url,
+           "base": option("--base"), "title": option("--title"), "body": option("--body"),
+           "branch": git("rev-parse", "--abbrev-ref", "HEAD", cwd=os.getcwd()).stdout.strip(),
+           "remote": git("remote", "get-url", "origin", cwd=os.getcwd()).stdout.strip()})
     print("Creating pull request for " + option("--base"))
     print(url)
     raise SystemExit(0)
 
+if args[:2] == ["pr", "merge"]:
+    url = args[2] if len(args) > 2 else ""
+    opened = pull_request(url)
+    if opened:
+        behind = git("merge-base", "--is-ancestor", opened["base"], opened["branch"],
+                     cwd=opened["remote"]).returncode != 0
+        if behind:
+            print("Pull request is not mergeable: the merge commit cannot be cleanly created",
+                  file=sys.stderr)
+            raise SystemExit(1)
+        # Merged, and merged for real: the base branch of the bare remote moves
+        # to what the pull request holds, so a test can read the result.
+        landed = git("rev-parse", opened["branch"], cwd=opened["remote"]).stdout.strip()
+        git("update-ref", "refs/heads/" + opened["base"], landed, cwd=opened["remote"])
+    write({"command": "pr merge", "url": url})
+    print("Merged pull request")
+    raise SystemExit(0)
+
 if args[:2] == ["pr", "view"]:
+    url = args[2] if len(args) > 2 and args[2].startswith("http") else ""
+    opened = pull_request(url)
+    if "headRefName,baseRefName" in args:
+        if not opened:
+            raise SystemExit(1)
+        print(opened["branch"] + " " + opened["base"])
+        raise SystemExit(0)
     # `--json state` asks about a pull request by its URL; `--json url` asks
     # whether this branch already has one, and here it never does.
     if "state" in args:
-        print("OPEN")
+        merged = any(
+            one["command"] == "pr merge" and one["url"] == url for one in recorded()
+        )
+        print("MERGED" if merged else "OPEN")
         raise SystemExit(0)
     raise SystemExit(1)
 
@@ -631,6 +703,23 @@ class Bench:
             properties["Project"] = _stored({"relation": [{"id": project}]})
         return self.board.page(properties, database=self.database, body=body)
 
+    def move(self, ticket: str, column: str) -> None:
+        """A ticket dragged from one column to the next, as you would in Notion."""
+        self.board.pages[ticket]["properties"]["Status"] = _stored(
+            {"status": {"name": column}}
+        )
+
+    def land(self, repository: Path, filename: str) -> None:
+        """Another ticket merged: one commit on `main`, pushed to the remote.
+
+        What every pull request still open is suddenly behind on, and the whole
+        of what a repository taking ten tickets a day does to them.
+        """
+        (repository / filename).write_text("un autre ticket\n", encoding="utf-8")
+        _git(["add", filename], repository)
+        _git(["commit", "-m", f"Un autre ticket — {filename}"], repository)
+        _git(["push", "origin", "main"], repository)
+
     # -- running -------------------------------------------------------------
 
     def run(self) -> list[dict]:
@@ -651,6 +740,9 @@ class Bench:
 
     def pull_requests(self) -> list[dict]:
         return [one for one in _lines(self.logs["FAKE_GH_LOG"]) if one["command"] == "pr create"]
+
+    def merges(self) -> list[dict]:
+        return [one for one in _lines(self.logs["FAKE_GH_LOG"]) if one["command"] == "pr merge"]
 
     def sessions(self) -> list[dict]:
         return _lines(self.logs["FAKE_CLAUDE_LOG"])
@@ -717,6 +809,9 @@ def bench(**overrides: object):
                 path.write_text("", encoding="utf-8")
             environment = {
                 notion.API_ENV: api,
+                # What GitHub would still know next week, unlike the logs, which
+                # are emptied before each pass — see the fake `gh`.
+                "FAKE_GH_STATE": str(root / "logs" / "github.jsonl"),
                 "XDG_STATE_HOME": str(root / "state"),
                 "PATH": f"{root / 'bin'}{os.pathsep}{os.environ.get('PATH', '')}",
                 "FAKE_CLAUDE_FAIL": "",
@@ -858,6 +953,79 @@ def a_session_that_fails_leaves_a_readable_ticket_and_no_worktree():
         assert not list(worktrees.glob("*")), "the worktree is still on disk"
         assert not machine.pull_requests(), "a failed session still opened a pull request"
         assert machine.branches(repository) == ["main"], machine.branches(repository)
+
+
+@case
+def a_branch_is_replayed_on_a_base_that_moved_under_the_session():
+    """The pull request opens on top of what the repository holds now.
+
+    A board that sends ten tickets at one repository is a base branch that
+    moves under every one of them: the first merge lands, and the nine sessions
+    still running are opening pull requests against a `main` of an hour ago.
+    Here the base moves *during* the session — which is what the fake one does
+    when `FAKE_CLAUDE_MOVES_BASE` names a clone — and the branch that reaches
+    the remote carries both commits, not a conflict somebody has to sort out.
+
+    The same scenario with `rebase = false` is what says the test is about the
+    rebase rather than about git: the branch then goes out as it was written,
+    without what landed on main under it.
+    """
+    for rebase, expected in ((True, True), (False, False)):
+        with bench(rebase=rebase) as machine:
+            repository = machine.repository("site")
+            project = machine.project("Site", repository)
+            ticket = machine.ticket("Corriger l'entête", "Le titre est faux.", project)
+
+            with _environ({"FAKE_CLAUDE_MOVES_BASE": str(repository)}):
+                results = machine.run()
+
+            assert results[0]["status"] == "done", results
+            assert machine.status(ticket) == "In review", machine.status(ticket)
+            branch = results[0]["branch"]
+            files = machine.files_on(repository, branch)
+            assert "FAKE.md" in files, files
+            assert ("OTHER.md" in files) is expected, (rebase, files)
+            assert len(machine.pull_requests()) == 1, machine.pull_requests()
+            said = machine.board.said(ticket)
+            assert ("rejouée sur" in said[-1] or "replayed onto" in said[-1]) is expected, said[-1]
+
+
+@case
+def a_validated_merge_refused_for_being_behind_is_replayed_and_lands():
+    """Validated on Monday, behind by Tuesday: the runner puts it back on top.
+
+    The pull request was opened on a `main` that has moved since — another
+    ticket landed — so GitHub refuses the merge, exactly as the fake one does
+    here: the base is no longer an ancestor of the branch. The branch is
+    replayed onto it, force-pushed with a lease, and the merge is asked again.
+    What the test reads afterwards is the remote itself: `main` carries both
+    what landed under the ticket and what the ticket wrote.
+    """
+    with bench() as machine:
+        repository = machine.repository("site")
+        project = machine.project("Site", repository)
+        ticket = machine.ticket("Corriger l'entête", "Le titre est faux.", project)
+
+        first = machine.run()
+        assert machine.status(ticket) == "In review", machine.status(ticket)
+        branch = first[0]["branch"]
+
+        machine.land(repository, "OTHER.md")
+        machine.move(ticket, "Validated")
+
+        results = machine.run()
+
+        assert results and results[0]["status"] == "done", results
+        assert machine.status(ticket) == "Done", machine.status(ticket)
+        assert len(machine.merges()) == 1, "the merge was asked once too often, or never"
+        landed = machine.files_on(repository, "main")
+        assert "OTHER.md" in landed and "FAKE.md" in landed, landed
+        # And the replay left nothing behind: the worktree it needed is gone.
+        scratch = Path(os.environ["XDG_STATE_HOME"]) / "ticket-runner" / "scratch"
+        assert not list(scratch.glob("rebase-*")), list(scratch.glob("rebase-*"))
+        assert not machine.worktrees(repository), machine.worktrees(repository)
+        said = machine.board.said(ticket)
+        assert "replayed onto" in said[-1], said[-1]
 
 
 @case

@@ -257,6 +257,16 @@ _SAID: dict[str, dict[str, str]] = {
         "en": "the pull request would not merge",
         "fr": "la pull request n'a pas voulu fusionner",
     },
+    "merge-rebased": {
+        "en": (
+            "The merge was refused for being behind, so `{branch}` was replayed onto "
+            "`{base}` and pushed again."
+        ),
+        "fr": (
+            "La fusion a été refusée parce que la branche était en retard : `{branch}` a "
+            "été rejouée sur `{base}` puis repoussée."
+        ),
+    },
     "merge-refused-question": {
         "en": "GitHub refused the merge: {error}",
         "fr": "GitHub a refusé la fusion : {error}",
@@ -290,6 +300,20 @@ _SAID: dict[str, dict[str, str]] = {
     "no-pull-request-opened": {
         "en": "The pull request could not be opened: {error}",
         "fr": "La pull request n'a pas pu être ouverte : {error}",
+    },
+    "rebased-onto": {
+        "en": "The branch was replayed onto `{base}` before the pull request was opened.",
+        "fr": "La branche a été rejouée sur `{base}` avant l'ouverture de la pull request.",
+    },
+    "rebase-refused": {
+        "en": (
+            "The branch could not be replayed onto `{base}` — {error}. The pull request "
+            "is opened as it stands, and shows the conflict."
+        ),
+        "fr": (
+            "La branche n'a pas pu être rejouée sur `{base}` — {error}. La pull request "
+            "est ouverte telle quelle et montre le conflit."
+        ),
     },
     # -- a run with nothing left to spend -------------------------------------
     "credit-spent-kept": {

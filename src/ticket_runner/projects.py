@@ -125,9 +125,18 @@ def _walk(root: Path, max_depth: int = 4) -> list[Path]:
 
 
 class Resolver:
-    def __init__(self, workspace_root: Path, overrides: dict[str, str]) -> None:
+    def __init__(
+        self,
+        workspace_root: Path,
+        overrides: dict[str, str],
+        accounts: dict[str, str] | None = None,
+    ) -> None:
         self._root = workspace_root
         self._overrides = overrides
+        # Which GitHub account each owner is worked under: asking about a
+        # repository, and cloning one, are as much that account's business as
+        # the pull request is. See `git.token_for`.
+        self._accounts = accounts or {}
         self._by_remote: dict[str, list[Path]] | None = None
 
     def _index(self) -> dict[str, list[Path]]:
@@ -236,7 +245,7 @@ class Resolver:
         # GitHub redirects a renamed repository, and only GitHub knows to what.
         # Asked last, because it is the one way that leaves the machine — and
         # only about a name that already failed to match anything here.
-        today = git.current_name(declared) if "/" in declared else ""
+        today = git.current_name(declared, self._accounts) if "/" in declared else ""
         current = _normalise(today)
         ambiguous = False
         if current and current != declared:
@@ -286,7 +295,7 @@ class Resolver:
         directory name anybody would type twice.
         """
         path = self._root / repository.rsplit("/", 1)[-1]
-        git.clone(repository, path)
+        git.clone(repository, path, self._accounts)
         # The index was built before this existed. Dropping it is enough: it is
         # rebuilt on the next question, and there is rarely one in the same run.
         self._by_remote = None

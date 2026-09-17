@@ -10,10 +10,21 @@ up, not refused**. Its branch is named after its ID, so the branch a failed
 session left behind is the same one the next attempt asks for — that branch is
 checked out again and replayed on top of the newest base, rather than standing
 in the way of the ticket for good.
+
+A third holds for the `gh` half: **a repository is worked under the account it
+belongs to**. One machine may answer to two GitHubs — your own and a client's —
+and `gh` only ever has one of them active at a time, so a pull request on the
+other one is refused for reasons that read like a bug. `[github]` in the
+configuration says which owner is whose account, and every command that leaves
+the machine is run with that account's token. A machine with one account
+configures nothing and nothing changes: `gh` answers as whoever it is signed in
+as, exactly as before.
 """
 
 from __future__ import annotations
 
+import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -35,19 +46,91 @@ class Result:
         return self.code == 0
 
 
-def run(args: list[str], cwd: Path | str | None = None, timeout: int = 300) -> Result:
+def run(
+    args: list[str], cwd: Path | str | None = None, timeout: int = 300, token: str = ""
+) -> Result:
+    """One command, and the GitHub account it runs as when there is a choice.
+
+    `token` is what makes a second account possible: `gh` reads `GH_TOKEN`
+    before anything it has on disk, and so does the credential helper it
+    installs — which is how a `git push` goes out under the same account as the
+    pull request that follows it. Empty leaves the environment alone, and the
+    command answers as whoever `gh` is signed in as.
+    """
+    environment = None
+    if token:
+        # Both names: `gh` prefers GH_TOKEN, and setting only that one would
+        # leave a GITHUB_TOKEN inherited from elsewhere to answer for the tools
+        # that read it instead.
+        environment = {**os.environ, "GH_TOKEN": token, "GITHUB_TOKEN": token}
     process = subprocess.run(
         args,
         cwd=str(cwd) if cwd else None,
         capture_output=True,
         text=True,
         timeout=timeout,
+        env=environment,
     )
     return Result(process.returncode, process.stdout.strip(), process.stderr.strip())
 
 
-def git(args: list[str], cwd: Path | str, timeout: int = 300) -> Result:
-    return run(["git", *args], cwd=cwd, timeout=timeout)
+def git(args: list[str], cwd: Path | str, timeout: int = 300, token: str = "") -> Result:
+    return run(["git", *args], cwd=cwd, timeout=timeout, token=token)
+
+
+# Which GitHub account a repository is worked under, by the owner it belongs to:
+# `[github]` in the configuration, read as `owner = "the gh account"`. An empty
+# mapping is one account and the whole of the old behaviour.
+Accounts = dict[str, str]
+
+# Asked of `gh` once per account and kept: a token is not something that changes
+# under a run, and a board with forty tickets would otherwise spawn forty `gh
+# auth token` on the way to the same answer.
+_TOKENS: dict[str, str] = {}
+
+
+def owner(reference: str) -> str:
+    """Who a repository belongs to, from a URL, a remote or `owner/name`.
+
+    The three shapes the runner actually holds: the `origin` of a clone, the
+    URL of a pull request, and what a project page declares.
+    """
+    text = str(reference).strip().removesuffix(".git")
+    text = re.sub(r"^[a-z]+://", "", text)  # https://github.com/owner/name
+    text = re.sub(r"^[^@/]+@", "", text)  # git@github.com:owner/name
+    parts = [part for part in text.replace(":", "/", 1).split("/") if part]
+    if len(parts) < 2:
+        return ""
+    # A host is the part with a dot in it; `owner/name` has none.
+    return parts[1].lower() if "." in parts[0] else parts[0].lower()
+
+
+def account_token(account: str) -> str:
+    """The token `gh` holds for that account, or nothing — see `token_for`."""
+    if account not in _TOKENS:
+        result = (
+            run(["gh", "auth", "token", "--user", account], timeout=60)
+            if shutil.which("gh")
+            else Result(1, "", "gh not found")
+        )
+        _TOKENS[account] = result.out if result.ok else ""
+    return _TOKENS[account]
+
+
+def token_for(reference: str, accounts: Accounts | None) -> str:
+    """Which account that repository is worked under, as a token to run with.
+
+    Nothing means "whoever `gh` is signed in as", and it means it for three
+    different reasons on purpose: no account is configured at all, none is
+    configured for that owner, or `gh` is not signed in as the one that is
+    named. The first two are the ordinary machine, and the third is `doctor`'s
+    to report — a ticket has no business failing over a line of configuration
+    that names an account nobody logged in.
+    """
+    if not accounts:
+        return ""
+    account = accounts.get(owner(reference))
+    return account_token(account) if account else ""
 
 
 def is_repo(path: Path) -> bool:
@@ -59,7 +142,7 @@ def remote_url(repo: Path) -> str:
     return result.out if result.ok else ""
 
 
-def clone(repository: str, into: Path) -> None:
+def clone(repository: str, into: Path, accounts: Accounts | None = None) -> None:
     """Fetch `owner/name` into a folder this machine does not have yet.
 
     Through `gh` when it is there, because that is already what knows how to
@@ -73,11 +156,14 @@ def clone(repository: str, into: Path) -> None:
     outcome than a ticket that started late.
     """
     into.parent.mkdir(parents=True, exist_ok=True)
+    token = token_for(repository, accounts)
     if shutil.which("gh"):
-        result = run(["gh", "repo", "clone", repository, str(into)], timeout=600)
+        result = run(["gh", "repo", "clone", repository, str(into)], timeout=600, token=token)
     else:
         result = run(
-            ["git", "clone", f"https://github.com/{repository}.git", str(into)], timeout=600
+            ["git", "clone", f"https://github.com/{repository}.git", str(into)],
+            timeout=600,
+            token=token,
         )
     if not result.ok:
         lines = [line.strip() for line in (result.err + "\n" + result.out).splitlines() if line.strip()]
@@ -276,11 +362,18 @@ def commits_ahead(worktree: Path, base: str) -> int:
     return 0
 
 
+def head(worktree: Path) -> str:
+    """The commit that branch is on, as a way of noticing it was replayed."""
+    return git(["rev-parse", "HEAD"], worktree).out
+
+
 def is_dirty(worktree: Path) -> bool:
     return bool(git(["status", "--porcelain"], worktree).out)
 
 
-def push(worktree: Path, branch: str, force: bool = False) -> Result:
+def push(
+    worktree: Path, branch: str, force: bool = False, accounts: Accounts | None = None
+) -> Result:
     """Push the ticket's branch, forcing only when its history was replayed.
 
     `force` comes from the branch having been picked up from an earlier attempt
@@ -292,25 +385,34 @@ def push(worktree: Path, branch: str, force: bool = False) -> Result:
     """
     force_flag = ["--force-with-lease"] if force else []
     return git(
-        ["push", "--set-upstream", *force_flag, "origin", branch], worktree, timeout=300
+        ["push", "--set-upstream", *force_flag, "origin", branch],
+        worktree,
+        timeout=300,
+        token=token_for(remote_url(worktree), accounts),
     )
 
 
-def open_pull_request(worktree: Path, title: str, body: str, base: str) -> str:
+def open_pull_request(
+    worktree: Path, title: str, body: str, base: str, accounts: Accounts | None = None
+) -> str:
     """Open the PR through gh and return its URL. Opening it merges nothing."""
     if not shutil.which("gh"):
         raise GitError("gh not found — cannot open the pull request")
+    token = token_for(remote_url(worktree), accounts)
     result = run(
         ["gh", "pr", "create", "--base", base, "--title", title, "--body", body],
         cwd=worktree,
         timeout=180,
+        token=token,
     )
     if result.ok:
         for line in reversed(result.out.splitlines()):
             if line.startswith("http"):
                 return line.strip()
         return result.out
-    existing = run(["gh", "pr", "view", "--json", "url", "-q", ".url"], cwd=worktree)
+    existing = run(
+        ["gh", "pr", "view", "--json", "url", "-q", ".url"], cwd=worktree, token=token
+    )
     if existing.ok and existing.out.startswith("http"):
         return existing.out
     raise GitError(f"gh pr create: {result.err or result.out}")
@@ -319,7 +421,9 @@ def open_pull_request(worktree: Path, title: str, body: str, base: str) -> str:
 MERGE_FLAGS = {"squash": "--squash", "merge": "--merge", "rebase": "--rebase"}
 
 
-def merge_pull_request(url: str, method: str = "squash") -> str:
+def merge_pull_request(
+    url: str, method: str = "squash", accounts: Accounts | None = None
+) -> str:
     """Merge that pull request through `gh`. Returns what `gh` said of it.
 
     The one outward-facing gesture the runner makes on its own — and it makes it
@@ -333,13 +437,107 @@ def merge_pull_request(url: str, method: str = "squash") -> str:
     """
     if not shutil.which("gh"):
         raise GitError("gh not found — cannot merge the pull request")
-    result = run(["gh", "pr", "merge", url, MERGE_FLAGS.get(method, "--squash")], timeout=300)
+    result = run(
+        ["gh", "pr", "merge", url, MERGE_FLAGS.get(method, "--squash")],
+        timeout=300,
+        token=token_for(url, accounts),
+    )
     if result.ok:
         return (result.out or f"merged ({method})").strip()
     raise GitError(f"gh pr merge: {result.err or result.out}")
 
 
-def pull_request_on(repo: Path, branch: str) -> str:
+# What GitHub says when the merge is refused *because the branch is no longer on
+# top of its base* — the one refusal a rebase answers. A check still red, a
+# review still missing, a branch protected: those are refusals about the work or
+# about the rules, and replaying the branch would only push a second time for
+# nothing. "policy" is excluded for that reason: it is the wording of a base
+# branch that forbids this merge, not of one that has moved.
+_BEHIND = (
+    "not mergeable",
+    "merge conflict",
+    "base branch was modified",
+    "head branch is out of date",
+)
+
+
+def is_behind(error: object) -> bool:
+    """Is this refusal one that replaying the branch could answer?"""
+    said = str(error).lower()
+    return any(wording in said for wording in _BEHIND) and "policy" not in said
+
+
+def pull_request_branches(url: str, accounts: Accounts | None = None) -> tuple[str, str]:
+    """The branch that pull request is made from, and the one it targets.
+
+    Empty strings where the question could not be asked — `gh` missing, not
+    authenticated, no network. The caller then has nothing to replay and says
+    so, rather than guessing a branch name from a ticket.
+    """
+    if not shutil.which("gh"):
+        return "", ""
+    result = run(
+        ["gh", "pr", "view", url, "--json", "headRefName,baseRefName",
+         "-q", ".headRefName + \" \" + .baseRefName"],
+        timeout=60,
+        token=token_for(url, accounts),
+    )
+    if not result.ok or len(result.out.split()) != 2:
+        return "", ""
+    made_from, into = result.out.split()
+    return made_from, into
+
+
+def replay_pushed(
+    repo: Path, branch: str, onto: str, workdir: Path, accounts: Accounts | None = None
+) -> str:
+    """Replay a branch that is already on GitHub onto its base, and push it again.
+
+    What a merge GitHub refuses for being behind asks for, and it is asked of
+    the branch as origin holds it rather than of whatever this machine has: the
+    ticket's own worktree is usually long gone by the time somebody validates.
+
+    In a detached worktree of its own — the rule at the top of this module holds
+    here too, and detached means the local branch is not moved either: another
+    attempt at that same ticket may well have it checked out. The push is a
+    lease on the very commit that was replayed, so a branch somebody pushed to
+    in the meantime is left alone and the merge stays refused.
+
+    Says why it could not, or nothing.
+    """
+    fetch(repo)
+    was = git(["rev-parse", f"origin/{branch}"], repo).out
+    if not was:
+        return f"origin/{branch} is not here to replay"
+    if not has_ref(repo, f"origin/{onto}"):
+        return f"origin/{onto} is not here to replay onto"
+    git(["worktree", "prune"], repo)
+    workdir.parent.mkdir(parents=True, exist_ok=True)
+    added = git(["worktree", "add", "--detach", str(workdir), was], repo)
+    if not added.ok:
+        return f"git worktree add: {added.err or added.out}"
+    try:
+        if failure := rebase(workdir, f"origin/{onto}"):
+            return failure
+        pushed = git(
+            ["push", f"--force-with-lease={branch}:{was}", "origin", f"HEAD:refs/heads/{branch}"],
+            workdir,
+            timeout=300,
+            token=token_for(remote_url(repo), accounts),
+        )
+        if not pushed.ok:
+            lines = [
+                line.strip()
+                for line in (pushed.err + "\n" + pushed.out).splitlines()
+                if line.strip()
+            ]
+            return lines[-1] if lines else f"git push {branch} failed"
+    finally:
+        remove_worktree(repo, workdir)
+    return ""
+
+
+def pull_request_on(repo: Path, branch: str, accounts: Accounts | None = None) -> str:
     """The URL of an open pull request made from that branch, or nothing.
 
     Nothing also means the question could not be asked — `gh` missing, not
@@ -352,11 +550,12 @@ def pull_request_on(repo: Path, branch: str) -> str:
         ["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "url", "-q", ".[0].url"],
         cwd=repo,
         timeout=60,
+        token=token_for(remote_url(repo), accounts),
     )
     return result.out if result.ok else ""
 
 
-def current_name(owner_and_name: str) -> str:
+def current_name(owner_and_name: str, accounts: Accounts | None = None) -> str:
     """What GitHub calls that repository today, as `owner/name` — or nothing.
 
     A repository renamed on GitHub keeps answering to its old name: GitHub
@@ -370,11 +569,12 @@ def current_name(owner_and_name: str) -> str:
     result = run(
         ["gh", "repo", "view", owner_and_name, "--json", "nameWithOwner", "-q", ".nameWithOwner"],
         timeout=60,
+        token=token_for(owner_and_name, accounts),
     )
     return result.out if result.ok else ""
 
 
-def pull_request_state(url: str) -> str:
+def pull_request_state(url: str, accounts: Accounts | None = None) -> str:
     """What GitHub says of that pull request: MERGED, OPEN, CLOSED — or nothing.
 
     Nothing means the question could not be asked: `gh` missing, not
@@ -386,5 +586,9 @@ def pull_request_state(url: str) -> str:
     """
     if not shutil.which("gh"):
         return ""
-    result = run(["gh", "pr", "view", url, "--json", "state", "-q", ".state"], timeout=60)
+    result = run(
+        ["gh", "pr", "view", url, "--json", "state", "-q", ".state"],
+        timeout=60,
+        token=token_for(url, accounts),
+    )
     return result.out if result.ok else ""

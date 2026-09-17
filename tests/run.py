@@ -161,7 +161,7 @@ def _workspace(
         for folder, remote in remotes.items():
             (root / folder / ".git").mkdir(parents=True)
 
-        def clone(repository: str, into: Path) -> None:
+        def clone(repository: str, into: Path, accounts=None) -> None:
             if cloned is None:
                 raise projects.git.GitError(
                     f"{repository} could not be cloned into {into} — no network in this test"
@@ -171,7 +171,10 @@ def _workspace(
             remotes[str(into.relative_to(root))] = f"git@github.com:{repository}.git"
 
         projects.git.remote_url = lambda repo: remotes.get(str(repo.relative_to(root)), "")
-        projects.git.current_name = lambda name: (asked.append(name), (renamed or {}).get(name, ""))[1]
+        projects.git.current_name = lambda name, accounts=None: (
+            asked.append(name),
+            (renamed or {}).get(name, ""),
+        )[1]
         projects.git.clone = clone
         try:
             yield projects.Resolver(root, {}), asked
@@ -3232,7 +3235,7 @@ def _github(states: dict[str, str], merge=None):
     from ticket_runner import git as git_module
 
     asked, original = git_module.pull_request_state, git_module.merge_pull_request
-    git_module.pull_request_state = lambda url: states.get(url, "")
+    git_module.pull_request_state = lambda url, accounts=None: states.get(url, "")
     if merge is not None:
         git_module.merge_pull_request = merge
     try:
@@ -3331,7 +3334,7 @@ def _validating(
     merges: list[tuple[str, str]] = []
     published: list[str] = []
 
-    def merge(url: str, method: str = "squash") -> str:
+    def merge(url: str, method: str = "squash", accounts=None) -> str:
         merges.append((url, method))
         if refuses:
             raise git_module.GitError(refuses)
@@ -3548,9 +3551,12 @@ def a_validated_ticket_whose_date_has_passed_is_carried_out_at_once():
         {},
     )
     merges: list[tuple[str, str]] = []
-    with _github({"https://github.com/x/y/pull/1": "OPEN"}, merge=lambda url, method="squash": (
-        merges.append((url, method)) or "merged"
-    )):
+    with _github(
+        {"https://github.com/x/y/pull/1": "OPEN"},
+        merge=lambda url, method="squash", accounts=None: (
+            merges.append((url, method)) or "merged"
+        ),
+    ):
         results = runner.deliver()
     assert merges == [("https://github.com/x/y/pull/1", "squash")]
     assert results and results[0]["status"] == "done"
@@ -5019,19 +5025,34 @@ def every_setting_the_file_holds_is_one_the_console_can_reach():
 
 
 @case
-def the_projects_table_gains_and_loses_rows():
-    """The one section that is a mapping rather than a list of known keys."""
-    path, config = _saved('\n[projects]\n"Site vitrine" = "~/work/site"\nold = "~/work/old"\n')
+def the_tables_that_are_mappings_gain_and_lose_rows():
+    """The two sections that are a mapping rather than a list of known keys.
+
+    `[projects]` and `[github]` are saved by what the browser sends in full, so
+    a row you removed there is a line that goes away here.
+    """
+    path, config = _saved(
+        '\n[projects]\n"Site vitrine" = "~/work/site"\nold = "~/work/old"\n'
+        '\n[github]\nanimalink = "dev-animalink"\nold = "nobody"\n'
+    )
     web_settings.save(
         config,
-        {"projects": [
-            {"name": "Site vitrine", "path": "~/work/site-v2"},
-            {"name": "Trader IA", "path": "~/work/trader"},
-        ]},
+        {
+            "projects": [
+                {"name": "Site vitrine", "value": "~/work/site-v2"},
+                {"name": "Trader IA", "value": "~/work/trader"},
+            ],
+            "github": [{"name": "Animalink", "value": "dev-animalink"}],
+        },
     )
-    projects = C.load(path).projects
-    assert set(projects) == {"Site vitrine", "Trader IA"}, "the row you removed is gone"
-    assert projects["Site vitrine"].endswith("site-v2")
+    saved = C.load(path)
+    assert set(saved.projects) == {"Site vitrine", "Trader IA"}, "the row you removed is gone"
+    assert saved.projects["Site vitrine"].endswith("site-v2")
+    assert saved.github == {"animalink": "dev-animalink"}, "and an owner is read lowercased"
+
+    drawn = web_settings.describe(C.load(path))
+    assert {"name": "Animalink", "value": "dev-animalink"} in drawn["github"]
+    assert any(section["pairs"] == "github" for section in drawn["sections"])
 
 
 @case
@@ -5653,7 +5674,7 @@ def _cleaning(worktrees: dict[str, dict]) -> tuple[str, list[str]]:
                 git=raw,
                 default_branch=lambda _repo: "main",
                 has_ref=lambda _repo, reference: reference in {"main", "origin/main"} | pushed,
-                pull_request_on=lambda _repo, branch: requests.get(branch, ""),
+                pull_request_on=lambda _repo, branch, accounts=None: requests.get(branch, ""),
                 commits_ahead=lambda worktree, _base: facts(worktree).get("commits", 0),
                 is_dirty=lambda worktree: facts(worktree).get("dirty", False),
                 remove_worktree=lambda _repo, worktree: Path(worktree).rmdir(),
@@ -5885,6 +5906,199 @@ def a_rebase_that_conflicts_is_undone_and_the_session_runs_anyway():
 
 
 @case
+def a_repository_is_worked_under_the_account_its_owner_names():
+    """Two GitHubs on one machine, and the command that goes out as the right one.
+
+    Everything the runner asks `gh` about a repository — its name, its pull
+    request, its merge — has to go out as the account that can see it. What
+    designates it is the owner, read off whatever the caller has in hand: a
+    remote, a pull request URL, or `owner/name` as a project page spells it.
+    """
+    from ticket_runner import git as git_module
+
+    for reference in (
+        "https://github.com/Animalink/site/pull/12",
+        "git@github.com:animalink/site.git",
+        "https://github.com/animalink/site",
+        "animalink/site",
+    ):
+        assert git_module.owner(reference) == "animalink", reference
+    assert git_module.owner("site") == "", "a name alone designates no owner"
+
+    asked: list[str] = []
+
+    def token(account: str) -> str:
+        asked.append(account)
+        return f"gho-{account}" if account != "nobody" else ""
+
+    accounts = {"animalink": "dev-animalink", "salvadorcardona": "salvadevme"}
+    with _git_answering(account_token=token):
+        assert git_module.token_for("animalink/site", accounts) == "gho-dev-animalink"
+        assert git_module.token_for(
+            "https://github.com/SalvadorCardona/x/pull/1", accounts
+        ) == "gho-salvadevme"
+        # An owner nobody named, and a machine that names nobody: both are the
+        # account `gh` is signed in as, which is what one GitHub always did.
+        assert git_module.token_for("someone-else/x", accounts) == ""
+        assert git_module.token_for("animalink/site", {}) == ""
+        # And an account `gh` is not signed in as is not a ticket's problem:
+        # `doctor` says so, the command runs as whoever is active.
+        assert git_module.token_for("x/y", {"x": "nobody"}) == ""
+    assert asked == ["dev-animalink", "salvadevme", "nobody"], asked
+
+
+@case
+def a_gh_call_about_a_repository_carries_that_account_and_nothing_else():
+    """The token reaches the command, and only through the environment.
+
+    `GH_TOKEN` is what `gh` reads before anything on disk — and what the
+    credential helper it installs reads too, which is how the push and the pull
+    request that follows it go out as the same account.
+    """
+    from ticket_runner import git as git_module
+
+    seen: list[dict] = []
+
+    class _Done:
+        returncode, stdout, stderr = 0, "OPEN", ""
+
+    def fake(args, cwd=None, capture_output=True, text=True, timeout=300, env=None):
+        seen.append({"args": list(args), "env": env})
+        return _Done()
+
+    original = git_module.subprocess.run
+    git_module.subprocess.run = fake
+    try:
+        with _git_answering(account_token=lambda account: "gho-secret"):
+            git_module.pull_request_state(
+                "https://github.com/animalink/site/pull/3", {"animalink": "dev-animalink"}
+            )
+            git_module.pull_request_state("https://github.com/x/y/pull/3", {})
+    finally:
+        git_module.subprocess.run = original
+
+    assert seen[0]["env"]["GH_TOKEN"] == "gho-secret"
+    assert seen[0]["env"]["GITHUB_TOKEN"] == "gho-secret"
+    assert "--json" in seen[0]["args"], seen[0]["args"]
+    assert seen[1]["env"] is None, "no account named, no environment touched"
+
+
+@case
+def only_a_merge_a_rebase_could_answer_is_retried():
+    """A refusal about the branch, told apart from a refusal about the work.
+
+    A base branch that moved is what replaying answers. A check still red, a
+    review still missing, a branch whose policy forbids this merge: pushing the
+    branch again would spend a CI run to be refused in the same words.
+    """
+    from ticket_runner import git as git_module
+
+    for refusal in (
+        "gh pr merge: Pull request is not mergeable: the merge commit cannot be cleanly created",
+        "GraphQL: Base branch was modified. Review and try the merge again.",
+        "the head branch is out of date",
+    ):
+        assert git_module.is_behind(refusal), refusal
+    for refusal in (
+        "gh pr merge: Pull request is not mergeable: the base branch policy prohibits the merge",
+        "GraphQL: 1 approving review is required by reviewers with write access",
+        "Required status check “ci” is expected",
+    ):
+        assert not git_module.is_behind(refusal), refusal
+
+
+@case
+def a_merge_refused_for_being_behind_is_replayed_and_asked_again():
+    """The gesture you would make by hand, and nobody should make ten times a day.
+
+    A pull request opened this morning is behind by noon on a repository that
+    takes ten tickets a day. The refusal is about the branch, not about the
+    work, so the branch is replayed onto its base, pushed, and the merge is
+    asked once more — and the ticket says so rather than coming back as a
+    question.
+    """
+    from ticket_runner import git as git_module
+
+    runner = _board_runner(
+        [_reviewed("pbehind", "Validated", "https://github.com/x/y/pull/1")], {}
+    )
+    runner.config.runner.rebase = True
+    runner._project_of = lambda ticket: projects.Project("Site", Path("/repo"))
+    attempts: list[str] = []
+    replayed: list[tuple] = []
+
+    def merge(url: str, method: str = "squash", accounts=None) -> str:
+        attempts.append(url)
+        if len(attempts) == 1:
+            raise git_module.GitError("gh pr merge: Pull request is not mergeable")
+        return "merged"
+
+    def replay(repo, branch, onto, workdir, accounts=None) -> str:
+        replayed.append((repo, branch, onto))
+        return ""
+
+    with _github({"https://github.com/x/y/pull/1": "OPEN"}, merge=merge), _git_answering(
+        pull_request_branches=lambda url, accounts=None: ("ticket/le-header-9d2cb790", "main"),
+        replay_pushed=replay,
+    ):
+        results = runner.deliver()
+
+    assert len(attempts) == 2, "the merge was not asked again"
+    assert replayed == [(Path("/repo"), "ticket/le-header-9d2cb790", "main")], replayed
+    assert results[0]["status"] == "done", results
+    said = runner.client.comments_written[-1]
+    assert "replayed onto" in said, said
+
+
+@case
+def a_merge_refused_for_anything_else_is_still_a_question():
+    """Nothing is pushed again to answer a review that has not happened."""
+    from ticket_runner import git as git_module
+
+    runner = _board_runner(
+        [_reviewed("preview", "Validated", "https://github.com/x/y/pull/1")], {}
+    )
+    runner._project_of = lambda ticket: projects.Project("Site", Path("/repo"))
+    replayed: list[tuple] = []
+
+    def merge(url: str, method: str = "squash", accounts=None) -> str:
+        raise git_module.GitError("gh pr merge: 1 approving review is required")
+
+    with _github({"https://github.com/x/y/pull/1": "OPEN"}, merge=merge), _git_answering(
+        replay_pushed=lambda *args, **kwargs: replayed.append(args) or "",
+    ):
+        results = runner.deliver()
+
+    assert not replayed, "a review that has not happened is not a stale branch"
+    assert results[0]["status"] == "blocked", results
+
+
+@case
+def a_replay_that_conflicts_leaves_the_merge_refused():
+    """The branch goes back as it was, and the ticket asks rather than guesses."""
+    from ticket_runner import git as git_module
+
+    runner = _board_runner(
+        [_reviewed("pconflict", "Validated", "https://github.com/x/y/pull/1")], {}
+    )
+    runner._project_of = lambda ticket: projects.Project("Site", Path("/repo"))
+    attempts: list[str] = []
+
+    def merge(url: str, method: str = "squash", accounts=None) -> str:
+        attempts.append(url)
+        raise git_module.GitError("gh pr merge: Pull request is not mergeable")
+
+    with _github({"https://github.com/x/y/pull/1": "OPEN"}, merge=merge), _git_answering(
+        pull_request_branches=lambda url, accounts=None: ("ticket/le-header-9d2cb790", "main"),
+        replay_pushed=lambda *args, **kwargs: "CONFLICT (content): src/app.py",
+    ):
+        results = runner.deliver()
+
+    assert len(attempts) == 1, "the merge is not asked again on a branch nothing moved"
+    assert results[0]["status"] == "blocked", results
+
+
+@case
 def a_directory_holding_work_is_not_cleared_to_make_room():
     """Uncommitted changes under the ticket's path outrank the ticket."""
     from ticket_runner import git as git_module
@@ -5907,15 +6121,18 @@ def only_a_replayed_branch_is_ever_force_pushed():
 
     sent: list[list[str]] = []
 
-    def fake(args, cwd, timeout=300):
+    def fake(args, cwd, timeout=300, token=""):
         sent.append(list(args))
         return git_module.Result(0, "", "")
 
     with _git_answering(git=fake):
         git_module.push(Path("/nowhere"), "ticket/le-header-9d2cb790")
         git_module.push(Path("/nowhere"), "ticket/le-header-9d2cb790", force=True)
-    assert "--force-with-lease" not in sent[0]
-    assert "--force-with-lease" in sent[1] and "--force" not in sent[1]
+    # Only the pushes: a push also asks the worktree which remote it is on, to
+    # know which GitHub account it goes out under.
+    pushes = [args for args in sent if args[0] == "push"]
+    assert "--force-with-lease" not in pushes[0]
+    assert "--force-with-lease" in pushes[1] and "--force" not in pushes[1]
 
 
 # -- releases ----------------------------------------------------------------

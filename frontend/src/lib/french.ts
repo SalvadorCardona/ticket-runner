@@ -264,10 +264,16 @@ export const FRENCH: Record<string, string> = {
   "the project, as Notion names it": "le projet, tel que Notion le nomme",
   "where it is on this machine": "où il se trouve sur cette machine",
   "remove {{project}}": "retirer {{project}}",
-  "this project": "ce projet",
+  "this row": "cette ligne",
   "No mapping here — the project pages carry it.":
     "Aucune correspondance ici — ce sont les pages de projet qui la portent.",
   "add a project": "ajouter un projet",
+  "the owner, as GitHub spells it": "le propriétaire, tel que GitHub l'écrit",
+  "the gh account it is worked under": "le compte gh sous lequel il est travaillé",
+  "gh auth status lists them": "gh auth status les liste",
+  "One GitHub here — everything goes out as whoever gh is signed in as.":
+    "Un seul GitHub ici — tout part sous le compte auquel gh est connecté.",
+  "add an account": "ajouter un compte",
   "one change, unsaved": "une modification non enregistrée",
   "{{count}} changes, unsaved": "{{count}} modifications non enregistrées",
   revert: "annuler",
@@ -368,6 +374,9 @@ export const FRENCH: Record<string, string> = {
   "Push the branch": "Pousser la branche",
   "Open a pull request": "Ouvrir une pull request",
   "Needs `gh` to be installed and logged in.": "Demande que `gh` soit installé et connecté.",
+  "Replay the branch before the pull request": "Rejouer la branche avant la pull request",
+  "A session takes an hour and the base branch does not wait for it. The branch is put back on top of it before the push, and a validated merge refused for being behind is retried once after the same gesture.":
+    "Une session prend une heure et la branche de base ne l'attend pas. La branche est remise par-dessus avant le push, et une fusion validée refusée pour retard est retentée une fois après le même geste.",
   "Merge a validated ticket by": "Fusionner un ticket validé par",
   "What `gh pr merge` is told when you move a ticket to Validated.":
     "Ce qu'on dit à `gh pr merge` quand vous déplacez un ticket vers Validé.",
@@ -472,6 +481,10 @@ export const FRENCH: Record<string, string> = {
   Projects: "Projets",
   "A Notion project, and the repository it means on this machine. Only needed when the project page says nothing: a `path` or a `github` property on the page keeps the mapping on the board, where every machine can read it.":
     "Un projet Notion, et le dépôt qu'il désigne sur cette machine. Utile seulement quand la page du projet ne dit rien : une propriété `path` ou `github` sur la page garde la correspondance sur le tableau, où toutes les machines peuvent la lire.",
+
+  "Your GitHub accounts": "Vos comptes GitHub",
+  "One machine often answers to two GitHubs — your own and a client's — and `gh` only ever has one of them active, so a pull request on the other is refused for reasons that read like a bug. On the left the owner, as GitHub spells it in a repository's URL; on the right the account, as `gh auth status` lists it. Log each one in once with `gh auth login` and they stay signed in side by side. An owner nobody names here is worked under whichever account `gh` is active as, which is what one GitHub has always done.":
+    "Une machine répond souvent à deux GitHub — le vôtre et celui d'un client — et `gh` n'en a jamais qu'un d'actif : une pull request sur l'autre est refusée pour des raisons qui ressemblent à un bug. À gauche le propriétaire, tel que GitHub l'écrit dans l'URL d'un dépôt ; à droite le compte, tel que `gh auth status` le liste. Connectez chacun une fois avec `gh auth login` et ils restent connectés côte à côte. Un propriétaire que personne ne nomme ici est travaillé sous le compte actif de `gh`, ce qu'un seul GitHub a toujours fait.",
 
   "The columns of your board": "Les colonnes de votre tableau",
   "What each moment is called in your Notion. Empty means the default, and the defaults are not arbitrary: leaving `blocked` unset while naming `failed` is how you say your board has one column for both.":
