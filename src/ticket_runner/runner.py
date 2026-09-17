@@ -17,6 +17,14 @@ sessions run at a time, and every session that ends frees a place the board is
 asked to fill straight away: a ticket made ready at 14:10 starts at 14:10, not
 when the session that began at 14:04 is finally done. A pass therefore ends
 when the ready column is empty and nothing is left in flight — see `_work`.
+
+What is left in this module is that pass and nothing else. `tick` decides what
+a run is made of and in which order; `_work` keeps `max_concurrent` places
+filled until the board has nothing left to fill them with. Everything a pass
+asks for on the way — reading the board, preparing a ticket, running its
+session, carrying out a validated one, answering a comment — is a chapter of
+its own in a module of its own, and `base.py` says why they are assembled the
+way they are rather than held at arm's length.
 """
 
 from __future__ import annotations
@@ -40,6 +48,8 @@ class Runner(
     reports.Reports,
     base.Base,
 ):
+    """One pass of the runner, over everything a pass is made of."""
+
     def update(self) -> None:
         """Once an hour, make sure the installed code is still the newest.
 
