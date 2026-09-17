@@ -18,6 +18,45 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Added
 
+- **The runner stops before the subscription is spent, and leaves you a share of
+  it.** A runner left to itself would chew through every window it is given, so
+  the terminal you open yourself at five o'clock finds nothing left.
+  `runner.credit_reserve_percent` is the share it refuses to touch — 5 by
+  default, so nothing new is started past 95 % — read off the same two figures
+  Claude Code's own `/usage` shows, the session window and the week, whichever
+  is the more constraining. What is already running is never killed: it
+  finishes, because stopping a session halfway spends what it has already cost
+  and gets nothing for it. What costs no credit carries on throughout — a pull
+  request you validated this morning is still merged this afternoon — and that
+  is the whole difference between this line and a spent window, which stops the
+  pass outright. The reading is taken again at every free place rather than once
+  a pass, since the sessions in flight are what fills the window. `0` spends the
+  lot, as before this existed; `50` is the most it accepts; and a reading nobody
+  can take — no Claude Code store, a payload whose shape changed — is one
+  warning and the old behaviour, never a runner that stopped working because it
+  could not find a JSON key. The setting is a field of the console's Settings
+  tab, under *The run*.
+
+- **A ticket the credit ran out under is ticked, not moved to a column of its
+  own.** *Blocked* is the column that means **you** are needed — the agent asked
+  a question and is waiting for an answer — and letting "come back at six" into
+  it made the one column anybody has to open stop saying anything. But an eighth
+  column was the wrong answer to that: nothing *happened* to the ticket, and
+  moving it says something did. So the tickets database gains a checkbox,
+  **Waiting for credit**: the ticket stays exactly as ready — or as validated —
+  as it was, ticked while the window is spent and unticked by the write that
+  claims it. The pass that has credit again takes the ticked ones *before*
+  anything else, because they are the ones already half done. It picks their
+  session back up rather than beginning the ticket over — the conversation is
+  sent one message saying the window rolled over and its own half-done work is
+  still on disk, not the whole frame a second time, and a session Claude Code no
+  longer has falls back to a fresh one. What was queued behind a spent session
+  is ticked the same way rather than sitting in *Ready* looking like a runner
+  gone quiet. Being a property and not a status option is also what makes it
+  reach a board built before it: `ticket-runner init` adds it to an existing
+  database, where an option on a real `status` can only be typed in by hand.
+  Without it nothing breaks — the credit is waited out silently, as before.
+
 - **A project created from its GitHub link alone is cloned, not refused.** Until
   now, a `Repository` property that matched none of the clones under
   `workspace_root` put the project back with "no repository could be found" —

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import shutil
 from datetime import datetime, timezone
+from pathlib import Path
 
 from . import git, notion, progress, session, state
 from . import prompt as prompt_module
@@ -76,20 +77,26 @@ class Execution(Base):
         # The ticket first, then its agent, then the runner: the narrower the
         # choice, the more deliberate it was.
         chosen = job.model or job.agent.model or self.config.runner.model
-        self.say(f"    Claude session {job.session_id}{' · ' + chosen if chosen else ''} → {log}")
         live = job.live = self._live(job)
         try:
-            outcome = session.run(
-                text,
-                cwd=job.workdir,
-                log=log,
-                model=chosen,
-                permission_mode=self.config.runner.permission_mode,
-                timeout_minutes=self.config.runner.timeout_minutes,
-                session_id=job.session_id,
-                environment=self.environment,
-                on_event=live.event if live else None,
-            )
+            outcome = self._session(job, text, log, chosen, live)
+            if job.resume and session.lost(outcome):
+                # A session Claude Code no longer has — pruned, filed on another
+                # machine, or a worktree it cannot be resumed from. The ticket
+                # and its branch are still here, so a fresh session starts from
+                # everything except the thread of the interrupted one.
+                #
+                # Only *that* failure. A resumed session that asked a question,
+                # timed out or crashed did so on its own account, and would do
+                # it again: redoing it costs a second full session — under a
+                # reserve whose whole point is to save credit — and throws away
+                # what the first one had to say.
+                self.say("    ↻ that session could not be picked up — starting a new one")
+                job.session_id, job.resume = session.new_id(), False
+                # Its own log, or the second attempt would open the first one's
+                # with "w" and truncate the very transcript that explains it.
+                log = log.with_name(f"{log.stem}-again{log.suffix}")
+                outcome = self._session(job, text, log, chosen, live)
         except BaseException:
             # A session that dies still leaves a ticket saying “⏳ Live” and a
             # column stuck on whatever it was doing. Closing here is what makes
@@ -122,6 +129,37 @@ class Execution(Base):
             live.close(closing, ok=ended_well)
         self._hold_credits(outcome)
         return outcome
+
+    def _session(
+        self,
+        job: Job,
+        text: str,
+        log: Path,
+        model: str,
+        live: progress.Live | None,
+    ) -> session.Outcome:
+        """One attempt at this job's session, opened or carried on.
+
+        A carried one is sent the short message instead of the frame: it has the
+        ticket, the brief and the context already, and resending them would cost
+        on every resumption what they cost once. See `prompt.CARRY_ON`.
+        """
+        if job.resume:
+            text = prompt_module.carry_on(self.voice.instruction())
+        opening = "picking session" if job.resume else "Claude session"
+        self.say(f"    {opening} {job.session_id}{' · ' + model if model else ''} → {log}")
+        return session.run(
+            text,
+            cwd=job.workdir,
+            log=log,
+            model=model,
+            permission_mode=self.config.runner.permission_mode,
+            timeout_minutes=self.config.runner.timeout_minutes,
+            session_id=job.session_id,
+            resume=job.resume,
+            environment=self.environment,
+            on_event=live.event if live else None,
+        )
 
     def _live(self, job: Job) -> progress.Live | None:
         """The ticket's live report, or None when it is not wanted.
@@ -183,6 +221,7 @@ class Execution(Base):
                 said.say("credit-spent-kept", branch=job.branch)
                 if git.commits_ahead(job.workdir, job.base)
                 else "",
+                home=job.session_home or job.project.path,
             )
 
         if not outcome.ok:
@@ -318,7 +357,12 @@ class Execution(Base):
             # The working directory is left as it is: whatever the session had
             # written into ANSWER.md before the quota ran out is what the next
             # attempt opens on.
-            return self._requeue(ticket, self.config.notion.state("ready"), outcome)
+            return self._requeue(
+                ticket,
+                self.config.notion.state("ready"),
+                outcome,
+                home=job.session_home,
+            )
 
         answer_file = job.workdir / "ANSWER.md"
         content = ""

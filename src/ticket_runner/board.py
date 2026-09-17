@@ -59,12 +59,18 @@ class Board(Base):
         made ready, so a date can only be there to say "not yet".
 
         Among the tickets that may run, order settles who goes first when more
-        are ready than `max_concurrent` allows: priority, then the one whose
-        date passed longest ago, then age. Age last, so that nothing is starved
-        by a steady trickle of newer work.
+        are ready than `max_concurrent` allows: what the credit interrupted
+        before what was never begun, then priority, then the one whose date
+        passed longest ago, then age. Interrupted first because it is the one
+        already half done — its branch carries commits, its session can be
+        picked back up, and leaving it behind a fresh ticket is how a board
+        spends the returning credit on starting things rather than on finishing
+        them. Age last, so that nothing is starved by a steady trickle of newer
+        work.
         """
         tickets = [Ticket(page) for page in self.client.query(self.database, self._ready_filter())]
         tickets += self.woken()
+        interrupted = self.parked(tickets)
         priorities = {name: index for index, name in enumerate(PRIORITIES)}
         default = priorities.get("Normal", len(PRIORITIES))
         now = datetime.now().astimezone()
@@ -80,9 +86,10 @@ class Board(Base):
             moments[ticket.id] = moment.timestamp() if moment else float("inf")
             eligible.append(ticket)
 
-        def rank(ticket: Ticket) -> tuple[int, float, str]:
+        def rank(ticket: Ticket) -> tuple[int, int, float, str]:
             value = notion.read(ticket.page, self.config.notion.prop("priority"))
             return (
+                0 if ticket.id in interrupted else 1,
                 priorities.get(str(value), default),
                 moments[ticket.id],
                 ticket.page.raw.get("created_time", ""),
@@ -120,6 +127,48 @@ class Board(Base):
                 for value in sorted(settled)
             ]
         }
+
+    def waiting_flag(self) -> str:
+        """The checkbox a ticket waits for credit under, or "" without one.
+
+        Optional, like every column past the first few, and asked of the schema
+        rather than assumed: a board built before it has no such property, and
+        the credit then stops the runner exactly as it did before — silently,
+        with the tickets left where they were and nothing on the board to say
+        why. Which is the whole argument for a property over a status option: an
+        attribute *can* be added to an existing database through the API, so
+        running `init` again is enough, where an eighth column would have had to
+        be typed into Notion by hand.
+
+        The type is checked too. A "Waiting for credit" that somebody made a
+        text column is not this: writing `True` into it would read as the word
+        "True" on the board, and querying it would fail the whole pass.
+        """
+        name = self.config.notion.prop("waiting")
+        try:
+            return name if self.client.schema(self.database).get(name) == "checkbox" else ""
+        except notion.NotionError:
+            return ""
+
+    def parked(self, tickets: list[Ticket]) -> set[str]:
+        """Which of these the credit stopped, rather than never started.
+
+        Read off the tickets already in hand instead of by a query of its own:
+        a parked ticket never left its column, so the ready one brought it back
+        like any other. That is the attribute earning its keep — an eighth column
+        meant a second query per pass, and a board where a ticket disappeared
+        from under you between two passes.
+        """
+        flag = self.waiting_flag()
+        if not flag:
+            return set()
+        held = {ticket.id for ticket in tickets if notion.read(ticket.page, flag)}
+        # Said only by a pass that can act on it. A wait lasts hours, and a pass
+        # that will start nothing announcing what it is not starting would be
+        # the whole of the journal by the time the window rolls over.
+        if held and not self.under_reserve():
+            self.say(f"  ▶ {len(held)} ticket(s) waiting for credit — picked up first")
+        return held
 
     def woken(self) -> list[Ticket]:
         """Tickets this runner has already reported on, and answered since.

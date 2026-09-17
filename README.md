@@ -294,6 +294,7 @@ for reading rather than for filling in.
 | `runner.max_concurrent` | `2` | tickets handled side by side — an empty place is filled from the board without waiting for anything to end |
 | `runner.timeout_minutes` | `30` | past this, the session is killed and the ticket fails |
 | `runner.wait_for_credits` | `true` | a spent subscription window puts the runner to sleep instead of failing tickets — see *When the credits run out* below |
+| `runner.credit_reserve_percent` | `5` | the share of each window the runner refuses to touch, so there is a subscription left for you — `0`–`50`, see *Stopping before the wall* below |
 | `runner.model` | `""` | `"opus"`, `"sonnet"`… empty = the CLI's default |
 | `runner.language` | `""` | `"fr"` to be answered in French — see *The language it answers in* below |
 | `runner.permission_mode` | `"bypassPermissions"` | see *What protects your code* below |
@@ -381,7 +382,8 @@ Two things travel with that, and neither is a detail. The CLI is then authentica
 token instead of as you, so **Claude in Chrome does not load** — a ticket that needed the
 browser cannot be handled that way. And the bill is OpenRouter's rather than the
 subscription's: nothing is metered in windows any more, so `runner.wait_for_credits` has
-nothing left to wait for.
+nothing left to wait for, and `runner.credit_reserve_percent` no window to reserve a share
+of.
 
 Both switches are fields of the console's **Settings** tab, under *Every other model*; the
 key is a secret like any other, so it goes out to the page as “set, ending in …abcd” and
@@ -408,6 +410,16 @@ comes back only when you type a new one.
 | `Duration` | number | *optional* — written back, in minutes |
 | `Progress` | text | *optional* — **what the session is doing right now**, rewritten every ten seconds |
 | `Scheduled` | date | *optional* — **hold the ticket until that moment**, then run it — or, on a validated ticket, publish it |
+| `Waiting for credit` | checkbox | *optional* — ticked by the runner while the subscription's window is spent under the ticket. It does not move: it is still ready, and the tick is the note saying why nobody has got to it yet |
+
+`Waiting for credit` is an attribute rather than an eighth column, and on purpose: nothing
+happened to a ticket nothing was started for, so nothing on the board should say it moved.
+The pass that has credit again takes the ticked ones first — they are the ones already
+half done — picks their session back up, and unticks them as it claims them. It is also
+the reason this reaches a board you built last month: a property can be added to an
+existing database through Notion's API, where an option on a real `status` cannot. Run
+`ticket-runner init` again and it appears; skip it and the runner waits out the credit
+exactly as it did before, only silently. See [Stopping before the wall](#stopping-before-the-wall).
 
 `Scheduled` is what turns the board into a calendar. A ticket without one starts within
 seconds of reaching the ready column, so a date on it can only mean *not yet*: the runner
@@ -851,6 +863,14 @@ for what it says — merged, published, out. And *Blocked* is its own column rat
 shade of *Failed*, because the runner works hard to tell them apart — a ticket waiting for
 **you** and a session that crashed are different days, and pouring both into one column
 throws that away.
+
+There is deliberately **no column for "the credit ran out"**. A ticket the subscription
+ran out under is waiting for nobody, so letting it into *Blocked* would have made the one
+column that means "you are needed" also mean "come back at six" — but an eighth column of
+its own would have been just as wrong, because nothing happened to that ticket. It is
+still ready. So it stays where it is and is *ticked*, in a **Waiting for credit** checkbox
+— an attribute of the ticket, not a moment of its life. See
+[the tickets database](#the-tickets-database).
 
 *Validated* is the fourth, and the odd one: every other column **reports**, this one
 **asks**. It is the answer to the question *In review* puts — is this what you wanted? —
@@ -1582,16 +1602,21 @@ the time the credits return there is nobody left to put any of them back.
 
 So it waits instead. When a session dies on the quota:
 
-- **the ticket goes back where it came from** — *ready* for work, *validated* for a
-  publication — with a comment saying why and no question asked of you. Its branch, its
-  worktree and whatever it had already committed are left exactly as they are: the next
-  attempt picks the branch up and carries on from there, as it does for any ticket that
-  has run before;
+- **the ticket goes back to *ready*, ticked as waiting for credit** — and not to
+  *blocked*, which is the column that means *you* are needed; a column that also means
+  "come back at six" has stopped saying anything. A comment says why and asks nothing of
+  you. Its branch, its worktree and whatever it had already committed are left exactly as
+  they are, and so is its session: the pass that has credit again picks that very
+  conversation back up rather than starting the ticket over;
 - **nothing else is started**. The wait is written to
   `~/.local/state/ticket-runner/credits.json`, and the runs in between — a run is a process
   the timer starts, not a loop — find it and do nothing at all: no session, no claim, no
-  answer in a thread;
-- **the first run after it carries on**, as though the pass had never happened.
+  answer in a thread. What was queued behind it is ticked the same way, rather than
+  sitting in *ready* looking like a runner gone quiet;
+- **the first run after it carries on**, and it takes the ticked tickets *first* — before
+  anything else in *ready*. They are the ones already half done, and a board that spends
+  the returning credit on starting things rather than on finishing them is a board that
+  never finishes anything. Claiming one unticks it.
 
 How long it waits is what Claude Code said. `Claude AI usage limit reached|1758031200` is
 the CLI naming the moment; when it names none, the wait is a quarter of an hour and a run
@@ -1602,9 +1627,47 @@ be the expensive mistake — what was hit is the *end* of one, and it may be a m
 same line, because a timer that is on above a board that does not move has only one honest
 reading otherwise: it is broken.
 
+The `Waiting for credit` checkbox is optional, like every property past the first few.
+Being a property is what lets it reach a board that predates it at all: `ticket-runner
+init` adds it to a database it did not build, where an option on a real `status` cannot be
+widened from outside Notion. Without it nothing breaks — the ticket goes back to *ready*
+and the credit is waited out exactly as before, only with nothing on the board to say so.
+
 Set `runner.wait_for_credits = false` to have the old behaviour back — an exhausted quota
 reported as the session failure it looks like. There is one case for it: an
 `ANTHROPIC_API_KEY` runner, which is billed per token and hits nothing to wait for.
+
+### Stopping before the wall
+
+Waiting for a spent window is the cure; not spending it all is the treatment.
+`runner.credit_reserve_percent` is the share of each window the runner refuses to touch —
+5 by default, so it starts nothing past 95 % and there is still a subscription left for
+the terminal *you* open.
+
+It reads the same two figures Claude Code's own `/usage` shows — the session window and
+the week — and takes the more constraining of them: 20 % of the week and 97 % of the
+session is 97 % spent. Past the line:
+
+- **nothing new is started**: not a ticket, not a publication, not an answer in a thread;
+- **what is running is not killed** — it finishes. Stopping a session halfway to save
+  credit would spend what it has already cost and get nothing for it;
+- **everything that costs no credit carries on**: a pull request you validated this
+  morning is still merged this afternoon, merged ones are still closed, the board is still
+  swept. That is the whole difference between this line and a spent window, which stops
+  the pass outright;
+- **the tickets it did not start are ticked as waiting for credit** where they stand, and
+  come back first when the window rolls over;
+- **you are told once**, at the line and again on the way back — not on every pass. Four
+  hours at a ten-second cadence is fourteen hundred passes, and a phone that rings on each
+  of them is a phone that stops being read.
+
+The reading is taken again at every free place rather than once a pass: a pass lasts as
+long as its longest session, and the sessions in flight are what fills the window. `0`
+spends the lot, which is what the runner did before this setting existed; `50` is the most
+it will accept. If the usage cannot be read at all — no Claude Code store, a payload whose
+shape changed — the runner says so once and behaves exactly as it does at `0`: a runner
+that stopped working because it could not find a JSON key would be a far worse failure
+than the one this guards against.
 
 ---
 

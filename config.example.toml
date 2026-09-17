@@ -100,6 +100,15 @@ progress = "Progress"
 # that moment, then picked up on the first pass after it.
 due = "Scheduled"
 
+# checkbox: ticked while the subscription's window is spent under the ticket, or
+# while the reserve below is holding it back. An attribute rather than a column,
+# because nothing happened to the ticket: it is still ready — or still validated
+# — and the tick is the note saying why nobody has got to it yet. The pass that
+# has credit again takes the ticked ones *before* anything else, picking their
+# session back up where it stopped, and unticks them as it claims them.
+# Optional: a board without the column waits exactly as it did before, silently.
+waiting = "Waiting for credit"
+
 # The columns of the *schedules* database — what comes back on its own. A row
 # there is the recipe for a ticket and the cadence it is born at; the body of
 # the page is the brief, copied into each ticket so it reads on its own. What
@@ -216,13 +225,33 @@ timeout_minutes = 30
 
 # A subscription is metered in windows: a few hours of work, then Claude Code
 # answers "usage limit reached" to everything until the window rolls over. With
-# this on, that is not a failure — the ticket goes back to the column it was
-# taken from, its branch and its worktree untouched, and nothing at all is run
-# until the credits return. The CLI usually says when that is; when it does not,
-# the runner tries again a quarter of an hour later.
+# this on, that is not a failure — the ticket stays where it is, ticked as
+# waiting for credit, its branch and its worktree untouched, and nothing at all
+# is run until the credits return. The CLI usually says when that is; when it
+# does not, the runner tries again a quarter of an hour later.
 #   ticket-runner status   says how long there is left to wait
-# Off: an exhausted quota fails every ticket it touches, one after another.
+# Off: an exhausted quota fails every ticket it touches, one after another —
+# and the reserve below stops meaning anything, since there is no window left to
+# hold a share of.
 wait_for_credits = true
+
+# The share of each window the runner refuses to touch, as a percentage, so that
+# the subscription it has been chewing on all afternoon still has something left
+# for the terminal *you* open. At 5 it starts nothing past 95 % of the session
+# window or of the week — whichever is the more constraining, which is the same
+# pair of figures `/usage` shows in Claude Code.
+#
+# What is already running is never killed: it finishes. What was not started is
+# ticked as waiting for credit and comes back, first in the queue, on the pass
+# that has credit again — picking its session back up rather than beginning the
+# ticket over. Merges, publications and everything else that costs no credit
+# carry on throughout.
+#
+# 0 spends the lot, which is what the runner did before this line existed. 50 is
+# the most; past that it is not a reserve, it is a decision to halve the machine.
+# If the usage cannot be read at all — no Claude Code store, a shape that changed
+# — the runner says so once and behaves exactly as it does with 0.
+credit_reserve_percent = 5
 
 # Empty = the CLI's default model. Otherwise "opus", "sonnet", "haiku"…
 model = ""

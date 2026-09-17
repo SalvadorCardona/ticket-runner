@@ -47,6 +47,13 @@ class Replies(Base):
         """
         if self.dry_run or not self.config.runner.reply:
             return []
+        # An answer is a session too, and the reserve is about sessions. The
+        # thread is left unanswered rather than answered badly: the pass that has
+        # credit again finds it exactly where it is, with nothing said in
+        # between — and the clock is deliberately not stamped, so that pass does
+        # not then wait out `reply_interval_seconds` before looking.
+        if self.under_reserve():
+            return []
         ledger = self.ledger
         if not ledger.due(self.config.runner.reply_interval_seconds):
             return []

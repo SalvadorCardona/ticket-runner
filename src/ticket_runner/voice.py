@@ -296,6 +296,12 @@ _SAID: dict[str, dict[str, str]] = {
         "en": "What the session had already committed is kept on `{branch}`.",
         "fr": "Ce que la session avait déjà commité est conservé sur `{branch}`.",
     },
+    "credit-parked": {
+        "en": "nothing was started for it, and nothing is wrong with it: "
+              "the credit comes back at {when}",
+        "fr": "rien n'a été lancé pour lui, et rien ne cloche de son côté : "
+              "le crédit revient à {when}",
+    },
     # -- a run that died in the middle ---------------------------------------
     "abandoned-requeued": {
         "en": "I am picking it up again from the start.",
