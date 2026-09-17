@@ -158,6 +158,21 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
   answering starts a session of its own, while an answer to a blocked ticket —
   typed in Notion, Telegram or Slack — is picked up by the pass itself at the
   next freed place.
+- **A place nothing ever took is filled too, and that is what makes
+  `max_concurrent = 2` mean two.** Filling a place when a session *ended* left
+  the ordinary case out: tickets arrive one at a time, so the first one starts,
+  the second place stays empty, and the pass then had nothing to do but wait for
+  the session in flight before reading the board again. Nobody else could read
+  it either — the run lock is the pass's until it ends, and the timer that fires
+  every interval meets it and leaves — so one ticket in progress meant one
+  ticket at a time, however many places you had allowed. A pass now looks at the
+  board for as long as it holds an empty place, every `interval_seconds`: the
+  same cadence the timer reads it on, so a board watched every ten seconds
+  starts a second ticket within ten seconds of it being made ready, and one
+  watched every half hour behaves exactly as if the runner had been idle.
+  Nothing else moved — a full pool still waits for a completion and costs not
+  one extra request, `--limit` still caps the pass and not the width, and a
+  spent subscription still stops the pass from starting anything at all.
 - The web console has been redrawn. Every page opens the same way — where you
   are, said as a path; a heading you can read from across the room; and the one
   line that says what the page is for — and the accent is a lime, so the button

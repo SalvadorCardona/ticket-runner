@@ -266,8 +266,8 @@ for reading rather than for filling in.
 | Key | Default | Effect |
 | --- | --- | --- |
 | `runner.workspace_root` | `~/workspace` | where to look for repositories — and where one you have not cloned yet is cloned |
-| `runner.interval_seconds` | `1800` | seconds between two passes — `ticket-runner enable` applies a change |
-| `runner.max_concurrent` | `2` | tickets handled side by side — a place that frees is refilled at once |
+| `runner.interval_seconds` | `1800` | seconds between two passes, and how often a pass in flight looks for a ticket to put in an empty place — `ticket-runner enable` applies a change |
+| `runner.max_concurrent` | `2` | tickets handled side by side — an empty place is filled from the board without waiting for anything to end |
 | `runner.timeout_minutes` | `30` | past this, the session is killed and the ticket fails |
 | `runner.wait_for_credits` | `true` | a spent subscription window puts the runner to sleep instead of failing tickets — see *When the credits run out* below |
 | `runner.model` | `""` | `"opus"`, `"sonnet"`… empty = the CLI's default |
@@ -304,6 +304,14 @@ frees a place, the board is read again on the spot, and what goes in is whicheve
 is top of the queue *then* — priority, date, age, exactly as at the start. So a ticket
 made ready at 14:10 starts at 14:10 rather than waiting on the two-hour session that
 began at 14:04, and the pass ends when nothing is ready and nothing is in flight.
+
+A place does not have to be *freed* to be filled: one that was never taken — two places,
+one ticket ready — is looked at too, every `interval_seconds`, for as long as the pass
+lasts. That is the same cadence the timer reads the board on, and it has to come from the
+pass, because the run lock belongs to the pass until it ends and the timer only meets it
+and leaves. Without it, tickets arriving one at a time would run one at a time whatever
+`max_concurrent` said, which is exactly what a board with one ticket in progress and
+three waiting looks like.
 
 Two things follow. `ticket-runner run --limit 3` means three tickets for that pass, not
 three at a time — the limit caps what is taken off the board, `max_concurrent` caps what

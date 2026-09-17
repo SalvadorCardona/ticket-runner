@@ -2294,6 +2294,16 @@ class Runner:
         held out by hand, because Notion may still be serving the status this
         very pass wrote.
 
+        A completion is not the *only* place, and that was the second half of
+        the same fault: a place standing empty while one session runs is a place
+        the board could fill straight away, and waiting for that session to end
+        before looking made `max_concurrent = 2` behave like one. Nobody else
+        can look either — the run lock belongs to this pass for as long as it
+        lasts, and the timer meets it and leaves. So the pass looks on its own,
+        at the timer's cadence (`interval_seconds`): exactly as often as the
+        board would have been read had nothing been running, and not one request
+        more.
+
         Results are recorded one by one rather than at the end, so
         `ticket-runner history` shows a ticket that finished in four minutes
         without waiting on the one that will take two hours.
@@ -2306,6 +2316,7 @@ class Runner:
         started: set[str] = set()
         queued = list(ready)
         flight: set[Future] = set()
+        stalled = False  # the credits ran out: nothing more is begun
 
         with ThreadPoolExecutor(max_workers=width) as pool:
             while True:
@@ -2323,12 +2334,25 @@ class Runner:
                         flight.add(pool.submit(self.execute, job))
                 if not flight:
                     return results
-                done, flight = wait(flight, return_when=FIRST_COMPLETED)
+                # An empty place is a reason to come back before a session ends;
+                # a full pool is not, and waits for one exactly as it did.
+                empty = (
+                    refill
+                    and not stalled
+                    and len(flight) < width
+                    and (remaining is None or remaining > 0)
+                )
+                done, flight = wait(
+                    flight,
+                    timeout=self.config.runner.interval_seconds if empty else None,
+                    return_when=FIRST_COMPLETED,
+                )
                 for future in done:
                     result = future.result()
                     results.append(result)
                     state.record(result)
-                if self.waiting_for_credits():
+                stalled = bool(self.waiting_for_credits())
+                if stalled:
                     # A session died on the quota while this pass was running.
                     # Every one it could still start would die on the same
                     # sentence, so nothing more is begun — what is in flight is
@@ -2336,7 +2360,7 @@ class Runner:
                     # the board up where it was.
                     queued = []
                     continue
-                if refill and (remaining is None or remaining > 0):
+                if (done or empty) and refill and (remaining is None or remaining > 0):
                     queued = self._again(started)
 
     def _again(self, started: set[str]) -> list[Ticket]:
