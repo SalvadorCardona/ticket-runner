@@ -1,6 +1,6 @@
 """What every other piece of a run has under its hand.
 
-A run is deliberately *one* object: one Notion client, one reading of the
+A run is deliberately *one* object: one store, one reading of the
 workspace, one cache of a page's comments, one ledger of what has been said and
 one lock over it. Two of them would mean two claims on the same ticket, the
 same thread fetched twice, and a comment answered by whichever half read it
@@ -25,7 +25,7 @@ import socket
 import threading
 from datetime import datetime
 
-from . import channels, conversation, notify, notion, openrouter
+from . import channels, conversation, notify, openrouter, store
 from . import voice as voice_module
 from . import workspace as workspace_module
 from .config import Config
@@ -51,7 +51,10 @@ class Base:
         # minute into the systemd journal forever, and buries the runs that
         # matter. A terminal wants the reassurance; a log does not.
         self.announce_idle = announce_idle
-        self.client = notion.Client(config.notion.token)
+        # The board, whichever one the configuration asked for: Notion, a
+        # directory of Markdown files, or the two kept in step. Nothing above
+        # this line knows which — see store.py.
+        self.client = store.open(config)
         self.resolver = Resolver(
             config.runner.workspace_root, config.projects, config.github
         )
@@ -61,7 +64,7 @@ class Base:
         # what wakes a ticket, what goes into its prompt, and what is waiting
         # for an answer — and asking Notion three times for the same thread is
         # how a board with forty tickets becomes a rate limit problem.
-        self._comments: dict[str, list[notion.Comment]] = {}
+        self._comments: dict[str, list[store.Comment]] = {}
         self._ledger: conversation.Ledger | None = None
         self._ledger_lock = threading.Lock()
         self._spellings: tuple[str, ...] | None = None

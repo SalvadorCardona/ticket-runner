@@ -141,3 +141,69 @@ def to_blocks(markdown: str) -> list[dict]:
 def chunked(blocks: list[dict], size: int = MAX_BLOCKS) -> list[list[dict]]:
     """Notion accepts at most 100 blocks per append."""
     return [blocks[index : index + size] for index in range(0, len(blocks), size)] or [[]]
+
+
+# -- and back again ----------------------------------------------------------
+
+
+def _rich(block: dict, kind: str) -> str:
+    """The text of one block, whichever end of the wire it came from.
+
+    Notion hands a piece of rich text back with `plain_text` on it; a block this
+    module has just *built* carries `text.content` instead. Reading both is what
+    lets `plain` serve the two callers it has — flattening a page the API
+    returned, and writing down blocks the live report made.
+    """
+    return "".join(
+        part.get("plain_text") or (part.get("text") or {}).get("content", "")
+        for part in block.get(kind, {}).get("rich_text", [])
+    )
+
+
+def plain(block: dict) -> str:
+    """One Notion block, as the markdown line it came from.
+
+    The return journey, and it lives here rather than in the client because a
+    block is the shape a *page* is made of, not a shape the HTTP layer invented:
+    the Notion client flattens a page with it, and a board made of files writes
+    the live report's blocks down with it.
+
+    Lossy where Notion is richer than a line of text — a toggle keeps its title
+    and loses its fold, a table comes back empty — and that is the trade the
+    whole conversion is: the text always reaches the reader, at worst without
+    its furniture.
+    """
+    kind = block.get("type", "")
+    if kind == "paragraph":
+        return _rich(block, kind)
+    if kind in ("heading_1", "heading_2", "heading_3"):
+        return f"{'#' * int(kind[-1])} {_rich(block, kind)}"
+    if kind == "bulleted_list_item":
+        return f"- {_rich(block, kind)}"
+    if kind == "numbered_list_item":
+        return f"1. {_rich(block, kind)}"
+    if kind == "to_do":
+        done = block.get(kind, {}).get("checked")
+        return f"- [{'x' if done else ' '}] {_rich(block, kind)}"
+    if kind in ("quote", "callout"):
+        return f"> {_rich(block, kind)}"
+    if kind == "toggle":
+        return _rich(block, kind)
+    if kind == "code":
+        language = block.get(kind, {}).get("language", "")
+        return f"```{language}\n{_rich(block, kind)}\n```"
+    if kind == "divider":
+        return "---"
+    if kind in ("image", "file", "pdf"):
+        payload = block.get(kind, {})
+        source = payload.get("external", {}).get("url") or payload.get("file", {}).get("url", "")
+        caption = "".join(part.get("plain_text", "") for part in payload.get("caption", []))
+        # The S3 URL is signed and expires: it is indicative only.
+        return f"[{caption or kind} attached to the ticket: {source.split('?')[0]}]"
+    if kind == "bookmark":
+        return block.get(kind, {}).get("url", "")
+    if kind == "child_page":
+        return f"[sub-page: {block.get(kind, {}).get('title', '')}]"
+    if kind in ("table", "table_row", "column_list", "column"):
+        return ""
+    return _rich(block, kind)

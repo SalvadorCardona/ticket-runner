@@ -40,7 +40,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .. import config as config_module
-from .. import notion
+from .. import store
 from ..config import Config, state_dir
 from .api import Api
 
@@ -280,9 +280,9 @@ class Handler(BaseHTTPRequestHandler):
             if route == "/api/board":
                 return self._json(self.api.board())
             if route == "/api/projects":
-                return self._json({"projects": sorted(
-                    self.api.projects().values(), key=lambda item: item["name"].lower()
-                )})
+                return self._json(self.api.all_projects())
+            if route == "/api/context":
+                return self._json(self.api.context())
             if route == "/api/schedules":
                 return self._json(self.api.schedules())
             if route == "/api/history":
@@ -299,8 +299,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(self.api.logs())
             if match := re.fullmatch(r"/api/logs/([\w.\-]+)", route):
                 return self._json(self.api.log(match.group(1)))
-        except notion.NotionError as error:
-            return self._fail(502, f"Notion: {str(error).splitlines()[0]}")
+        except store.StoreError as error:
+            return self._fail(502, f"the board: {str(error).splitlines()[0]}")
         except LookupError as error:
             return self._fail(404, str(error))
         except Exception as error:  # noqa: BLE001
@@ -353,6 +353,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(self.api.chat.reset())
             if route == "/api/settings":
                 return self._json(self.api.save_settings(payload))
+            if route == "/api/context":
+                return self._json(self.api.save_context(str(payload.get("text", ""))))
+            if route == "/api/schedules":
+                return self._json(
+                    self.api.create_schedule(str(payload.get("name", "")), payload)
+                )
+            if match := re.fullmatch(r"/api/schedules/([0-9a-fA-F-]{32,36})", route):
+                return self._json(self.api.save_schedule(match.group(1), payload))
             if route == "/api/refresh":
                 self.api.forget()
                 self.api.watch.nudge()
@@ -365,8 +373,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._fail(409, str(error))
         except FileNotFoundError as error:
             return self._fail(503, str(error))
-        except notion.NotionError as error:
-            return self._fail(502, f"Notion: {str(error).splitlines()[0]}")
+        except store.StoreError as error:
+            return self._fail(502, f"the board: {str(error).splitlines()[0]}")
         except Exception as error:  # noqa: BLE001
             return self._fail(500, str(error).splitlines()[0])
 

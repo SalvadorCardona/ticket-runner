@@ -9,6 +9,47 @@
 # time, and leaves these comments where they are — so editing it by hand and
 # editing it in a browser are the same gesture, and neither undoes the other.
 
+[storage]
+# Where the board lives. Three answers, and the first is what this tool has
+# always done.
+#
+#   "notion"    the board is Notion's, exactly as before. Nothing below this
+#               line changes anything, and [notion] is what matters
+#   "markdown"  the board is a directory of Markdown files — properties in a
+#               YAML frontmatter, the page's content under it. Notion is never
+#               asked anything: no token, no integration, no page to share, no
+#               network. `ticket-runner doctor` stops asking too
+#   "both"      the two, kept in step. A pass reconciles them before it reads
+#               the queue, and every write lands on both — see `conflict` below
+#
+# Reading a ticket, running it and reporting on it are the same in all three:
+# the runner talks to a board through one interface, and which one it got is
+# decided here and nowhere else.
+mode = "notion"
+
+# Where the Markdown board is, for "markdown" and for "both". Left empty it is
+#   ~/.local/state/ticket-runner/board
+# and it is a plain directory — `tickets/`, `projects/`, `agents/`,
+# `schedules/`, `comments/` and `context.md`. Nothing stops you putting it in a
+# git repository of its own, which is most of the point of having it.
+path = ""
+
+# Who wins when the same page changed on both sides since the last
+# reconciliation. "newest" is the only rule there is: the later
+# `last_edited_time` is kept, and the one that lost is written into the journal
+#   ~/.local/state/ticket-runner/sync.jsonl
+# with both timestamps. Nothing is ever overwritten without a line saying so,
+# and nothing is ever deleted: a page that disappeared on one side is
+# journalled and left alone on the other.
+#
+#   ticket-runner sync             reconcile now, and say what moved
+#   ticket-runner sync --journal   what past reconciliations did
+conflict = "newest"
+
+# Whether a pass reconciles before doing anything else. Off, and the two boards
+# only meet when you run `ticket-runner sync` yourself.
+on_every_pass = true
+
 [notion]
 # Token of an internal Notion integration (https://www.notion.so/my-integrations).
 # The workspace page must be shared with it — everything under it is then

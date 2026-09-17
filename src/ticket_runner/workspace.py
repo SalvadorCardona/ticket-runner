@@ -1,4 +1,4 @@
-"""Finding what the runner needs from one Notion workspace.
+"""Finding what the runner needs from one workspace.
 
 Naming the tickets database works, but it means one configuration key per
 database — and the day a second one matters, a third key, and a fourth. A Notion
@@ -16,6 +16,10 @@ Two rules keep that from becoming brittle:
   not a migration: a configuration written before it exists keeps working
   untouched, and pointing at one database from a workspace you would rather not
   share whole stays possible.
+
+All of which is *Notion's* shape, and that is why `from_notion` is named for it:
+a Markdown board has no directory and no rows, it has four directories on disk.
+`resolve` therefore asks the store, and each store answers in its own terms.
 """
 
 from __future__ import annotations
@@ -35,6 +39,10 @@ class Workspace:
     # not a fault: the row is optional exactly as the other two are.
     schedules: str = ""
     context: str = ""
+    # The page the context was read off, so that it can be written back: the
+    # console edits it as a text area, and a text you can read but not save is
+    # worse than one you cannot see. Empty where there is no such page.
+    context_page: str = ""
     rows: dict[str, str] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 
@@ -54,8 +62,17 @@ def _index(client: notion.Client, database_id: str) -> dict[str, str]:
     return index
 
 
-def resolve(client: notion.Client, settings: Notion) -> Workspace:
-    """The databases and the standing context, from the configuration.
+def resolve(backend, settings: Notion) -> Workspace:
+    """The databases and the standing context, whichever store holds them.
+
+    One line, and it is the seam: every caller used to reach for Notion's own
+    layout, and now asks the board it was handed what it is made of.
+    """
+    return backend.workspace(settings)
+
+
+def from_notion(client: notion.Client, settings: Notion) -> Workspace:
+    """The databases and the standing context, from a Notion workspace.
 
     Raises NotionError when the tickets database cannot be reached: that one is
     what a run is made of, and continuing without it would only mean reporting
@@ -103,6 +120,7 @@ def resolve(client: notion.Client, settings: Notion) -> Workspace:
                 space.warnings.append(f"{key} database unreadable: {_first_line(error)}")
 
     if page := row("context"):
+        space.context_page = page
         try:
             space.context = client.blocks_text(page)
         except notion.NotionError as error:

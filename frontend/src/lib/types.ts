@@ -52,10 +52,38 @@ export interface Board {
 }
 
 export interface Project {
+  /** Empty for a project the configuration names and the board has never heard of. */
   id: string
   name: string
   kind: string
   url: string
+  /** What the project page declares, when it declares anything. */
+  repository?: string
+  path?: string
+  /** The `[projects]` entry of the configuration, where there is one. */
+  configured?: string
+  /** Where this row came from: the board, or the file on this machine. */
+  source?: "board" | "config"
+  /** How many tickets point at it. */
+  tickets?: number
+}
+
+export interface Projects {
+  projects: Project[]
+  workspace_root: string
+  /** `storage.mode`: which board these came off. */
+  storage: string
+}
+
+/** The standing context: what reaches every ticket before the ticket itself. */
+export interface Context {
+  text: string
+  /** The page it is written on, "" where the workspace has none. */
+  page: string
+  /** What that page is called, for the sentence that says it is missing. */
+  where: string
+  storage: string
+  editable: boolean
 }
 
 /** One row of the Schedules database: a recipe for a ticket, and how often it is born. */
@@ -105,6 +133,10 @@ export interface RunnerState {
   /** The same moment, as a clock reads it. */
   credits_at: string
   workspace_root: string
+  /** `storage.mode`: "notion", "markdown", or "both". */
+  storage: string
+  /** Where the Markdown board is, empty unless there is one. */
+  board_path: string
   interval_seconds: number
   model: string
   permission_mode: string

@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-from . import notion
+from . import store
 from .config import state_dir
 
 # What to call it when you want its attention. Configurable — `notion.mention` —
@@ -88,10 +88,10 @@ class Thread:
     """
 
     discussion: str
-    comments: list[notion.Comment] = field(default_factory=list)
+    comments: list[store.Comment] = field(default_factory=list)
 
     @property
-    def last(self) -> notion.Comment:
+    def last(self) -> store.Comment:
         return self.comments[-1]
 
     def spoken_by(self, user: str) -> bool:
@@ -122,12 +122,12 @@ def said(text: str) -> str:
     return rest.strip() or text
 
 
-def ours(comment: notion.Comment, me: str) -> bool:
+def ours(comment: store.Comment, me: str) -> bool:
     """Is this the runner's own voice — not merely its token?"""
     return bool(me) and comment.created_by == me and not is_relayed(comment.text)
 
 
-def threads(comments: Iterable[notion.Comment]) -> list[Thread]:
+def threads(comments: Iterable[store.Comment]) -> list[Thread]:
     """The comments of a page, grouped into their discussions, in order.
 
     A comment whose discussion Notion did not give us is a thread of one rather
@@ -175,7 +175,7 @@ def addressed(text: str, spellings: Iterable[str]) -> bool:
 
 
 def waiting(
-    comments: Iterable[notion.Comment], *, me: str, spellings: Iterable[str]
+    comments: Iterable[store.Comment], *, me: str, spellings: Iterable[str]
 ) -> list[Thread]:
     """The threads of a page that are waiting on a reply from the runner.
 

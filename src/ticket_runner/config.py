@@ -18,6 +18,10 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# The two vocabularies of `[storage]`, kept where the interface is declared —
+# `store.py` imports nothing from here, so this direction is the safe one.
+from .store import CONFLICTS, MODES
+
 PLACEHOLDER = "ntn_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 # Where the console's sign-in may be written instead of in the file.
@@ -273,6 +277,49 @@ class OpenRouter:
     route_sessions: bool = False
 
 
+def board_dir() -> Path:
+    """Where a Markdown board lives when the file does not say.
+
+    Under the state directory, beside the worktrees and the logs, because that
+    is where this tool already keeps what it made rather than what you wrote.
+    Anybody who would rather have it in a repository of their own says so —
+    which is most of the point of a board made of files.
+    """
+    return state_dir() / "board"
+
+
+@dataclass
+class Storage:
+    """Where the board is kept, and what to do when two copies disagree.
+
+    `notion` is the default and the whole of the old behaviour: one board, in
+    Notion, and not a line of this module is felt. `markdown` is the same board
+    as files on disk, and never touches the network — no token is read, nothing
+    is resolved, `ticket-runner doctor` stops asking Notion who you are.
+    `both` keeps the two in step: a pass reconciles them before it reads the
+    queue, and `conflict` says who wins when the same page moved on both sides.
+    """
+
+    mode: str = "notion"
+    path: Path = field(default_factory=board_dir)
+    # "newest": the later `last_edited_time` wins, and the loser is journalled
+    # rather than dropped quietly. The only rule there is, and named so that the
+    # day there is a second one the file can say which.
+    conflict: str = "newest"
+    # Whether a pass reconciles the two before it does anything else. Off is for
+    # somebody who would rather run `ticket-runner sync` when it suits them.
+    on_every_pass: bool = True
+
+    @property
+    def notion(self) -> bool:
+        """Does this installation talk to Notion at all?"""
+        return self.mode in ("notion", "both")
+
+    @property
+    def markdown(self) -> bool:
+        return self.mode in ("markdown", "both")
+
+
 @dataclass
 class Config:
     notion: Notion
@@ -282,6 +329,7 @@ class Config:
     web: Web = field(default_factory=Web)
     notify: Notify = field(default_factory=Notify)
     openrouter: OpenRouter = field(default_factory=OpenRouter)
+    storage: Storage = field(default_factory=Storage)
     # `[github]`: which of your GitHub accounts each owner is worked under, as
     # `owner = "the gh account"`. Empty is a machine with one account, which is
     # every machine until it is not — see `git.token_for`.
@@ -289,6 +337,10 @@ class Config:
 
     def require_usable(self) -> None:
         """Raise ConfigError if the file is not complete enough to run."""
+        if not self.storage.notion:
+            # A Markdown board needs nothing named and nothing shared: the
+            # directory is made the first time something is written into it.
+            return
         missing = []
         if not self.notion.token or self.notion.token == PLACEHOLDER:
             missing.append("notion.token")
@@ -300,7 +352,8 @@ class Config:
             raise ConfigError(
                 f"{', '.join(missing)} must be set in {self.path}\n"
                 "  ticket-runner init <page-url>   builds the databases and fills this in\n"
-                "  ticket-runner config            opens the file in your editor"
+                "  ticket-runner config            opens the file in your editor\n"
+                "  storage.mode = \"markdown\"       runs the whole thing without Notion"
             )
 
 
@@ -785,6 +838,23 @@ def load(path: Path | None = None) -> Config:
         route_sessions=bool(router_raw.get("route_sessions", router_defaults.route_sessions)),
     )
 
+    storage_raw = raw.get("storage", {})
+    storage_defaults = Storage()
+    # Filtered rather than trusted, and for once that is not paranoia: a typo
+    # here would silently decide where the board lives. An unknown word falls
+    # back on Notion, which is what a file that says nothing already gets.
+    mode = str(storage_raw.get("mode", storage_defaults.mode)).strip().lower()
+    conflict = str(storage_raw.get("conflict", storage_defaults.conflict)).strip().lower()
+    storage = Storage(
+        mode=mode if mode in MODES else storage_defaults.mode,
+        path=Path(os.path.expanduser(str(storage_raw.get("path", "")))) if storage_raw.get("path")
+        else storage_defaults.path,
+        conflict=conflict if conflict in CONFLICTS else storage_defaults.conflict,
+        on_every_pass=bool(
+            storage_raw.get("on_every_pass", storage_defaults.on_every_pass)
+        ),
+    )
+
     notify_raw = raw.get("notify", {})
     # `runner.notify` came first and said "one desktop notification per ticket".
     # It keeps saying exactly that: the new table only has to name what it
@@ -812,6 +882,7 @@ def load(path: Path | None = None) -> Config:
         web=web,
         notify=notify,
         openrouter=openrouter,
+        storage=storage,
         github=github,
     )
 

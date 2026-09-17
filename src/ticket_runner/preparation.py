@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import shutil
 
-from . import agents, git, naming, notion, session, state
+from . import agents, git, naming, session, state, store
 from . import voice as voice_module
 from .base import Base
 from .config import state_dir
@@ -33,7 +33,7 @@ class Preparation(Base):
 
     def prepare(self, ticket: Ticket) -> Job | None:
         """Locate the project and claim the ticket. None if it is unusable."""
-        relation = notion.read(ticket.page, self.config.notion.prop("project")) or []
+        relation = store.read(ticket.page, self.config.notion.prop("project")) or []
         if not relation:
             # No project at all is not an error: it is the plainest possible
             # document ticket. "Draft me an email", "summarise this" — there is
@@ -49,14 +49,14 @@ class Preparation(Base):
                 project = self.resolver.resolve(
                     self.client, relation[0], clone=not self.dry_run
                 )
-            except (LookupError, notion.NotionError) as error:
+            except (LookupError, store.StoreError) as error:
                 self._fail(ticket, self.voice.say("no-project"), str(error), blocked=True)
                 return None
 
         short = short_id(ticket.id)
         try:
             body = self.client.blocks_text(ticket.page.id)
-        except notion.NotionError as error:
+        except store.StoreError as error:
             self._fail(ticket, self.voice.say("unreadable"), str(error))
             return None
         if is_blank(body):
@@ -88,7 +88,7 @@ class Preparation(Base):
 
         # Both are optional and neither can fail a ticket: a database with no
         # Agent column reads as no agent, and unreadable comments as none.
-        role = notion.read(ticket.page, self.config.notion.prop("role")) or []
+        role = store.read(ticket.page, self.config.notion.prop("role")) or []
         agent = (
             agents.resolve(self.client, role[0], self.config.notion.prop("model"))
             if role
@@ -111,11 +111,11 @@ class Preparation(Base):
             session_id=carried or session.new_id(),
             resume=bool(carried),
             log=state.log_file(short),
-            model=str(notion.read(ticket.page, self.config.notion.prop("model")) or ""),
+            model=str(store.read(ticket.page, self.config.notion.prop("model")) or ""),
             agent=agent,
             comments=self.discussion(ticket),
         )
-        where = f"{project.path} · {branch}" if project.is_code else "document → Notion"
+        where = f"{project.path} · {branch}" if project.is_code else "document → the ticket's page"
         said = f" · {len(job.comments)} comment(s)" if job.comments else ""
         role = f" · as {agent.name}" if agent else ""
         self.say(f"  → {ticket.title}\n    {project.name or 'no project'} · {where}{role}{said}")
@@ -195,7 +195,7 @@ class Preparation(Base):
                 ticket.page.id,
                 {self.client.title_property(self.database): title},
             )
-        except notion.NotionError as error:
+        except store.StoreError as error:
             self.say(f"  ! the title could not be written to Notion: {voice_module.line(error)}")
             return
         ticket.page.title = title

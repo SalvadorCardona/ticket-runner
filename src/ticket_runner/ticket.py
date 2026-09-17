@@ -18,13 +18,13 @@ import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import agents, notion, progress
+from . import agents, progress, store
 from .projects import Project
 
 
 @dataclass
 class Ticket:
-    page: notion.Page
+    page: store.Page
 
     @property
     def id(self) -> str:

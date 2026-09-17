@@ -18,6 +18,7 @@ from pathlib import Path
 from datetime import datetime
 
 from . import __version__, channels, config as config_module, conversation, credits, git, notion
+from . import store
 from . import provision
 from . import schedules as schedules_module
 from . import session, state, systemd
@@ -93,8 +94,8 @@ def command_run(args: argparse.Namespace) -> int:
     except state.Busy as error:
         print(f"{DIM}{error}{RESET}")
         return 0
-    except notion.NotionError as error:
-        print(f"{RED}Notion:{RESET} {error}", file=sys.stderr)
+    except store.StoreError as error:
+        print(f"{RED}the board:{RESET} {error}", file=sys.stderr)
         return 1
     failures = sum(1 for result in results if result.get("status") == "failed")
     # The timer should only see a failure if the whole run failed: one ticket
@@ -129,17 +130,17 @@ def command_list(args: argparse.Namespace) -> int:
     if tickets:
         title(f"{len(tickets)} ticket(s) to handle, in the order they will run")
     for position, ticket in enumerate(tickets, 1):
-        relation = notion.read(ticket.page, configuration.notion.prop("project")) or []
+        relation = store.read(ticket.page, configuration.notion.prop("project")) or []
         project, kind = "?", ""
         if relation:
             try:
                 resolved = runner.resolver.resolve(runner.client, relation[0])
                 project = resolved.name
                 kind = "code" if resolved.is_code else "document"
-            except (LookupError, notion.NotionError):
+            except (LookupError, store.StoreError):
                 project = f"{YELLOW}project not found{RESET}"
         badges = [
-            str(notion.read(ticket.page, configuration.notion.prop(key)) or "")
+            str(store.read(ticket.page, configuration.notion.prop(key)) or "")
             for key in ("priority", "model")
         ]
         tail = " · ".join([part for part in [project, kind, *badges] if part])
@@ -184,8 +185,8 @@ def command_schedules(args: argparse.Namespace) -> int:
     runner = Runner(configuration, quiet=True)
     try:
         rows = runner.schedules()
-    except notion.NotionError as error:
-        print(f"{RED}Notion:{RESET} {error}", file=sys.stderr)
+    except store.StoreError as error:
+        print(f"{RED}the board:{RESET} {error}", file=sys.stderr)
         return 1
 
     if not runner.workspace.schedules:
@@ -274,7 +275,7 @@ def command_projects(args: argparse.Namespace) -> int:
     runner = Runner(configuration, quiet=True)
     seen: dict[str, None] = {}
     for ticket in runner.client.query(runner.database):
-        for page_id in notion.read(ticket, configuration.notion.prop("project")) or []:
+        for page_id in store.read(ticket, configuration.notion.prop("project")) or []:
             seen.setdefault(page_id, None)
     if not seen:
         print("No project referenced by any ticket.")
@@ -291,10 +292,63 @@ def command_projects(args: argparse.Namespace) -> int:
                 warn(f"{project.name} → {where}\n    {project.note}")
             else:
                 ok(f"{project.name} → {where}")
-        except (LookupError, notion.NotionError) as error:
+        except (LookupError, store.StoreError) as error:
             failed += 1
             bad(str(error).replace("\n", "\n    "))
     return 1 if failed else 0
+
+
+def command_sync(args: argparse.Namespace) -> int:
+    """Reconcile the Notion board and the Markdown one, and say what moved.
+
+    A pass already does this on its own when `storage.mode = "both"`. This is
+    for the two moments a pass is no help: the first reconciliation, where you
+    want to watch what a full board does before it does it to both copies, and
+    after an editing session in the files, where waiting for the timer is a
+    silly way to find out whether the frontmatter was readable.
+    """
+    from . import sync as sync_module
+
+    configuration = load_config()
+    if args.journal:
+        entries = sync_module.journal(args.number)
+        if not entries:
+            print("Nothing has been synchronised yet.")
+            return 0
+        title(f"The last {len(entries)} entries")
+        for entry in entries:
+            mark = {"conflict": YELLOW, "deleted-in-notion": YELLOW, "deleted-in-markdown": YELLOW}
+            colour = mark.get(entry.get("what", ""), DIM)
+            said = " — " + entry["detail"] if entry.get("detail") else ""
+            print(
+                f"  {entry.get('at', '')[:16]}  {colour}{entry.get('what', '')}{RESET}  "
+                f"{entry.get('title') or entry.get('page', '')}{DIM}{said}{RESET}"
+            )
+        return 0
+
+    if configuration.storage.mode != "both":
+        bad(f'storage.mode is "{configuration.storage.mode}" — there is only one board to read')
+        print(f"  {DIM}set storage.mode = \"both\" to keep Notion and Markdown in step{RESET}")
+        return 2
+
+    backend = store.open(configuration)
+    title("Reconciling")
+    report = backend.synchronise(configuration.notion)
+    for problem in report.problems:
+        bad(problem)
+    for entry in report.carried:
+        ok(f"{entry.what}  {entry.title or entry.page}")
+    for entry in report.conflicts:
+        warn(f"{entry.title or entry.page} — {entry.detail}")
+    for entry in report.deletions:
+        warn(f"{entry.title or entry.page} — {entry.detail}")
+    if not report:
+        print(f"  {DIM}nothing to carry across — the two boards agree{RESET}")
+    print(
+        f"\n{len(report.carried)} carried, {len(report.conflicts)} conflict(s), "
+        f"{len(report.deletions)} deletion(s) — journal: {sync_module.journal_path()}"
+    )
+    return 1 if report.problems else 0
 
 
 def command_history(args: argparse.Namespace) -> int:
@@ -378,7 +432,7 @@ def command_status(args: argparse.Namespace) -> int:
         runner = Runner(configuration, quiet=True)
         counts: dict[str, int] = {}
         for page in runner.client.query(runner.database):
-            name = str(notion.read(page, configuration.notion.prop("status")) or "—")
+            name = str(store.read(page, configuration.notion.prop("status")) or "—")
             counts[name] = counts.get(name, 0) + 1
         if not counts:
             print(f"  {DIM}no ticket{RESET}")
@@ -386,7 +440,7 @@ def command_status(args: argparse.Namespace) -> int:
         for name, number in sorted(counts.items(), key=lambda item: -item[1]):
             highlight = GREEN if name == ready_state else DIM
             print(f"  {highlight}{number:>3}{RESET}  {name}")
-    except (config_module.ConfigError, notion.NotionError) as error:
+    except (config_module.ConfigError, store.StoreError) as error:
         bad(f"Notion unreachable: {str(error).splitlines()[0]}")
 
     title("Recent tickets")
@@ -500,7 +554,7 @@ def command_init(args: argparse.Namespace) -> int:
     title("Page")
     try:
         target = client.page(page)
-    except notion.NotionError as error:
+    except store.StoreError as error:
         bad(f"unreachable: {str(error).splitlines()[0]}")
         warn("open the page in Notion → ··· → Connections → add your integration")
         return 1
@@ -511,7 +565,7 @@ def command_init(args: argparse.Namespace) -> int:
         report = provision.provision(
             client, configuration.notion, page, demo=not args.no_demo
         )
-    except notion.NotionError as error:
+    except store.StoreError as error:
         # The API's validation errors say what is wrong on the lines after the
         # first one; cutting them off leaves “body failed validation. Fix one:”.
         first, *rest = str(error).splitlines()
@@ -587,7 +641,11 @@ def command_doctor(args: argparse.Namespace) -> int:
         return 2
     try:
         configuration.require_usable()
-        ok("Notion token and tickets database are set")
+        ok(
+            "Notion token and tickets database are set"
+            if configuration.storage.notion
+            else f'storage.mode = "{configuration.storage.mode}" — nothing else is required'
+        )
     except config_module.ConfigError as error:
         bad(str(error).splitlines()[0])
         problems += 1
@@ -700,26 +758,41 @@ def command_doctor(args: argparse.Namespace) -> int:
         print(f"\n{RED}{problems} problem(s) to fix.{RESET}")
         return 1
 
-    title("Notion")
-    client = notion.Client(configuration.notion.token)
-    try:
-        ok(f"connected as “{client.my_name() or 'integration'}”")
-    except notion.NotionError as error:
-        bad(f"token refused: {error}")
-        return 1
+    title("Storage")
+    storage = configuration.storage
+    client = store.open(configuration)
+    if storage.markdown:
+        ok(f"markdown board at {storage.path}")
+        if not storage.path.is_dir():
+            print(f"  {DIM}not created yet — the first write makes it{RESET}")
+        if storage.mode == "both":
+            print(
+                f"  {DIM}mirrored with Notion, {storage.conflict} wins a conflict"
+                f"{' — reconciled on every pass' if storage.on_every_pass else ''}"
+                f"{RESET}"
+            )
+    if storage.notion:
+        try:
+            ok(f"connected to Notion as “{client.my_name() or 'integration'}”")
+        except store.StoreError as error:
+            bad(f"token refused: {error}")
+            return 1
+    else:
+        print(f"  {DIM}storage.mode = \"markdown\" — Notion is never asked anything{RESET}")
 
-    if configuration.notion.workspace:
+    if storage.notion and configuration.notion.workspace:
         title("Notion workspace")
     try:
         space = workspace_module.resolve(client, configuration.notion)
-    except notion.NotionError as error:
+    except store.StoreError as error:
         for line in str(error).splitlines():
             bad(line.strip())
-        warn("every page must be shared with the integration (··· menu → Connections)")
+        if storage.notion:
+            warn("every page must be shared with the integration (··· menu → Connections)")
         return 1
     database = space.tickets
 
-    if configuration.notion.workspace:
+    if storage.notion and configuration.notion.workspace:
         listed = ", ".join(f"“{name}”" for name in sorted(space.rows)) or "nothing"
         ok(f"{len(space.rows)} page(s): {listed}")
         for message in space.warnings:
@@ -737,13 +810,13 @@ def command_doctor(args: argparse.Namespace) -> int:
     title("Tickets database")
     try:
         schema = client.schema(database)
-    except notion.NotionError as error:
+    except store.StoreError as error:
         bad(f"unreachable: {str(error).splitlines()[0]}")
         warn("the database must be shared with the integration (··· menu → Connections)")
         return 1
     ok(f"readable — {len(schema)} property(ies)")
     reference = configuration.notion.tickets_database or configuration.notion.page("tickets")
-    if database != reference:
+    if storage.notion and database != reference:
         warn(f"resolved from “{reference}” to database {database}")
 
     for key, expected in (
@@ -820,7 +893,7 @@ def command_doctor(args: argparse.Namespace) -> int:
         try:
             client.comments(sample[0].id)
             ok("comments readable — answers wake a ticket, and can be answered back")
-        except notion.NotionError as error:
+        except store.StoreError as error:
             if "403" in str(error):
                 bad("comments not readable — an answer in a comment reaches nothing")
                 warn(
@@ -866,7 +939,7 @@ def command_doctor(args: argparse.Namespace) -> int:
 
 
 def _doctor_schedules(
-    client: notion.Client,
+    client: store.Store,
     configuration: config_module.Config,
     space: workspace_module.Workspace,
 ) -> int:
@@ -891,7 +964,7 @@ def _doctor_schedules(
     settings = configuration.notion
     try:
         schema = client.schema(database)
-    except notion.NotionError as error:
+    except store.StoreError as error:
         warn(f"unreadable: {str(error).splitlines()[0]}")
         return 0
     ok(f"readable — {len(schema)} property(ies)")
@@ -918,7 +991,7 @@ def _doctor_schedules(
 
     try:
         rows = [schedules_module.read(page, settings) for page in client.query(database)]
-    except notion.NotionError as error:
+    except store.StoreError as error:
         warn(f"the schedules could not be read: {str(error).splitlines()[0]}")
         return 0
     if not rows:
@@ -1328,6 +1401,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     projects = subparsers.add_parser("projects", help="check the project → repository mapping")
     projects.set_defaults(function=command_projects)
+
+    syncing = subparsers.add_parser("sync", help="reconcile the Notion board and the Markdown one")
+    syncing.add_argument(
+        "--journal", action="store_true", help="show what past reconciliations did"
+    )
+    syncing.add_argument("-n", "--number", type=int, default=30, help="with --journal: how many")
+    syncing.set_defaults(function=command_sync)
 
     status = subparsers.add_parser("status", help="timer, console, current run, recent tickets")
     status.set_defaults(function=command_status)

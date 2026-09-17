@@ -29,7 +29,7 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
-from . import agents, git, notion, session, state
+from . import agents, git, session, state, store
 from . import prompt as prompt_module
 from . import voice as voice_module
 from .base import Base
@@ -114,14 +114,14 @@ class Delivery(Base):
         now = datetime.now().astimezone()
         try:
             pages = self.validated()
-        except notion.NotionError as error:
+        except store.StoreError as error:
             self.say(f"  ! the validated column could not be read: {voice_module.line(error)}")
             return [], []
         for page in pages:
             ticket = Ticket(page)
             if ticket.id in taken:
                 continue
-            url = str(notion.read(page, settings.prop("pull_request")) or "")
+            url = str(store.read(page, settings.prop("pull_request")) or "")
             moment = self._moment(ticket)
             if moment and moment > now:
                 # A date says "not before this moment", and it says it here as
@@ -177,7 +177,7 @@ class Delivery(Base):
         self._deferred = sorted(held, key=lambda pair: pair[1])
         return results, publishing
 
-    def validated(self) -> list[notion.Page]:
+    def validated(self) -> list[store.Page]:
         """The pages sitting in the validated column.
 
         None at all where the board has no such column: the gesture is opt-in,
@@ -343,7 +343,7 @@ class Delivery(Base):
         short = short_id(ticket.id)
         # The role, if the ticket names one: the account to post to and the
         # voice to post in are exactly the sort of thing an agent page carries.
-        role = notion.read(ticket.page, self.config.notion.prop("role")) or []
+        role = store.read(ticket.page, self.config.notion.prop("role")) or []
         job = Job(
             ticket,
             project,
@@ -353,7 +353,7 @@ class Delivery(Base):
             body=self._body(ticket),
             session_id=session.new_id(),
             log=state.log_file(short),
-            model=str(notion.read(ticket.page, self.config.notion.prop("model")) or ""),
+            model=str(store.read(ticket.page, self.config.notion.prop("model")) or ""),
             agent=(
                 agents.resolve(self.client, role[0], self.config.notion.prop("model"))
                 if role

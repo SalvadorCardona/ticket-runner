@@ -10,7 +10,8 @@ import { parseLink } from "react-resource-view"
  * to read it. So the board is `/?view=console/tickets/list`, a ticket is
  * `/?view=console/tickets/read/<id>` — the shape react-resource-view writes in
  * its `query` routing mode — and the panes that are not resources are
- * `/?page=live`, `/?page=schedules`, `/?page=settings`.
+ * `/?page=live`, `/?page=projects`, `/?page=context`, `/?page=schedules`,
+ * `/?page=settings`.
  *
  * The four primitives below are what that package asks of a router. Written
  * here rather than taken from TanStack: a console with a handful of pages has
@@ -81,13 +82,13 @@ export const navigation: NavigationPortInterface = {
 
 /* -- what an address means ------------------------------------------------ */
 
-export type Page = "live" | "schedules" | "settings" | "console"
+export type Page = "live" | "projects" | "context" | "schedules" | "settings" | "console"
 
 export type Route =
   | { kind: "page"; page: Page }
   | { kind: "resource"; params: ViewResourceContextParams }
 
-const PAGES: Page[] = ["live", "schedules", "settings", "console"]
+const PAGES: Page[] = ["live", "projects", "context", "schedules", "settings", "console"]
 
 export const pageHref = (page: Page) => `/?page=${page}`
 

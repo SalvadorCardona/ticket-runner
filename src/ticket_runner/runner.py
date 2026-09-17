@@ -35,8 +35,8 @@ from __future__ import annotations
 
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 
-from . import base, board, credits, delivery, execution, notion, preparation
-from . import recurrence, replies, reports, state
+from . import base, board, credits, delivery, execution, preparation
+from . import recurrence, replies, reports, state, store
 from . import update as update_module
 from . import voice as voice_module
 from .projects import Project
@@ -105,6 +105,9 @@ class Runner(
         self._comments.clear()
         self._claimed = set()
         self._usage_warned = False
+        # Before the answers and before the queue: what somebody wrote in a file
+        # this morning is part of the board this pass is about to read.
+        self.reconcile()
         self.answers()
         # The softer of the two lines, and it stops less: the window is not
         # spent, it is down to the share you asked to keep. Nothing is *started*
@@ -364,7 +367,7 @@ class Runner(
         self.answers()
         try:
             tickets, waiting = self.queue()
-        except notion.NotionError as error:
+        except store.StoreError as error:
             self.say(f"  ! the board could not be read again: {voice_module.line(error)}")
             return []
         fresh = [ticket for ticket in tickets if ticket.id not in started]

@@ -1,9 +1,10 @@
 import type {
   Board,
   ChatState,
+  Context,
   Message,
   Pair,
-  Project,
+  Projects,
   RunnerState,
   Saved,
   Schedules,
@@ -57,7 +58,8 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
 export const api = {
   state: () => request<RunnerState>("/api/state"),
   board: () => request<Board>("/api/board"),
-  projects: () => request<{ projects: Project[] }>("/api/projects"),
+  projects: () => request<Projects>("/api/projects"),
+  context: () => request<Context>("/api/context"),
   schedules: () => request<Schedules>("/api/schedules"),
   chat: () => request<{ messages: Message[] } & ChatState & { busy?: boolean }>("/api/chat"),
   settings: () => request<Settings>("/api/settings"),
@@ -82,6 +84,11 @@ export const api = {
     projects?: Pair[]
     github?: Pair[]
   }) => request<Saved>("/api/settings", payload),
+  saveContext: (text: string) => request<{ text: string }>("/api/context", { text }),
+  saveSchedule: (id: string, values: Record<string, unknown>) =>
+    request<{ id: string }>(`/api/schedules/${id}`, values),
+  createSchedule: (values: Record<string, unknown>) =>
+    request<{ id: string; name: string }>("/api/schedules", values),
   refresh: () => request<unknown>("/api/refresh", {}),
 }
 

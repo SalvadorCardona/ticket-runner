@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from . import notion
+from . import store
 from . import schedules as schedules_module
 from . import voice as voice_module
 from .base import Base
@@ -127,9 +127,9 @@ class Recurrence(Base):
         settings = self.config.notion
         try:
             page = self.client.page(schedule.last_ticket)
-        except notion.NotionError:
+        except store.StoreError:
             return False
-        status = str(notion.read(page, settings.prop("status")) or "")
+        status = str(store.read(page, settings.prop("status")) or "")
         return status not in (settings.state("done"), settings.state("failed"))
 
     def _born(self, schedule: schedules_module.Schedule) -> dict | None:
@@ -161,7 +161,7 @@ class Recurrence(Base):
         try:
             brief = self.client.blocks_text(schedule.page.id)
             page_id = self.client.create_row(self.database, title, values)
-        except notion.NotionError as error:
+        except store.StoreError as error:
             self.say(
                 f"  ! {schedule.name} — the ticket could not be created: "
                 f"{voice_module.line(error)}"
@@ -176,7 +176,7 @@ class Recurrence(Base):
                 f"*Born of the “{schedule.name}” schedule, {stamp}* — {schedule.page.url}\n"
                 + (f"\n{brief}\n" if brief.strip() else ""),
             )
-        except notion.NotionError as error:
+        except store.StoreError as error:
             self.say(
                 f"  ! {title} — created, but its body was refused: {voice_module.line(error)}"
             )
@@ -202,7 +202,7 @@ class Recurrence(Base):
         }
         try:
             self.client.update(self.workspace.schedules, schedule.page.id, written)
-        except notion.NotionError as error:
+        except store.StoreError as error:
             self.say(
                 f"  ! {schedule.name} — Notion refused the write: {voice_module.line(error)}"
             )

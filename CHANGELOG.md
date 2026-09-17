@@ -86,6 +86,41 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
   account, and `ticket-runner doctor` says the line is dead. The table is a
   section of the console's Settings tab, *Your GitHub accounts*.
 
+- **The runner can live without Notion: the board as Markdown files.** One line —
+  `storage.mode = "markdown"` — and projects, the standing context, the schedules
+  and the tickets are read and written as files, properties in a YAML
+  frontmatter and the content as Markdown under it, in a directory you can put
+  under git. Nothing reaches the network: no token to create, no page to share,
+  no integration to grant capabilities to, and `ticket-runner doctor` stops
+  asking Notion who you are. Everything after that is unchanged — the queue, the
+  claim, the worktree, the session, the report, the discussion on a ticket — for
+  the reason this was worth doing at all: the runner now talks to a board
+  through one interface (`store.py`), and which board answered is decided in one
+  place. `notion` stays the default and behaves exactly as it always has.
+
+- **The console can see every project, rewrite the standing context, and write a
+  schedule.** Three screens, and they are what makes a Markdown-only
+  installation self-sufficient. *Projects* lists every project this installation
+  knows of — the board's own and the ones only `[projects]` names — with what
+  each declares and where it landed on this disk. *Context* shows the text that
+  reaches every ticket before the ticket itself, as the agent gets it, and saves
+  it: it replaces rather than appends, because a context is a value, not a
+  history. *Schedules* is no longer read-only — a row opens into a form for the
+  six columns a schedule is written in, never the three a pass writes back, and
+  a new schedule is created unticked whatever the form said.
+
+- **Notion and Markdown, kept in step.** `storage.mode = "both"` reconciles the
+  two before every pass and writes to both in between, so a ticket claimed at
+  14:02 is not still reading *Ready* in the files while a session works on it. A
+  page changed on both sides since the last reconciliation is a conflict:
+  `storage.conflict = "newest"` keeps the later edit and writes the other into
+  `~/.local/state/ticket-runner/sync.jsonl` with both timestamps and the name of
+  the side that won. Nothing is ever deleted — a page that disappeared on one
+  side is journalled and left alone on the other — and a page that never existed
+  on the other side is created there, which is what makes the switch work from a
+  board that is already full. `ticket-runner sync` does it on demand,
+  `ticket-runner sync --journal` says what past ones did.
+
 - **A project created from its GitHub link alone is cloned, not refused.** Until
   now, a `Repository` property that matched none of the clones under
   `workspace_root` put the project back with "no repository could be found" —
