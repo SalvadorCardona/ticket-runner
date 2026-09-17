@@ -637,6 +637,26 @@ def command_doctor(args: argparse.Namespace) -> int:
             + f"{RESET}"
         )
 
+    title("Console")
+    # "We have a sign-in, and the page still asks me for a token" is the
+    # ordinary shape of a console whose `web.email` and `web.password` were
+    # never both set — the sign-in is dormant until they are, and the token
+    # never goes away anyway. Said here rather than left to be guessed from a
+    # login page that does not appear.
+    address = f"http://{configuration.web.host}:{configuration.web.port}"
+    email, password = configuration.web.email, configuration.web.password
+    if email and password:
+        ok(f"{address} — opened by signing in as {email}")
+        print(f"  {DIM}the token keeps working: a script, and serve --print-token{RESET}")
+    else:
+        ok(f"{address} — opened with its token (ticket-runner serve --print-token)")
+        if email or password:
+            warn(
+                "half a sign-in: web.email without web.password, or the other way "
+                "round, is not a way in"
+            )
+        print(f"  {DIM}web.email and web.password — the two — to sign in instead{RESET}")
+
     title("Repositories")
     root = configuration.runner.workspace_root
     if root.is_dir():
