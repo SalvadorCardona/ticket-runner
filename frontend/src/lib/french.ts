@@ -24,6 +24,8 @@ export const FRENCH: Record<string, string> = {
   Saved: "Déplacé",
   create: "Nouveau ticket",
   read: "Ouvrir",
+  update: "modifier",
+  delete: "retirer",
   Cancel: "Annuler",
   "Search...": "Rechercher…",
   "Select...": "Choisir…",
@@ -308,8 +310,6 @@ export const FRENCH: Record<string, string> = {
     "Un champ laissé vide ne dit rien, et c'est la valeur par défaut du runner qui répond — affichée en gris à côté. Vos jetons restent sur la machine : ils ne sont jamais envoyés à cette page.",
   "Reading the configuration…": "Lecture de la configuration…",
   "could not read the configuration: {{why}}": "impossible de lire la configuration : {{why}}",
-  sections: "sections",
-  edited: "modifié",
   "default · {{value}}": "défaut · {{value}}",
   yes: "oui",
   no: "non",
@@ -318,16 +318,33 @@ export const FRENCH: Record<string, string> = {
   "set · ends {{preview}}": "renseigné · finit par {{preview}}",
   forget: "oublier",
   "takes effect once": "prend effet une fois que",
-  "the project, as Notion names it": "le projet, tel que Notion le nomme",
-  "where it is on this machine": "où il se trouve sur cette machine",
-  "remove {{project}}": "retirer {{project}}",
-  "this row": "cette ligne",
+  "Written to the file": "Écrit dans le fichier",
+  "nothing typed here": "rien de tapé ici",
+
+  /* -- the two `name = value` tables, each a resource of its own -------------
+     `Projects`, `Project` and the two section blurbs are already said where
+     `web/settings.py` describes the file; only what the rows add is here. */
+  "Where it is": "Où il se trouve",
+  "Spelled as the project page is, or the ticket finds no repository.":
+    "Écrit comme la page du projet l'écrit, sinon le ticket ne trouve aucun dépôt.",
+  "The repository itself. Worktrees are made beside it, never in it.":
+    "Le dépôt lui-même. Les worktrees sont créés à côté, jamais dedans.",
+  "A row with no name maps nothing.": "Une ligne sans nom ne fait correspondre rien.",
+  "A project mapped to nothing is a row to remove.":
+    "Un projet qui ne mène nulle part est une ligne à retirer.",
   "No mapping here — the project pages carry it.":
     "Aucune correspondance ici — ce sont les pages de projet qui la portent.",
   "add a project": "ajouter un projet",
-  "the owner, as GitHub spells it": "le propriétaire, tel que GitHub l'écrit",
-  "the gh account it is worked under": "le compte gh sous lequel il est travaillé",
-  "gh auth status lists them": "gh auth status les liste",
+  Accounts: "Comptes",
+  Owner: "Propriétaire",
+  Account: "Compte",
+  "As GitHub spells it in the URL of a repository, before the slash.":
+    "Tel que GitHub l'écrit dans l'URL d'un dépôt, avant la barre oblique.",
+  "The account `gh auth status` lists, logged in once with `gh auth login`.":
+    "Le compte que `gh auth status` liste, connecté une fois avec `gh auth login`.",
+  "A row with no owner names nobody.": "Une ligne sans propriétaire ne nomme personne.",
+  "An owner mapped to nothing is a row to remove.":
+    "Un propriétaire qui ne mène nulle part est une ligne à retirer.",
   "One GitHub here — everything goes out as whoever gh is signed in as.":
     "Un seul GitHub ici — tout part sous le compte auquel gh est connecté.",
   "add an account": "ajouter un compte",

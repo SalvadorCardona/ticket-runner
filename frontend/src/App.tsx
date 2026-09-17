@@ -9,7 +9,6 @@ import { LivePane } from "@/components/console/live-pane"
 import { ProjectsPane } from "@/components/console/projects-pane"
 import { ResourcePane } from "@/components/console/resource-pane"
 import { SchedulesPane } from "@/components/console/schedules-pane"
-import { SettingsPane } from "@/components/console/settings-pane"
 import { TicketTalk } from "@/components/console/ticket-talk"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
@@ -17,8 +16,10 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { ConsoleProvider, useConsole } from "@/hooks/use-console"
 import { useBoard } from "@/lib/board-store"
 import { useT } from "@/lib/i18n"
-import { go, pageHref, useRoute, type Page } from "@/lib/router"
+import { useRoute, type Page } from "@/lib/router"
 import { cn } from "@/lib/utils"
+import { SETTINGS } from "@/resources/settings"
+import { TICKETS } from "@/resources/tickets"
 
 /* The shape of the page.
  *
@@ -37,7 +38,6 @@ const CRUMB: Record<Page, string> = {
   projects: "projects",
   context: "context",
   schedules: "schedules",
-  settings: "settings",
 }
 
 const ASIDE = "ticket-runner-aside"
@@ -46,12 +46,18 @@ function Console() {
   const route = useRoute()
   const board = useBoard()
   const t = useT()
-  const { ticket, openTicket, closeTicket, runCommand } = useConsole()
+  const { ticket, openTicket, closeTicket } = useConsole()
+
+  // Which resource the address names. An address that names none is the board.
+  const resourceId = route.kind === "resource" ? (route.params.resourceId ?? TICKETS) : null
 
   // The address says which ticket is open; the board says what it is, so the
   // discussion loads while the page is still being read.
   const ticketId =
-    route.kind === "resource" && route.params.resourceAction === ActionList.read && route.params.id
+    route.kind === "resource" &&
+    resourceId === TICKETS &&
+    route.params.resourceAction === ActionList.read &&
+    route.params.id
       ? String(route.params.id)
       : null
   React.useEffect(() => {
@@ -81,25 +87,21 @@ function Console() {
     })
   }
 
-  const check = (verb: string) => {
-    // On one column the console is a page of its own; on two it is beside you.
-    if (window.matchMedia("(max-width: 860px)").matches) go(pageHref("console"))
-    void runCommand(verb)
-  }
-
   // The bar says the path, not the title: `workspace / board / #3f2a1c`. The
   // page under it opens with the heading, so a ticket is named here by its id
   // — the short thing that fits a breadcrumb — rather than by its sentence.
   const crumbs =
     route.kind === "page"
       ? [t("workspace"), t(CRUMB[route.page])]
-      : ticketId
-        ? [t("workspace"), t("board"), `#${ticket?.short ?? String(ticketId).slice(-8)}`]
-        : [t("workspace"), t("board")]
+      : resourceId === SETTINGS
+        ? [t("workspace"), t("settings")]
+        : ticketId
+          ? [t("workspace"), t("board"), `#${ticket?.short ?? String(ticketId).slice(-8)}`]
+          : [t("workspace"), t("board")]
 
-  // Each pane keeps its place while another is shown, so a ticket half-read
-  // and a setting half-typed survive a trip through the menu.
-  const cell = (name: "live" | "settings" | "context", child: React.ReactNode) => {
+  // Each pane keeps its place while another is shown, so a transcript
+  // half-read and a text half-typed survive a trip through the menu.
+  const cell = (name: "live" | "context", child: React.ReactNode) => {
     const shown = route.kind === "page" && route.page === name
     return (
       <div
@@ -141,8 +143,7 @@ function Console() {
               </div>
             ) : null}
             {cell("live", <LivePane />)}
-            {cell("settings", <SettingsPane onCheck={check} />)}
-            {/* A `cell` for the same reason the settings are one: it holds a
+            {/* A `cell` for the same reason the live pane is one: it holds a
                 text somebody is half-way through rewriting, and a trip through
                 the menu must not cost it. */}
             {cell("context", <ContextPane />)}

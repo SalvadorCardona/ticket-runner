@@ -43,6 +43,8 @@ const ENGLISH: Record<string, string> = {
   Saved: "Moved",
   create: "New ticket",
   read: "Open",
+  update: "Edit",
+  delete: "Remove",
   "Une erreur est survenue": "Something went wrong",
   Continuer: "Continue",
   Fermer: "Close",
