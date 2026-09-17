@@ -2004,7 +2004,7 @@ def a_bare_date_means_the_start_of_that_day_here():
     """Not midnight UTC: a ticket dated "30 August" starts on the 30th, locally."""
     from datetime import datetime
 
-    from ticket_runner.runner import scheduled_for
+    from ticket_runner.schedules import scheduled_for
 
     moment = scheduled_for("2026-08-30")
     assert moment is not None and moment.tzinfo is not None
@@ -2014,7 +2014,7 @@ def a_bare_date_means_the_start_of_that_day_here():
 
 @case
 def a_date_with_a_time_keeps_its_offset():
-    from ticket_runner.runner import scheduled_for
+    from ticket_runner.schedules import scheduled_for
 
     moment = scheduled_for("2026-08-30T14:30:00.000+02:00")
     assert moment is not None
@@ -2025,7 +2025,7 @@ def a_date_with_a_time_keeps_its_offset():
 @case
 def an_unreadable_date_never_holds_a_ticket_back():
     """A value the runner cannot parse must not silently freeze a ticket."""
-    from ticket_runner.runner import scheduled_for
+    from ticket_runner.schedules import scheduled_for
 
     assert scheduled_for(None) is None
     assert scheduled_for("") is None
@@ -2040,7 +2040,7 @@ def notion_truncates_a_datetime_to_the_minute():
     it names. Worth pinning: a future change here would look like the runner
     firing early.
     """
-    from ticket_runner.runner import scheduled_for
+    from ticket_runner.schedules import scheduled_for
 
     stored = scheduled_for("2026-08-28T14:48:00.000+02:00")
     assert stored is not None and (stored.hour, stored.minute, stored.second) == (14, 48, 0)
