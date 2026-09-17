@@ -290,7 +290,7 @@ for reading rather than for filling in.
 | Key | Default | Effect |
 | --- | --- | --- |
 | `runner.workspace_root` | `~/workspace` | where to look for repositories — and where one you have not cloned yet is cloned |
-| `runner.interval_seconds` | `1800` | seconds between two passes, and how often a pass in flight looks for a ticket to put in an empty place — `ticket-runner enable` applies a change |
+| `runner.interval_seconds` | `1800` | seconds between two passes, and how often a pass in flight looks at the board — for a ticket to put in an empty place, and for one you have validated since — `ticket-runner enable` applies a change |
 | `runner.max_concurrent` | `2` | tickets handled side by side — an empty place is filled from the board without waiting for anything to end |
 | `runner.timeout_minutes` | `30` | past this, the session is killed and the ticket fails |
 | `runner.wait_for_credits` | `true` | a spent subscription window puts the runner to sleep instead of failing tickets — see *When the credits run out* below |
@@ -340,9 +340,16 @@ and leaves. Without it, tickets arriving one at a time would run one at a time w
 `max_concurrent` said, which is exactly what a board with one ticket in progress and
 three waiting looks like.
 
+The *validated* column is read on that same cadence, and even when every place is taken:
+a merge needs no place — it is two `gh` calls in the pass's own thread — and a
+publication takes the next one that frees, before any ready ticket. Work you have
+accepted is one gesture from done, and nothing about a session in flight has anything to
+do with it. See [Validated, and what it sets off](#validated-and-what-it-sets-off).
+
 Two things follow. `ticket-runner run --limit 3` means three tickets for that pass, not
-three at a time — the limit caps what is taken off the board, `max_concurrent` caps what
-runs at once. And a comment addressed to the runner during a long pass is answered by the
+three at a time — the limit caps what is taken off the ready column, `max_concurrent`
+caps what runs at once, and a validated ticket carried out along the way is counted by
+neither. And a comment addressed to the runner during a long pass is answered by the
 **next** pass, because answering starts a session of its own and that would put more
 sessions in flight than you allowed. An answer to a *blocked* ticket asks for work rather
 than for a reply, so that one is picked up by the pass itself at the next freed place —
@@ -1034,6 +1041,12 @@ Five things are worth knowing:
   settled at the top of a pass, before any new ticket is claimed — a ticket you have
   accepted comes before one nobody has read. Publications run side by side under
   `max_concurrent`, so four of them cost one session's wait rather than four;
+- **and it never waits for what is in progress.** The column is read again every
+  `interval_seconds` for as long as the pass lasts, whether or not a place is free: a
+  pull request you validate at 14:20 is merged at 14:20 — a merge is two `gh` calls and
+  costs no place at all — and a publication takes the next place that frees, ahead of
+  the ready column. A validated ticket therefore never sits behind a two-hour session it
+  has nothing to do with;
 - **a date on the ticket still holds.** `Scheduled` says "not before this moment"
   wherever it is written, so a validated ticket dated Thursday is merged or published on
   Thursday rather than on the next pass. It is what makes the column a schedule and not

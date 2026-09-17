@@ -18,6 +18,10 @@ asked to fill straight away: a ticket made ready at 14:10 starts at 14:10, not
 when the session that began at 14:04 is finally done. A pass therefore ends
 when the ready column is empty and nothing is left in flight — see `_work`.
 
+The validated column is read on that same cadence, and for the same reason: a
+merge you asked for at 14:20 has nothing to do with the session that began at
+14:04, and waiting for it is the one thing it should never do.
+
 What is left in this module is that pass and nothing else. `tick` decides what
 a run is made of and in which order; `_work` keeps `max_concurrent` places
 filled until the board has nothing left to fill them with. Everything a pass
@@ -35,6 +39,7 @@ from . import base, board, credits, delivery, execution, notion, preparation
 from . import recurrence, replies, reports, state
 from . import update as update_module
 from . import voice as voice_module
+from .projects import Project
 from .ticket import Ticket
 
 
@@ -208,6 +213,15 @@ class Runner(
         board would have been read had nothing been running, and not one request
         more.
 
+        **The validated column is looked at on that same cadence**, full pool or
+        not, and that is the third half of the same fault. A merge costs no
+        place at all — it is two `gh` calls in this very thread — and a
+        publication costs one like any session; yet both used to be settled at
+        the top of a pass and never again, so a ticket you validated at 14:20
+        sat there until the two-hour session that began at 14:04 was over, with
+        nothing whatsoever to do with it. Now it is carried out at 14:20, and
+        what is in progress goes on being in progress.
+
         Results are recorded one by one rather than at the end, so
         `ticket-runner history` shows a ticket that finished in four minutes
         without waiting on the one that will take two hours.
@@ -218,7 +232,12 @@ class Runner(
         remaining = ceiling  # None: as many tickets as the board offers
         results: list[dict] = []
         started: set[str] = set()
+        # The validated tickets this pass has taken off their column, kept apart
+        # from `started`: a ticket run by this very pass and validated while it
+        # was still running is delivered by it too, not held over to the next.
+        carried: set[str] = set()
         queued = list(ready)
+        publishing: list[tuple[Ticket, Project]] = []
         flight: set[Future] = set()
         stalled = False  # the credits ran out: nothing more is begun
 
@@ -235,6 +254,15 @@ class Runner(
                         results.append(parked)
                         state.record(parked)
                     queued = []
+                    publishing = []
+                # Publications first: a validated ticket is one gesture from
+                # done, and a place is better spent finishing work you have
+                # accepted than beginning work nobody has read yet. `--limit`
+                # does not count them — it caps what is taken off the ready
+                # column, and this was taken off another one.
+                while publishing and not stalled and len(flight) < width:
+                    ticket, project = publishing.pop(0)
+                    flight.add(pool.submit(self._publish, ticket, project))
                 while (
                     queued
                     and not stalled
@@ -254,17 +282,18 @@ class Runner(
                         flight.add(pool.submit(self.execute, job))
                 if not flight:
                     return results
-                # An empty place is a reason to come back before a session ends;
-                # a full pool is not, and waits for one exactly as it did.
+                # An empty place is a reason to come back before a session ends,
+                # and so is the validated column, which needs none: a pass that
+                # refills therefore wakes on the timer's cadence even with every
+                # place taken. A pass that does not refill waits for a session
+                # exactly as it did.
                 empty = (
-                    refill
-                    and not stalled
-                    and len(flight) < width
-                    and (remaining is None or remaining > 0)
+                    not stalled and len(flight) < width and (remaining is None or remaining > 0)
                 )
+                looking = refill and not stalled
                 done, flight = wait(
                     flight,
-                    timeout=self.config.runner.interval_seconds if empty else None,
+                    timeout=self.config.runner.interval_seconds if looking else None,
                     return_when=FIRST_COMPLETED,
                 )
                 for future in done:
@@ -278,14 +307,36 @@ class Runner(
                     # sentence, so nothing more is begun — what is in flight is
                     # left to finish, and what was queued says on the board why
                     # it did not start, exactly as the reserve's tickets do.
+                    # Publications are sessions too.
                     stalled = True
                     for parked in self.park(queued, spent):
                         results.append(parked)
                         state.record(parked)
                     queued = []
+                    publishing = []
                 if stalled:
                     continue
-                if (done or empty) and refill and (remaining is None or remaining > 0):
+                if not refill:
+                    continue
+                # The validated column, whether or not a place is free: its
+                # merges happen right here, and its publications take the next
+                # place. Both are held out of the next reading by hand, for the
+                # same reason tickets are — Notion may still be serving the
+                # status that was just written over.
+                settled, fresh = self.delivering(carried)
+                for result in settled:
+                    results.append(result)
+                    state.record(result)
+                carried |= {entry["id"] for entry in settled} | {
+                    ticket.id for ticket, _ in fresh
+                }
+                publishing += fresh
+                if fresh:
+                    self.say(
+                        f"  ↺ {len(fresh)} ticket(s) validated since — "
+                        "publishing at the next free place."
+                    )
+                if (done or empty) and (remaining is None or remaining > 0):
                     queued = self._again(started)
 
     def _again(self, started: set[str]) -> list[Ticket]:
