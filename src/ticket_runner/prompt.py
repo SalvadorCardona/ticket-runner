@@ -210,6 +210,21 @@ to a comment.
 """
 
 
+# What a session is told when it is picked back up where an exhausted quota left
+# it. Deliberately not the whole prompt again: this session has the ticket, the
+# brief and the context already, and resending them would cost on every turn
+# what they cost once. What it cannot know is that time has passed and that its
+# own half-done work is on disk — so that is the whole of the message.
+CARRY_ON = """\
+The credit ran out while you were working on this ticket, and it is back. Same \
+ticket, same rules, same working directory: carry on from where you stopped.
+
+Look at what you had already done before writing anything — `git status` and \
+`git log`, or the files you were editing — so that nothing is written twice. \
+Then finish the ticket and end on the RESULT line the first message asked for.
+{language}"""
+
+
 def build(
     template: str,
     *,
@@ -325,6 +340,11 @@ def message_of(prompt_text: str) -> str:
     if marker in prompt_text:
         return prompt_text.split(marker, 1)[1].split("\n# What is expected", 1)[0].strip()
     return prompt_text.strip()
+
+
+def carry_on(language: str = "") -> str:
+    """The message that restarts a ticket's own session, quota permitting."""
+    return CARRY_ON.format(language=_language(language))
 
 
 def _language(instruction: str) -> str:

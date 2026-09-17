@@ -115,6 +115,12 @@ class Runner:
     # behaviour — an exhausted quota is reported as the session failure it looks
     # like. See credits.py.
     wait_for_credits: bool = True
+    # How much of the window to leave alone, as a percentage. The runner starts
+    # nothing new past `100 - this`, so there is still a subscription left to
+    # open a terminal with — a runner that spends the last of it is a runner you
+    # end up turning off. Capped at 50: past that it is not a reserve, it is a
+    # decision to halve the machine.
+    credit_reserve_percent: int = 5
     model: str = ""
     # The language the runner writes its reports in, and the one it asks a
     # session to answer in. Empty is English, and it is more than that: a file
@@ -166,6 +172,12 @@ class Runner:
 # a typo here would only be discovered by GitHub refusing the one merge you were
 # watching.
 MERGE_METHODS = ("squash", "merge", "rebase")
+
+
+# The most of the subscription a reserve may hold back. Half is already an
+# extreme setting — the runner would then stop at 50 % of every window — and
+# anything past it describes a runner you meant to switch off instead.
+MOST_RESERVED = 50
 
 
 # The three moments worth a message. `blocked` is the one that matters: it is
@@ -358,9 +370,18 @@ PRIORITIES = ("Urgent", "High", "Normal", "Low")
 # merges the pull request, or it publishes what the ticket holds, and only then
 # is anything Done. A board that does not offer the column has no such moment,
 # and nothing changes: you merge by hand, as before.
+#
+# "Waiting for credit" is the column that is nobody's fault. A ticket stopped
+# because the subscription's window is spent has nothing wrong with it and
+# nothing to answer — putting it in "Blocked" made the one column that means
+# "you are needed" also mean "come back in four hours", and a column you have to
+# open to know which one it is has stopped saying anything. It sits beside "In
+# progress" because that is where its ticket came from, and it goes back there
+# on its own the moment there is credit again.
 _DEFAULT_STATUS = {
     "ready": "Ready",
     "running": "In progress",
+    "waiting": "Waiting for credit",
     "review": "In review",
     "validated": "Validated",
     "done": "Done",
@@ -623,6 +644,16 @@ def load(path: Path | None = None) -> Config:
         timeout_minutes=max(1, int(runner_raw.get("timeout_minutes", defaults.timeout_minutes))),
         wait_for_credits=bool(
             runner_raw.get("wait_for_credits", defaults.wait_for_credits)
+        ),
+        # Both ends clamped rather than refused: a file saying 150 meant "keep
+        # plenty", not "never run again", and a negative reserve is a typo for
+        # none at all.
+        credit_reserve_percent=max(
+            0,
+            min(
+                MOST_RESERVED,
+                int(runner_raw.get("credit_reserve_percent", defaults.credit_reserve_percent)),
+            ),
         ),
         model=str(runner_raw.get("model", defaults.model)).strip(),
         # Kept as the file wrote it: `voice` reads it down to a language it

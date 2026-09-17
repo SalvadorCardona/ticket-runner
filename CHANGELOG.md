@@ -18,6 +18,43 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Added
 
+- **The runner stops before the subscription is spent, and leaves you a share of
+  it.** A runner left to itself would chew through every window it is given, so
+  the terminal you open yourself at five o'clock finds nothing left.
+  `runner.credit_reserve_percent` is the share it refuses to touch — 5 by
+  default, so nothing new is started past 95 % — read off the same two figures
+  Claude Code's own `/usage` shows, the session window and the week, whichever
+  is the more constraining. What is already running is never killed: it
+  finishes, because stopping a session halfway spends what it has already cost
+  and gets nothing for it. What costs no credit carries on throughout — a pull
+  request you validated this morning is still merged this afternoon — and that
+  is the whole difference between this line and a spent window, which stops the
+  pass outright. The reading is taken again at every free place rather than once
+  a pass, since the sessions in flight are what fills the window. `0` spends the
+  lot, as before this existed; `50` is the most it accepts; and a reading nobody
+  can take — no Claude Code store, a payload whose shape changed — is one
+  warning and the old behaviour, never a runner that stopped working because it
+  could not find a JSON key. The setting is a field of the console's Settings
+  tab, under *The run*.
+
+- **A ticket the credit ran out under waits in its own column instead of
+  landing in Blocked.** *Blocked* is the column that means **you** are needed —
+  the agent asked a question and is waiting for an answer — and letting "come
+  back at six" into it made the one column anybody has to open stop saying
+  anything. So the board gains **Waiting for credit**: nothing is wrong with the
+  ticket, nothing is expected of you, and the pass that has credit again takes
+  those tickets *before* anything in *Ready*, because they are the ones already
+  half done. It picks their session back up rather than beginning the ticket
+  over — the conversation is sent one message saying the window rolled over and
+  its own half-done work is still on disk, not the whole frame a second time,
+  and a session Claude Code no longer has falls back to a fresh one. What was
+  queued behind a spent session goes to the same column rather than sitting in
+  *Ready* looking like a runner gone quiet. `ticket-runner init` creates the
+  option on a board it builds; a real `status` property cannot be widened
+  through the API, so on an existing board you add *Waiting for credit* by hand
+  — until you do, an exhausted quota puts the ticket back in *Ready* exactly as
+  it did before.
+
 - **A project created from its GitHub link alone is cloned, not refused.** Until
   now, a `Repository` property that matched none of the clones under
   `workspace_root` put the project back with "no repository could be found" —

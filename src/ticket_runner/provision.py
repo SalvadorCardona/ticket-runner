@@ -1,8 +1,9 @@
 """Building the Notion side of the runner from one page link.
 
 Setting this up by hand means five databases, a score of properties, four relations
-and six status options spelled *exactly* as the configuration spells them. Get
-one character wrong and the runner finds nothing, for ever, without saying why.
+and a column of status options spelled *exactly* as the configuration spells
+them. Get one character wrong and the runner finds nothing, for ever, without
+saying why.
 So the machine does it: you share one page with the integration, and everything
 under it is created here.
 
@@ -37,6 +38,10 @@ from .schedules import CADENCES
 _STATUS_COLOURS = {
     "ready": "blue",
     "running": "yellow",
+    # Grey, because it is the one column that asks nothing of anybody: a ticket
+    # sits there while the subscription's window rolls over, and leaves on its
+    # own. Anything louder would have it read as a problem to look at.
+    "waiting": "gray",
     "review": "purple",
     "validated": "pink",
     "done": "green",
@@ -131,7 +136,9 @@ def status_options(settings: Notion) -> list[dict]:
     `review`, and the board simply has no validated column.
     """
     seen: dict[str, str] = {}
-    for key in ("ready", "running", "review", "validated", "done", "failed", "blocked"):
+    for key in (
+        "ready", "running", "waiting", "review", "validated", "done", "failed", "blocked"
+    ):
         name = settings.state(key).strip()
         if name and name not in seen:
             seen[name] = _STATUS_COLOURS[key]

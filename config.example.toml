@@ -153,6 +153,14 @@ last_ticket = "Last ticket"
 #   ready    what the runner picks up — move a ticket here once its description
 #            is precise enough to be handled without you
 #   running  claimed, work in progress (stops a second pass from taking it)
+#   waiting  the subscription's window ran out under it, or the reserve above
+#            was reached. Nothing is wrong with it and nothing is expected of
+#            you: the pass that has credit again takes it *before* anything in
+#            ready, picking its session back up where it stopped. Its own column
+#            so that `blocked` keeps meaning "you are needed" and nothing else.
+#            Optional, and a real `status` property cannot be widened through
+#            the API — add the option in Notion, or a ticket the credit ran out
+#            on goes back to ready as it did before
 #   review   branch pushed, pull request opened, waiting for your review. It is
 #            where a ticket waits, and not "Done", because nothing is done: a
 #            human has still to look at it. Each run asks GitHub about those
@@ -177,6 +185,7 @@ last_ticket = "Last ticket"
 [notion.status]
 ready = "Ready"
 running = "In progress"
+waiting = "Waiting for credit"
 review = "In review"
 validated = "Validated"
 done = "Done"
@@ -216,13 +225,33 @@ timeout_minutes = 30
 
 # A subscription is metered in windows: a few hours of work, then Claude Code
 # answers "usage limit reached" to everything until the window rolls over. With
-# this on, that is not a failure — the ticket goes back to the column it was
-# taken from, its branch and its worktree untouched, and nothing at all is run
+# this on, that is not a failure — the ticket goes to the waiting-for-credit
+# column, its branch and its worktree untouched, and nothing at all is run
 # until the credits return. The CLI usually says when that is; when it does not,
 # the runner tries again a quarter of an hour later.
 #   ticket-runner status   says how long there is left to wait
-# Off: an exhausted quota fails every ticket it touches, one after another.
+# Off: an exhausted quota fails every ticket it touches, one after another —
+# and the reserve below stops meaning anything, since there is no window left to
+# hold a share of.
 wait_for_credits = true
+
+# The share of each window the runner refuses to touch, as a percentage, so that
+# the subscription it has been chewing on all afternoon still has something left
+# for the terminal *you* open. At 5 it starts nothing past 95 % of the session
+# window or of the week — whichever is the more constraining, which is the same
+# pair of figures `/usage` shows in Claude Code.
+#
+# What is already running is never killed: it finishes. What was not started
+# goes to the waiting-for-credit column and comes back, first in the queue, on
+# the pass that has credit again — picking its session back up rather than
+# beginning the ticket over. Merges, publications and everything else that costs
+# no credit carry on throughout.
+#
+# 0 spends the lot, which is what the runner did before this line existed. 50 is
+# the most; past that it is not a reserve, it is a decision to halve the machine.
+# If the usage cannot be read at all — no Claude Code store, a shape that changed
+# — the runner says so once and behaves exactly as it does with 0.
+credit_reserve_percent = 5
 
 # Empty = the CLI's default model. Otherwise "opus", "sonnet", "haiku"…
 model = ""

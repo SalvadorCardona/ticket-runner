@@ -350,10 +350,27 @@ def command_status(args: argparse.Namespace) -> int:
         ok("no run in progress")
 
     # A runner that is on, has tickets and does nothing looks broken. It is not:
-    # the subscription's window is spent, and the wait is the point.
+    # the subscription's window is spent — or down to the share you asked to
+    # keep — and the wait is the point. Both are said, because they stop
+    # different things: the first stops everything, the second only what would
+    # start a session.
     until = credits.held()
     if until:
         warn(f"out of credit — nothing is run until {credits.when(until)}")
+    reserved = credits.held(what="reserve")
+    reading = credits.used()
+    if reserved:
+        warn(
+            f"{configuration.runner.credit_reserve_percent}% of the subscription is "
+            f"held in reserve — nothing new is started until {credits.when(reserved)}"
+        )
+    elif reading is None:
+        warn("how much of the subscription is spent could not be read — the reserve is idle")
+    else:
+        ok(
+            f"{reading[0]:.0f}% of the subscription spent, "
+            f"{configuration.runner.credit_reserve_percent}% held in reserve"
+        )
 
     title("Board")
     try:
@@ -762,7 +779,9 @@ def command_doctor(args: argparse.Namespace) -> int:
     if not options:
         warn("the status property offers no options — nothing to check against")
     else:
-        for key in ("ready", "running", "review", "validated", "done", "failed", "blocked"):
+        for key in (
+            "ready", "running", "waiting", "review", "validated", "done", "failed", "blocked"
+        ):
             wanted = configuration.notion.state(key)
             if wanted in options:
                 ok(f"{key:<9} → “{wanted}”")
@@ -773,6 +792,17 @@ def command_doctor(args: argparse.Namespace) -> int:
                 warn(
                     f"{key:<9} → “{wanted}” not offered — no column to validate from, "
                     "so nothing is merged or published for you. `init` adds it"
+                )
+            elif key == "waiting":
+                # The other one, and it is missing from every board that predates
+                # it: a real `status` property cannot be widened through the API,
+                # so this is the one place the user can be told to type it in.
+                # Nothing breaks without it — a ticket the credit ran out on goes
+                # back to `ready`, as it did before the column existed.
+                warn(
+                    f"{key:<9} → “{wanted}” not offered — a ticket the credit ran out on "
+                    "goes back to “"
+                    f"{configuration.notion.state('ready')}”. Add the option in Notion"
                 )
             else:
                 bad(f"{key:<9} → “{wanted}” is not offered by the database")

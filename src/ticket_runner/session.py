@@ -56,8 +56,28 @@ class Outcome:
         return f"claude --resume {self.session_id}"
 
 
+# What the CLI says when it is asked to carry on a conversation it does not
+# have: pruned, filed elsewhere, or never on this machine. Narrow on purpose —
+# `lost` decides whether a run is worth doing over, and reading an ordinary
+# failure as a missing session would quietly run every failing ticket twice.
+_LOST = re.compile(
+    r"no conversation found|session .{0,80}not found|could not (?:be )?(?:find|found|resume)",
+    re.IGNORECASE,
+)
+
+
 def available() -> str:
     return shutil.which("claude") or ""
+
+
+def lost(outcome: "Outcome") -> bool:
+    """Did this session fail because there was no conversation to resume?
+
+    The one failure a fresh session repairs. Everything else a resumed session
+    can do — ask a question, time out, crash — it would do again, so redoing it
+    costs a second full session and loses whatever the first one had to say.
+    """
+    return bool(_LOST.search(outcome.error or ""))
 
 
 def new_id() -> str:

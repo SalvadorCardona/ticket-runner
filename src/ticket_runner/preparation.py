@@ -18,6 +18,7 @@ next ticket.
 
 from __future__ import annotations
 
+import re
 import shutil
 
 from . import agents, git, naming, notion, session, state
@@ -26,6 +27,12 @@ from .base import Base
 from .config import state_dir
 from .projects import Project
 from .ticket import Job, Ticket, is_blank, short_id, slugify
+
+
+# What a session identifier looks like — `session.new_id` draws a UUID4. Matched
+# rather than trusted because the Session column is a column like any other: a
+# cell somebody typed into must not become a `claude --resume` of its own.
+_SESSION_ID = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
 
 
 class Preparation(Base):
@@ -95,6 +102,12 @@ class Preparation(Base):
             else agents.Agent()
         )
 
+        # A ticket coming back out of the waiting column already has a session,
+        # stopped mid-sentence by a spent window rather than finished. Carrying
+        # it on costs a message where starting over costs the whole ticket again
+        # — and the session is what remembers the half of the work that is not
+        # in a commit yet. Anything else gets a fresh identifier, as ever.
+        carried = self._carried_session(ticket)
         job = Job(
             ticket,
             project,
@@ -102,7 +115,8 @@ class Preparation(Base):
             base,
             workdir,
             body,
-            session_id=session.new_id(),
+            session_id=carried or session.new_id(),
+            resume=bool(carried),
             log=state.log_file(short),
             model=str(notion.read(ticket.page, self.config.notion.prop("model")) or ""),
             agent=agent,
@@ -136,6 +150,31 @@ class Preparation(Base):
                 },
             )
         return job
+
+    def _carried_session(self, ticket: Ticket) -> str:
+        """The session to carry on for this ticket, when there is one to carry on.
+
+        Only out of the waiting-for-credit column, and that narrowness is the
+        point: everywhere else a ticket runs again, the Session column holds a
+        conversation that *ended* — reported on, commented, answered — and
+        resuming it would have the agent argue with its own verdict. A window
+        that closed mid-sentence is the one case where the conversation is
+        genuinely unfinished, and `park` empties the cell for the tickets in
+        that column that were never started at all.
+
+        Read back through whichever shape `_session_value` wrote: a deep link on
+        a URL column, the bare identifier on a text one. Anything that is not an
+        identifier — a link somebody pasted, an emptied cell — reads as none,
+        and the ticket opens a session of its own.
+        """
+        column = self.config.notion.state("waiting")
+        status = str(notion.read(ticket.page, self.config.notion.prop("status")) or "")
+        if status != column or column == self.config.notion.state("ready"):
+            return ""
+        raw = str(notion.read(ticket.page, self.config.notion.prop("session")) or "").strip()
+        if "://" in raw:
+            raw = raw.split("?")[0].rstrip("/").rsplit("/", 1)[-1]
+        return raw if _SESSION_ID.fullmatch(raw) else ""
 
     def _name(self, ticket: Ticket, body: str, short: str) -> None:
         """Give a nameless ticket a title, and write it on the page.

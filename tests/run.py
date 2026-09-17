@@ -808,7 +808,8 @@ def a_bare_page_becomes_the_whole_board():
     # runner reads both. Every column must be there, validated included.
     options = [option["name"] for option in schema["Status"]["select"]["options"]]
     assert options == [
-        "Ready", "In progress", "In review", "Validated", "Done", "Failed", "Blocked",
+        "Ready", "In progress", "Waiting for credit", "In review", "Validated", "Done",
+        "Failed", "Blocked",
     ]
 
     assert board.appended, "the context page is seeded rather than left blank"
@@ -894,9 +895,9 @@ def two_states_on_one_column_produce_one_option():
     settings.status = {"failed": "Needs you", "blocked": "Needs you"}
     names = [option["name"] for option in provision.status_options(settings)]
     assert names.count("Needs you") == 1
-    # Six: the two that were merged count once, and renaming a failure column
+    # Seven: the two that were merged count once, and renaming a failure column
     # says nothing about the validated one, which keeps its default.
-    assert len(names) == 6 and "Validated" in names
+    assert len(names) == 7 and "Validated" in names
 
     settings.status = {"review": "Done", "done": "Done"}
     names = [option["name"] for option in provision.status_options(settings)]
@@ -1162,6 +1163,7 @@ def _bare_runner(client) -> Runner:
     runner.agent_label = "ticket-runner@laptop"
     runner.quiet = True
     runner._comments = {}
+    runner._usage_warned = False
     runner._spellings = conversation.names()
     runner._me = ""          # Notion never said; the signature is all there is
     runner._identity_error = ""
@@ -1256,11 +1258,13 @@ def waking_looks_everywhere_but_where_a_status_already_speaks():
     excluded = {
         condition["status"]["does_not_equal"] for condition in runner._woken_filter()["and"]
     }
-    assert excluded == {"In review", "Validated", "Done", "Ready", "In progress"}
+    assert excluded == {
+        "In review", "Validated", "Done", "Ready", "In progress", "Waiting for credit",
+    }
     assert all(condition["property"] == "Status" for condition in runner._woken_filter()["and"])
-    # Five names spoken, and everything else — failed, blocked, whatever the
+    # Six names spoken, and everything else — failed, blocked, whatever the
     # board adds later — left in, because that is where an answer is expected.
-    assert len(runner._woken_filter()["and"]) == 5
+    assert len(runner._woken_filter()["and"]) == 6
 
 
 # -- talking in the comments -------------------------------------------------
@@ -2592,28 +2596,54 @@ def _out_of_credit(page: notion.Page) -> Runner:
     return runner
 
 
-@case
-def a_ticket_the_credits_ran_out_on_goes_back_to_ready_rather_than_failing():
-    """Nothing was wrong with it: there was nothing left to work on it with.
-
-    Failing it would cost the ticket twice — once for the quota, and once for
-    the four hours nobody is there to put it back.
-    """
-    page = _reviewed("p-doc", "In progress", None)
-    runner = _out_of_credit(page)
-    job = ticket_module.Job(
+def _doc_job(page: notion.Page) -> ticket_module.Job:
+    return ticket_module.Job(
         ticket_module.Ticket(page),
         projects.Project(name="", path=None),
         branch="",
         base="",
         workdir=Path(tempfile.mkdtemp()) / "doc",
     )
-    result = runner._execute_document(job)
-    assert runner.client.written == [("p-doc", {"Status": "Ready"})]
-    assert result["status"] == "waiting", "neither done nor failed"
+
+
+@case
+def a_ticket_the_credits_ran_out_on_waits_for_credit_rather_than_failing():
+    """Nothing was wrong with it: there was nothing left to work on it with.
+
+    Failing it would cost the ticket twice — once for the quota, and once for
+    the four hours nobody is there to put it back. Blocking it would cost the
+    board instead: "Blocked" is the column that means *you* are needed, and a
+    column that also means "come back at six" has stopped saying anything.
+    """
+    page = _reviewed("p-doc", "In progress", None)
+    runner = _out_of_credit(page)
+    runner.client._options = ["Waiting for credit", "In review", "Done"]
+    result = runner._execute_document(_doc_job(page))
+    assert runner.client.written[0][1]["Status"] == "Waiting for credit"
+    # The session goes on the page with it: it is what the pass that has credit
+    # again picks the ticket back up by, rather than starting it over.
+    assert runner.client.written[0][1]["Session"] == "s-1"
+    assert result["status"] == "waiting", "neither done, nor failed, nor blocked"
     said = runner.client.comments_written[0]
-    assert said.startswith("⏸️ Waiting — out of credit, back in “Ready” until "), said
+    assert said.startswith(
+        "⏸️ Waiting — out of credit, back in “Waiting for credit” until "
+    ), said
     assert "?" not in said, "a wait asks nothing of anybody"
+
+
+@case
+def a_board_without_the_waiting_column_puts_the_ticket_back_where_it_was():
+    """The column is added by hand in Notion — the API cannot widen a `status`.
+
+    Until it is there, an exhausted quota does exactly what it did before it
+    existed: the ticket goes back to the column it was claimed from.
+    """
+    page = _reviewed("p-doc", "In progress", None)
+    runner = _out_of_credit(page)
+    assert "Waiting for credit" not in runner.client._options, "premise"
+    runner._execute_document(_doc_job(page))
+    assert runner.client.written[0][1]["Status"] == "Ready"
+    assert "back in “Ready”" in runner.client.comments_written[0]
 
 
 def _that_failed(page: notion.Page, *, folded: bool) -> tuple[Runner, list[str], dict]:
@@ -2690,7 +2720,7 @@ def a_publication_the_credits_ran_out_on_goes_back_to_validated():
             ticket_module.Ticket(page), projects.Project(name="", path=None)
         )
     assert runner.client.written[0][1]["Status"] == "In progress", "claimed first"
-    assert runner.client.written[-1] == ("p-post", {"Status": "Validated"})
+    assert runner.client.written[-1][1]["Status"] == "Validated"
     assert result["status"] == "waiting"
     assert state.claims() == {}, "and the claim is let go of on the way out"
 
@@ -2735,6 +2765,350 @@ def a_runner_told_not_to_wait_fails_on_the_quota_as_it_always_did():
         # way a session that writes no answer always came back.
         assert runner._execute_document(job)["status"] == "blocked"
         assert "the credits are out" not in runner.client.comments_written[0]
+
+
+# -- stopping short of the wall ------------------------------------------------
+
+
+@contextmanager
+def _usage(payload: object):
+    """Claude Code's own store, replaced by what it would have cached.
+
+    `payload` is what goes under `cachedUsageUtilization.utilization`; `None`
+    writes no store at all, which is the reading nobody can take.
+    """
+    directory = Path(tempfile.mkdtemp())
+    if payload is not None:
+        (directory / ".claude.json").write_text(
+            json.dumps({"cachedUsageUtilization": {"utilization": payload}}),
+            encoding="utf-8",
+        )
+    previous = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = str(directory)
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = previous
+
+
+def _windows(session_percent: float, weekly: float = 0.0, hours: float = 4) -> dict:
+    """The two windows `/usage` shows, as the cache holds them."""
+    moment = datetime.now().astimezone() + timedelta(hours=hours)
+    return {
+        "five_hour": {"utilization": session_percent, "resets_at": moment.isoformat()},
+        "seven_day": {"utilization": weekly, "resets_at": moment.isoformat()},
+    }
+
+
+@case
+def the_most_constraining_of_the_two_windows_is_the_one_that_counts():
+    """20 % of the week and 97 % of the session is 97 % spent, not 20 %."""
+    with _usage(_windows(97, weekly=20)):
+        used, until = credits.used()
+        assert used == 97 and until > time.time()
+    with _usage(_windows(3, weekly=88)):
+        assert credits.used()[0] == 88
+
+    # A window whose moment has passed rolled over after the cache was written,
+    # so it is empty now whatever figure sits beside it — which is what makes a
+    # stale cache safe to read rather than something to date-check.
+    with _usage(_windows(99, weekly=99, hours=-2)):
+        assert credits.used() == (0.0, 0.0)
+
+    # And a reading is never invented: no store, no key, a shape that changed.
+    with _usage(None):
+        assert credits.used() is None
+    with _usage({"five_hour": None, "seven_day": "?"}):
+        assert credits.used() is None
+
+
+def _reserving(pages: list[notion.Page], percent: int = 5) -> Runner:
+    """A board runner with a reserve, whose sessions would all succeed."""
+    runner = _board_runner(pages, {}, options=["Waiting for credit", "In review", "Done"])
+    runner.config.runner.auto_update = False
+    runner.config.runner.credit_reserve_percent = percent
+    runner.config.runner.reply = False
+    runner.announce_idle = False
+    return runner
+
+
+@case
+def the_reserve_stops_the_runner_before_the_subscription_is_spent():
+    """The whole point: a runner that spends the last of it is one you turn off.
+
+    At 95 % nothing new is started — and the ticket that was ready says so on
+    the board, in its own column, rather than sitting in a ready column that
+    looks like a runner gone silent.
+    """
+    started: list[str] = []
+    with _state_home(), _usage(_windows(96)):
+        runner = _reserving([_ready("p-1"), _ready("p-2")])
+        runner.prepare = lambda ticket: started.append(ticket.id)
+        results = runner.tick()
+
+    assert started == [], "not one session begun"
+    assert {page: values["Status"] for page, values in runner.client.written} == {
+        "p-1": "Waiting for credit",
+        "p-2": "Waiting for credit",
+    }
+    # The Session cell is emptied: nothing was started for these, so there is no
+    # conversation to carry on — and a ticket woken by a comment must not have
+    # the run before it resumed, arguing with its own verdict.
+    assert all(values["Session"] == "" for _, values in runner.client.written)
+    assert [result["status"] for result in results] == ["waiting", "waiting"]
+    assert all("⏸️ Waiting" in said for said in runner.client.comments_written)
+
+
+@case
+def a_reserve_of_ten_percent_stops_ten_percent_earlier():
+    """The number is the setting's whole job, so it is the number that is read."""
+    with _state_home(), _usage(_windows(92)):
+        assert _reserving([], percent=5).under_reserve() == 0.0, "92 % is under 95 %"
+        assert _reserving([], percent=10).under_reserve() > 0.0, "and over 90 %"
+
+    # The wait ends when the constraining window does, not at some invented hour.
+    with _state_home(), _usage(_windows(96, hours=3)):
+        until = _reserving([], percent=5).under_reserve()
+        assert 2.9 * 3600 < until - time.time() <= 3 * 3600
+
+
+@case
+def a_reserve_nobody_can_measure_changes_nothing_at_all():
+    """A cache that is not there, or a shape that changed under us.
+
+    Refusing to run on it would be the worse failure by some distance: the
+    runner would stop working because it could not find a JSON key. So it says
+    so once and behaves exactly as it did before the setting existed.
+    """
+    started: list[str] = []
+    with _state_home(), _usage(None):
+        runner = _reserving([_ready("p-1")])
+        said: list[str] = []
+        runner.quiet, runner.say = False, said.append
+        runner.prepare = lambda ticket: started.append(ticket.id)
+        runner.tick()
+
+    assert started == ["p1"], "the ticket ran, as it always did"
+    warnings = [line for line in said if "could not be read" in line]
+    assert len(warnings) == 1, f"said once per run, not once per look: {warnings}"
+
+
+@case
+def the_reserve_is_read_again_at_every_free_place_not_once_a_pass():
+    """A pass lasts as long as its longest session, and the sessions in flight
+    are what fills the window: a pass that started under the line can cross it
+    halfway through. What is running is left to finish — killing a session to
+    save credit would spend what it has already cost.
+    """
+    finished = threading.Event()
+    with _state_home(), _usage(_windows(10)) as _:
+        runner = _reserving([_ready("p-1"), _ready("p-2")])
+        runner.config.runner.max_concurrent = 1
+        runner.prepare = lambda ticket: ticket_module.Job(
+            ticket, projects.Project(name="", path=None), branch="", base="",
+            workdir=Path(tempfile.mkdtemp()) / "doc",
+        )
+
+        def execute(job):
+            # The session itself is what spends the window, so the reading
+            # changes underneath the pass rather than before it.
+            store = Path(os.environ["CLAUDE_CONFIG_DIR"]) / ".claude.json"
+            store.write_text(
+                json.dumps({"cachedUsageUtilization": {"utilization": _windows(98)}}),
+                encoding="utf-8",
+            )
+            finished.set()
+            return {"id": job.ticket.page.id, "status": "done"}
+
+        runner.execute = execute
+        results = runner._work(runner.queue()[0], None, refill=True)
+
+    assert finished.is_set()
+    assert [result["status"] for result in results] == ["done", "waiting"]
+    assert results[1]["id"] == "p2", "the one it did not start says so on the board"
+
+
+@case
+def a_ticket_waiting_for_credit_goes_before_one_that_never_started():
+    """It is the one already half done: a branch with commits on it and a
+    session that can be picked back up. Starting a fresh ticket first is how a
+    board spends the returning credit on beginning things rather than on
+    finishing them."""
+    session_id = "11111111-2222-3333-4444-555555555555"
+    parked = _reviewed("p-parked", "Waiting for credit", None)
+    parked.properties["Session"] = {"type": "url", "url": f"ticket-runner://session/{session_id}"}
+    with _state_home(), _usage(_windows(10)):
+        runner = _reserving([_ready("p-fresh"), parked])
+        queued = runner.queue()[0]
+        assert [ticket.id for ticket in queued] == ["pparked", "pfresh"]
+
+        # And it is picked up rather than started over: the session on the page
+        # is the one the job carries, whatever shape the column wrote it in.
+        job = runner.prepare(queued[0])
+        assert job.resume and job.session_id == session_id
+        assert not runner.prepare(queued[1]).resume, "a fresh ticket opens a fresh session"
+
+
+@case
+def nothing_waiting_for_credit_is_picked_up_while_the_credit_is_still_short():
+    """They are read to be *run*: a pass that will start nothing has no reason
+    to ask, and re-parking a ticket already parked would be a Notion write per
+    pass for as long as the window lasts."""
+    parked = _reviewed("p-parked", "Waiting for credit", None)
+    with _state_home(), _usage(_windows(99)):
+        runner = _reserving([parked])
+        assert runner.parked() == []
+        assert runner.tick() == [], "and nothing is written on the way past"
+        assert runner.client.written == []
+
+
+@case
+def what_the_reserve_says_out_loud_is_said_once_and_once_on_the_way_back():
+    """A run is a process the timer starts, so "already said" has to be on disk.
+
+    Four hours at a ten-second cadence is fourteen hundred passes; a phone that
+    rings on each of them is a phone that stops being read.
+    """
+    with _state_home(), _usage(_windows(97)):
+        runner, told = _reserving([]), []
+        runner._announce = lambda title, body: told.append(title)
+        for _ in range(3):
+            assert runner.under_reserve() > 0.0
+        assert len(told) == 1, told
+
+    with _state_home(), _usage(_windows(97)):
+        runner, told = _reserving([]), []
+        runner._announce = lambda title, body: told.append(title)
+        assert runner.under_reserve() > 0.0
+        # The window rolls over, and the run that finds it says so — once.
+        (Path(os.environ["CLAUDE_CONFIG_DIR"]) / ".claude.json").write_text(
+            json.dumps({"cachedUsageUtilization": {"utilization": _windows(4)}}),
+            encoding="utf-8",
+        )
+        for _ in range(3):
+            assert runner.under_reserve() == 0.0
+        assert len(told) == 2, told
+
+
+@case
+def a_runner_with_no_window_to_reserve_a_slice_of_ignores_the_setting():
+    """`wait_for_credits = false` says this runner is not on a metered
+    subscription — an API key, or sessions routed through OpenRouter. There is
+    no window there, so there is no share of one to hold back."""
+    with _state_home(), _usage(_windows(99)):
+        runner = _reserving([])
+        runner.config.runner.wait_for_credits = False
+        assert runner.under_reserve() == 0.0
+
+
+@case
+def a_session_picked_back_up_is_told_what_changed_and_not_the_whole_ticket():
+    """It has the ticket, the brief and the context already; resending them
+    would cost on every resumption what they cost once. What it cannot know is
+    that hours passed and that its own half-done work is still on disk."""
+    sent: list[tuple[str, bool]] = []
+    page = _reviewed("p-doc", "Waiting for credit", None)
+    runner = _board_runner([page], {}, options=["Waiting for credit"])
+    runner._live = lambda job: None
+    runner.config.runner.attach_sessions = False
+
+    def fake_run(text, **rest):
+        sent.append((text, rest["resume"]))
+        return session.Outcome(
+            ok=True, blocked=False, session_id=rest["session_id"], summary="fait",
+            log=Path("/dev/null"),
+        )
+
+    original, session.run = session.run, fake_run
+    try:
+        job = _doc_job(page)
+        job.session_id, job.resume = "s-carried", True
+        runner._run_session(job, prompt.DOCUMENT)
+    finally:
+        session.run = original
+
+    text, resumed = sent[0]
+    assert resumed, "`claude --resume`, not a new conversation"
+    assert "carry on from where you stopped" in text
+    assert page.title not in text, "the frame is not sent a second time"
+
+
+@case
+def a_session_that_cannot_be_picked_back_up_starts_a_fresh_one():
+    """Pruned, filed on another machine, or a worktree it will not resume from.
+
+    The ticket and its branch are still here, so the run goes on from
+    everything except the thread of the interrupted session.
+    """
+    drawn: list[str] = []
+    page = _reviewed("p-doc", "Waiting for credit", None)
+    runner = _board_runner([page], {}, options=["Waiting for credit"])
+    runner._live = lambda job: None
+    runner.config.runner.attach_sessions = False
+
+    def fake_run(text, **rest):
+        drawn.append(rest["session_id"])
+        gone = rest["resume"]
+        return session.Outcome(
+            ok=not gone, blocked=False, session_id=rest["session_id"],
+            summary="fait", error="No conversation found" if gone else "",
+            log=Path("/dev/null"),
+        )
+
+    original, session.run = session.run, fake_run
+    try:
+        job = _doc_job(page)
+        job.session_id, job.resume = "s-gone", True
+        outcome = runner._run_session(job, prompt.DOCUMENT)
+    finally:
+        session.run = original
+
+    assert drawn[0] == "s-gone" and drawn[1] != "s-gone", drawn
+    assert outcome.ok and not job.resume
+
+
+@case
+def a_spent_window_mid_pass_says_so_on_the_tickets_it_did_not_start():
+    """The other half of the reserve, and the older of the two roads: a session
+    died on the quota while the pass was running. What it had queued behind it
+    is not silently dropped back into the ready column — it goes where the
+    ticket that died went, and comes back from there together."""
+    started: list[str] = []
+    with _state_home(), _usage(_windows(10)):
+        runner = _reserving([_ready("p-1"), _ready("p-2"), _ready("p-3")])
+        runner.config.runner.max_concurrent = 1
+        runner.prepare = lambda ticket: ticket_module.Job(
+            ticket, projects.Project(name="", path=None), branch="", base="",
+            workdir=Path(tempfile.mkdtemp()) / "doc",
+        )
+
+        def execute(job):
+            started.append(job.ticket.page.id)
+            credits.hold(time.time() + 300)  # what a spent session leaves behind
+            return {"id": job.ticket.page.id, "status": "waiting"}
+
+        runner.execute = execute
+        results = runner._work(runner.queue()[0], None, refill=True)
+
+    assert started == ["p-1"], "the ticket in flight finished, and nothing else began"
+    assert [result["status"] for result in results] == ["waiting", "waiting", "waiting"]
+    assert {page for page, _ in runner.client.written} == {"p-2", "p-3"}
+    assert all(
+        values["Status"] == "Waiting for credit" for _, values in runner.client.written
+    )
+
+
+@case
+def a_reserve_is_read_off_the_file_between_none_and_half():
+    """Both ends clamped rather than refused: 150 meant "keep plenty", not
+    "never run again", and a negative reserve is a typo for none at all."""
+    assert _config("[runner]\ncredit_reserve_percent = 10\n").runner.credit_reserve_percent == 10
+    assert _config("[runner]\ncredit_reserve_percent = 150\n").runner.credit_reserve_percent == 50
+    assert _config("[runner]\ncredit_reserve_percent = -3\n").runner.credit_reserve_percent == 0
+    assert _config("[runner]\n").runner.credit_reserve_percent == 5
 
 
 # -- runner ------------------------------------------------------------------
@@ -2820,6 +3194,7 @@ def _board_runner(pages: list[notion.Page], status: dict[str, str], options=None
     runner.dry_run = False
     runner._claimed = set()
     runner._comments = {}
+    runner._usage_warned = False
     runner._spellings = conversation.names()
     runner._me = ""
     runner._identity_error = ""
@@ -5840,6 +6215,13 @@ def the_version_is_rewritten_where_the_product_reads_it():
 
 
 def main() -> int:
+    # Claude Code's own store, pointed at an empty directory for the whole
+    # suite. Everything here is pure, and "how much of this machine's
+    # subscription is spent" is the least pure fact there is: a laptop at 96 %
+    # would otherwise park tickets in a test about something else entirely, and
+    # a CI runner with no store at all would take a different road again. The
+    # tests that are *about* the reading say so themselves — see `_usage`.
+    os.environ["CLAUDE_CONFIG_DIR"] = tempfile.mkdtemp()
     failures = 0
     for function in CASES:
         try:

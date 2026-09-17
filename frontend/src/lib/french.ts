@@ -324,6 +324,9 @@ export const FRENCH: Record<string, string> = {
   "Wait when the credits run out": "Attendre quand les crédits sont épuisés",
   "A subscription is metered in windows. When one is spent, the ticket goes back where it came from and nothing is run until the window rolls over — off, an exhausted quota fails every ticket it touches.":
     "Un abonnement se compte par fenêtres. Quand l'une est consommée, le ticket retourne d'où il vient et plus rien ne tourne jusqu'à la fenêtre suivante — désactivé, un quota épuisé fait échouer chaque ticket qu'il touche.",
+  "Keep for yourself (%)": "Garder pour vous (%)",
+  "The share of each window the runner refuses to touch. At 5 it starts nothing past 95 % of the session or the week — what is already running finishes, and the tickets it did not start wait in their own column rather than in Blocked. 0 spends the lot.":
+    "La part de chaque fenêtre à laquelle le runner ne touche pas. À 5, il ne lance plus rien au-delà de 95 % de la session ou de la semaine — ce qui tourne déjà va au bout, et les tickets qu'il n'a pas démarrés attendent dans leur propre colonne plutôt que dans Bloqué. 0 consomme tout.",
   "Empty: whatever Claude Code is set to. A ticket's own Model column wins over this one.":
     "Vide : ce que Claude Code utilise. La colonne Model d'un ticket l'emporte sur celui-ci.",
   "Answer in": "Répondre en",
@@ -477,6 +480,9 @@ export const FRENCH: Record<string, string> = {
   "the column the runner claims from": "la colonne dans laquelle le runner se sert",
   running: "en cours",
   "where it puts a ticket it has taken": "où il met un ticket qu'il a pris",
+  waiting: "en attente",
+  "the credit ran out — it comes back on its own":
+    "le crédit s'est épuisé — il repart tout seul",
   review: "en revue",
   "a pull request is waiting for you": "une pull request vous attend",
   validated: "validé",

@@ -9,8 +9,8 @@ the side.
 The two ways a run ends without a result live here too, and for the same
 reason: both are made of what is written rather than of what was done. `_fail`
 takes a ticket to failed — or to blocked, when the agent asked a question
-rather than guessed — and `_requeue` puts it back in the column it was taken
-from, which is the whole of what an exhausted quota has to say.
+rather than guessed — and `_requeue` puts it in the column it waits for credit
+in, which is the whole of what an exhausted quota has to say.
 
 `voice.py` decides the words and the language; this decides what is worth
 saying at all, and where.
@@ -18,6 +18,7 @@ saying at all, and where.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from . import channels, conversation, credits, notion, session
@@ -373,23 +374,47 @@ class Reports(Base):
         credits.hold(outcome.resets_at)
         when = credits.when(outcome.resets_at)
         self.say(f"  ⏸ out of credit — nothing is run until {when}")
-        self._notify("ticket-runner is out of credit", f"Back to work at {when}.")
+        self._announce("ticket-runner is out of credit", f"Back to work at {when}.")
 
     def _requeue(
-        self, ticket: Ticket, status: str, outcome: session.Outcome, note: str = ""
+        self,
+        ticket: Ticket,
+        status: str,
+        outcome: session.Outcome,
+        note: str = "",
+        home: Path | None = None,
     ) -> dict:
-        """Put a ticket back in the column it was taken from, and say why.
+        """Put a ticket in the column it waits in, and say why.
 
         The one way out of a run that is neither a success nor a failure:
         nothing was wrong with the ticket, there was simply nothing left to work
         on it with. So no question is asked and nobody's phone rings — the
-        column it goes back to is the whole of the message, and the first run
-        after the wait claims it like any other ticket.
+        column it goes to is the whole of the message, and the first run with
+        credit again picks it up before anything that never started.
+
+        The caller names the column because the two roads out of here come back
+        by different doors. A *ticket* goes to the waiting-for-credit column and
+        is picked up by the queue. A *publication* goes back to validated and is
+        picked up by `deliver`, which is the only thing that reads that column —
+        the decision to publish has already been taken, and putting it anywhere
+        else would both take that decision back and hand a delivery session to
+        the queue as though it were work to do.
         """
         said = self.voice
         when = credits.when(outcome.resets_at)
-        self.say(f"    ⏸ {ticket.title} — out of credit, back in “{status}” until {when}")
-        self._set(ticket, **{self.config.notion.prop("status"): status})
+        self.say(f"    ⏸ {ticket.title} — out of credit, into “{status}” until {when}")
+        # The session goes with it, because it is what the pass with credit
+        # again picks the ticket back up by — and it may not be the one the
+        # claim wrote, if the one the claim wrote could not be resumed.
+        self._set(
+            ticket,
+            **{
+                self.config.notion.prop("status"): status,
+                self.config.notion.prop("session"): self._session_value(
+                    outcome.session_id, home
+                ),
+            },
+        )
         self._comment(
             ticket,
             said.report(
@@ -403,6 +428,126 @@ class Reports(Base):
             "status": "waiting",
             "reason": f"out of credit until {when}",
         }
+
+    def under_reserve(self) -> float:
+        """The moment the reserve lifts, or 0.0 while there is credit to spend.
+
+        `credit_reserve_percent` is the share of the window this runner refuses
+        to touch, so that a subscription the runner has been chewing on all
+        afternoon still has something left for the terminal you open yourself.
+        Past `100 - reserve`, no session is started — not a ticket's, not a
+        publication's, not an answer in a thread. What *is* still done is
+        everything that costs nothing: a validated pull request is merged, a
+        merged one is closed, the board is swept.
+
+        Asked again every time rather than once per run, and that is the point:
+        a pass lasts as long as its longest session, and the sessions in flight
+        are what fills the window. Reading it afresh at each free place is what
+        makes the line hold *during* a pass rather than only at its top. What is
+        said out loud is held to once — by the note, not by a flag, since a run
+        is a process the timer starts and the pass after it must stay quiet.
+
+        Three ways this is 0.0, and only one of them is "there is room": the
+        setting belongs to a metered subscription, so a runner told not to wait
+        for credits has no window to reserve a slice of; and a reading nobody
+        could take is a warning, not a stop — see `credits.used`.
+        """
+        if not self.config.runner.wait_for_credits:
+            return 0.0
+        reading = credits.used()
+        if reading is None:
+            # Once per run, not once per free place: the cache is not going to
+            # appear halfway through a pass, and a warning repeated every ten
+            # seconds is a warning nobody reads.
+            if not self._usage_warned:
+                self._usage_warned = True
+                self.say(
+                    "  ! how much of the subscription is spent could not be read — "
+                    "carrying on without the reserve"
+                )
+            return 0.0
+        used, resets_at = reading
+        reserve = self.config.runner.credit_reserve_percent
+        if used < 100 - reserve:
+            # Back under the line: said once, and only by the run that finds it,
+            # exactly as the end of a spent window is.
+            if credits.release(what="reserve"):
+                self.say(f"  ▶ {used:.0f}% of the subscription spent — carrying on")
+                self._announce(
+                    "ticket-runner has credit again",
+                    f"{used:.0f}% of the subscription spent — back to work.",
+                )
+            return 0.0
+        # A window that names no moment still stops the runner; it simply stops
+        # it for as long as a blind wait, and the next run asks the cache again.
+        until = resets_at or time.time() + credits.BLIND_WAIT
+        if not credits.held(what="reserve"):
+            credits.hold(until, what="reserve")
+            when = credits.when(until)
+            self.say(
+                f"  ⏸ {used:.0f}% of the subscription spent, {reserve}% reserved — "
+                f"nothing new until {when}"
+            )
+            self._announce(
+                "ticket-runner is leaving you the rest",
+                f"{used:.0f}% of the subscription spent, {reserve}% reserved — "
+                f"nothing new is started before {when}.",
+            )
+        return until
+
+    def park(self, tickets: list[Ticket], until: float = 0.0) -> list[dict]:
+        """Move tickets nothing could be started for into the waiting column.
+
+        Said on the board rather than only in a journal nobody reads: a ready
+        column that stays full while the in-progress one stays empty tells you
+        the runner is broken, which is the one thing it is not. Moved once —
+        a ticket already in the column is left exactly as it is, which is what
+        keeps a wait of four hours from being four hours of Notion writes.
+
+        Nothing here asks anything of anybody: no question, no phone. The
+        notification for this went out once, when the line was reached.
+
+        `until` is the moment being waited for; unnamed, it is read off whichever
+        of the two waits is standing.
+        """
+        column = self.waiting_column("")
+        if not column or self.dry_run:
+            return []
+        said = self.voice
+        when = credits.when(until or self.under_reserve() or credits.held())
+        parked: list[dict] = []
+        for ticket in tickets:
+            if str(notion.read(ticket.page, self.config.notion.prop("status")) or "") == column:
+                continue
+            self.say(f"  ⏸ {ticket.title} — {said.say('credit-parked')}, until {when}")
+            # The Session cell is emptied on the way in, and that is what tells
+            # this ticket from one `_requeue` put here: nothing was started for
+            # this one, so there is no conversation to carry on. Whatever was in
+            # the cell belongs to a run that *finished* and was reported on —
+            # resuming it would have the agent argue with its own verdict, which
+            # is exactly what a ticket woken by a comment must not do.
+            self._set(
+                ticket,
+                **{
+                    self.config.notion.prop("status"): column,
+                    self.config.notion.prop("session"): "",
+                },
+            )
+            self._comment(
+                ticket,
+                said.report(
+                    said.verdict("waiting", said.say("credits-out", status=column, when=when))
+                ),
+            )
+            parked.append(
+                {
+                    "ticket": ticket.title,
+                    "id": ticket.id,
+                    "status": "waiting",
+                    "reason": f"out of credit until {when}",
+                }
+            )
+        return parked
 
     def waiting_for_credits(self) -> float:
         """The moment the credits come back, or 0.0 when there is nothing to wait for.

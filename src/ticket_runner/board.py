@@ -2,8 +2,8 @@
 
 Everything a pass wants to know before it starts working: which tickets are to
 be run now, which are waiting for their date, which have been answered since
-the last run, and which are still marked as taken by a run that is no longer
-alive.
+the last run, which a spent window left waiting for credit, and which are still
+marked as taken by a run that is no longer alive.
 
 One rule holds the module together: **a date on a ticket means "not before
 this moment", wherever it is written.** `_moment` is the single reading of it,
@@ -48,10 +48,11 @@ class Board(Base):
     def queue(self) -> tuple[list[Ticket], list[tuple[Ticket, datetime]]]:
         """The tickets to run now, and those waiting for their date.
 
-        Two ways in: the ready column, and a ticket the runner already handled
-        that has been commented on since (see `woken`). Both are ranked and
-        held back by their date the same way — once a ticket is to be run,
-        what put it there changes nothing.
+        Three ways in: the ready column, a ticket the runner already handled
+        that has been commented on since (see `woken`), and one a spent quota
+        left in the waiting-for-credit column (see `parked`). All three are
+        ranked and held back by their date the same way — once a ticket is to be
+        run, what put it there changes nothing.
 
         A ticket carrying a date is **scheduled**, not merely deadlined: it is
         left alone until that moment comes. Which is the only reading that means
@@ -59,12 +60,18 @@ class Board(Base):
         made ready, so a date can only be there to say "not yet".
 
         Among the tickets that may run, order settles who goes first when more
-        are ready than `max_concurrent` allows: priority, then the one whose
-        date passed longest ago, then age. Age last, so that nothing is starved
-        by a steady trickle of newer work.
+        are ready than `max_concurrent` allows: what was interrupted before what
+        was never begun, then priority, then the one whose date passed longest
+        ago, then age. Interrupted first because it is the one already half
+        done — its branch carries commits, its session can be picked back up,
+        and leaving it behind a fresh ticket is how a board spends the returning
+        credit on starting things rather than on finishing them. Age last, so
+        that nothing is starved by a steady trickle of newer work.
         """
+        resumed = self.parked()
         tickets = [Ticket(page) for page in self.client.query(self.database, self._ready_filter())]
-        tickets += self.woken()
+        tickets += self.woken() + resumed
+        interrupted = {ticket.id for ticket in resumed}
         priorities = {name: index for index, name in enumerate(PRIORITIES)}
         default = priorities.get("Normal", len(PRIORITIES))
         now = datetime.now().astimezone()
@@ -80,9 +87,10 @@ class Board(Base):
             moments[ticket.id] = moment.timestamp() if moment else float("inf")
             eligible.append(ticket)
 
-        def rank(ticket: Ticket) -> tuple[int, float, str]:
+        def rank(ticket: Ticket) -> tuple[int, int, float, str]:
             value = notion.read(ticket.page, self.config.notion.prop("priority"))
             return (
+                0 if ticket.id in interrupted else 1,
                 priorities.get(str(value), default),
                 moments[ticket.id],
                 ticket.page.raw.get("created_time", ""),
@@ -101,18 +109,18 @@ class Board(Base):
     def _woken_filter(self) -> dict:
         """Every status but the ones that already speak for a ticket.
 
-        Ready is on its way, running is in flight, in review is waiting on a
-        merge, validated is about to be carried out, and done is done: a comment
-        on a ticket that came back with its pull request is a conversation about
-        the work, not a request to do it again. What is left is where a run
-        leaves a ticket it could not finish — which is precisely where an answer
-        is expected.
+        Ready is on its way, running is in flight, waiting is coming back the
+        moment there is credit, in review is waiting on a merge, validated is
+        about to be carried out, and done is done: a comment on a ticket that
+        came back with its pull request is a conversation about the work, not a
+        request to do it again. What is left is where a run leaves a ticket it
+        could not finish — which is precisely where an answer is expected.
         """
         status_property = self.config.notion.prop("status")
         kind = self.client.schema(self.database).get(status_property, "status")
         settled = {
             self.config.notion.state(key)
-            for key in ("done", "review", "validated", "ready", "running")
+            for key in ("done", "review", "validated", "ready", "running", "waiting")
         }
         return {
             "and": [
@@ -120,6 +128,48 @@ class Board(Base):
                 for value in sorted(settled)
             ]
         }
+
+    def waiting_column(self, fallback: str) -> str:
+        """Where a ticket waits for credit, or `fallback` on a board without it.
+
+        Opt-in like every column past the first two, and for a reason the API
+        forces: a real `status` property cannot be widened from outside Notion,
+        so the option is added by hand — `ticket-runner init` puts it on a board
+        it builds itself, and says so about one it cannot. Until it is there, a
+        ticket the credit ran out on goes back where it came from, exactly as it
+        did before this column existed.
+        """
+        name = self.config.notion.state("waiting")
+        status = self.config.notion.prop("status")
+        if name in (self.config.notion.state("ready"), self.config.notion.state("running")):
+            return fallback
+        try:
+            offered = self.client.options(self.database, status)
+        except notion.NotionError:
+            return fallback
+        return name if name in offered else fallback
+
+    def parked(self) -> list[Ticket]:
+        """The tickets a spent quota left in the waiting-for-credit column.
+
+        None at all where the board has no such column, and none while the
+        credit is still short: these are read to be *run*, so a pass that will
+        start nothing has no reason to ask. Their comments are not read either —
+        a ticket in this column is waiting on a subscription, not on you, and
+        `converse` is what a question underneath it would go through.
+        """
+        column = self.waiting_column("")
+        if not column or self.under_reserve():
+            return []
+        status_property = self.config.notion.prop("status")
+        kind = self.client.schema(self.database).get(status_property, "status")
+        pages = self.client.query(
+            self.database, {"property": status_property, kind: {"equals": column}}
+        )
+        tickets = [Ticket(page) for page in pages]
+        if tickets:
+            self.say(f"  ▶ {len(tickets)} ticket(s) waiting for credit — picked up first")
+        return tickets
 
     def woken(self) -> list[Ticket]:
         """Tickets this runner has already reported on, and answered since.

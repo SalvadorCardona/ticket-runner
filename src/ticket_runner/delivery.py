@@ -105,6 +105,13 @@ class Delivery(Base):
                 if done:
                     results.append(done)
                 continue
+            if self.under_reserve():
+                # A publication is a session; a merge is two `gh` calls. So the
+                # merges above happen and this one waits, left validated, for
+                # the pass that has credit again — the decision to publish it is
+                # not being reconsidered, only postponed.
+                self._claimed.add(ticket.id)
+                continue
             project = self._project_of(ticket)
             if project.is_code:
                 # A ticket on a repository carries a pull request or it carries

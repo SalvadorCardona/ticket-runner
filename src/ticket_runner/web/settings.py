@@ -50,6 +50,9 @@ class Field:
     help: str = ""
     choices: tuple[str, ...] = ()
     minimum: int = 0
+    # Zero is "no ceiling", which is what almost every number here wants: a
+    # timeout or an interval is bounded by what you meant, not by the loader.
+    maximum: int = 0
     # What has to happen for a change to count. Most of it is read again on the
     # next run and needs nothing; the exceptions say so rather than looking like
     # they worked.
@@ -153,6 +156,15 @@ SECTIONS: tuple[Section, ...] = (
                 "A subscription is metered in windows. When one is spent, the ticket goes "
                 "back where it came from and nothing is run until the window rolls over — "
                 "off, an exhausted quota fails every ticket it touches.",
+            ),
+            Field(
+                "runner", "credit_reserve_percent", "int", "Keep for yourself (%)",
+                "The share of each window the runner refuses to touch. At 5 it starts "
+                "nothing past 95 % of the session or the week — what is already running "
+                "finishes, and the tickets it did not start wait in their own column "
+                "rather than in Blocked. 0 spends the lot.",
+                minimum=0,
+                maximum=config_module.MOST_RESERVED,
             ),
             Field(
                 "runner", "model", "text", "Model",
@@ -399,6 +411,7 @@ SECTIONS: tuple[Section, ...] = (
             {
                 "ready": "the column the runner claims from",
                 "running": "where it puts a ticket it has taken",
+                "waiting": "the credit ran out — it comes back on its own",
                 "review": "a pull request is waiting for you",
                 "validated": "you accepted it — the runner merges, or publishes",
                 "done": "in, and closed",
@@ -594,6 +607,8 @@ def _value(entry: Field, offered: object) -> object:
             raise ValueError(f"{entry.label}: “{offered}” is not a number") from None
         if number < max(entry.minimum, 0):
             raise ValueError(f"{entry.label}: {entry.minimum} at the least")
+        if entry.maximum and number > entry.maximum:
+            raise ValueError(f"{entry.label}: {entry.maximum} at the most")
         return number
     if entry.kind == "events":
         if not isinstance(offered, list):
