@@ -21,7 +21,6 @@ when the ready column is empty and nothing is left in flight — see `_work`.
 
 from __future__ import annotations
 
-import re
 import shutil
 import socket
 import threading
@@ -47,35 +46,6 @@ from .ticket import Job, Ticket, is_blank, short_id, slugify
 # How much of a ticket's own history is worth carrying into the prompt.
 COMMENT_LIMIT = 10
 COMMENT_CHARS = 2000
-
-
-def _line(error: object) -> str:
-    """The first line of an error, which is the part meant for a human."""
-    return str(error).splitlines()[0] if str(error).strip() else ""
-
-
-def _message_of(prompt_text: str) -> str:
-    """The message a built conversation prompt is about to answer.
-
-    A resumed session has the whole frame already; sending it again would cost
-    the ticket's body and the project's brief on every turn and teach it
-    nothing. What it has not seen is the last section.
-    """
-    marker = "# The message to answer\n\n"
-    if marker in prompt_text:
-        return prompt_text.split(marker, 1)[1].split("\n# What is expected", 1)[0].strip()
-    return prompt_text.strip()
-
-
-def _pull_request(said: voice_module.Voice, url: str) -> str:
-    """“PR #19”, which is how anybody refers to one out loud.
-
-    The URL says the same thing in seventy characters, and a verdict line has
-    about eighty in all — so the number goes on that line and the URL goes on
-    its own, where it is a link to click rather than a fact to read.
-    """
-    found = re.search(r"/pull/(\d+)", str(url or ""))
-    return said.say("pull-request", number=found.group(1)) if found else ""
 
 
 class Runner:
@@ -420,7 +390,7 @@ class Runner:
                 self._me = self.client.me()
             except notion.NotionError as error:
                 self._me = ""
-                self._identity_error = _line(error)
+                self._identity_error = voice_module.line(error)
         return self._me
 
     def spellings(self) -> tuple[str, ...]:
@@ -541,7 +511,7 @@ class Runner:
             self.say(f"  ✓ {ticket.title} — pull request merged, moved to done")
             self._set(ticket, **{status_property: self.config.notion.state("done")})
             self._comment(
-                ticket, said.report(said.verdict("merged", _pull_request(said, url)), url)
+                ticket, said.report(said.verdict("merged", said.pull_request(url)), url)
             )
             closed += 1
         return closed
@@ -720,7 +690,7 @@ class Runner:
                     said.say("merge-refused"),
                     f"{url}\n\n{error}",
                     blocked=True,
-                    question=said.say("merge-refused-question", error=_line(error)),
+                    question=said.say("merge-refused-question", error=voice_module.line(error)),
                 )
             how = said.say("merged-with", method=method)
         self.say(f"  ✓ {ticket.title} — pull request merged, moved to done")
@@ -730,7 +700,7 @@ class Runner:
         )
         self._comment(
             ticket,
-            said.report(said.verdict("merged", _pull_request(said, url), how), url),
+            said.report(said.verdict("merged", said.pull_request(url), how), url),
         )
         return {"ticket": ticket.title, "id": ticket.id, "status": "done", "merged": url}
 
@@ -983,7 +953,10 @@ class Runner:
             brief = self.client.blocks_text(schedule.page.id)
             page_id = self.client.create_row(self.database, title, values)
         except notion.NotionError as error:
-            self.say(f"  ! {schedule.name} — the ticket could not be created: {_line(error)}")
+            self.say(
+                f"  ! {schedule.name} — the ticket could not be created: "
+                f"{voice_module.line(error)}"
+            )
             return None
         # Linked first, so that a body Notion refuses still leaves the schedule
         # knowing what it produced — otherwise the next occurrence makes a twin.
@@ -995,7 +968,9 @@ class Runner:
                 + (f"\n{brief}\n" if brief.strip() else ""),
             )
         except notion.NotionError as error:
-            self.say(f"  ! {title} — created, but its body was refused: {_line(error)}")
+            self.say(
+                f"  ! {title} — created, but its body was refused: {voice_module.line(error)}"
+            )
         self.say(f"  ✳ {title} — created by a schedule, ready")
         return {
             "ticket": title,
@@ -1019,7 +994,9 @@ class Runner:
         try:
             self.client.update(self.workspace.schedules, schedule.page.id, written)
         except notion.NotionError as error:
-            self.say(f"  ! {schedule.name} — Notion refused the write: {_line(error)}")
+            self.say(
+                f"  ! {schedule.name} — Notion refused the write: {voice_module.line(error)}"
+            )
 
     def fetch_one(self, reference: str) -> Ticket:
         page_id = reference.strip()
@@ -1456,7 +1433,7 @@ class Runner:
             if not title:
                 self.say("  ! the naming session said nothing usable — reading the content")
         except (OSError, ValueError) as error:
-            self.say(f"  ! the ticket could not be named by a session: {_line(error)}")
+            self.say(f"  ! the ticket could not be named by a session: {voice_module.line(error)}")
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
 
@@ -1470,7 +1447,7 @@ class Runner:
                 {self.client.title_property(self.database): title},
             )
         except notion.NotionError as error:
-            self.say(f"  ! the title could not be written to Notion: {_line(error)}")
+            self.say(f"  ! the title could not be written to Notion: {voice_module.line(error)}")
             return
         ticket.page.title = title
         self.say(f"  · named “{title}” — the ticket had none of its own")
@@ -1645,7 +1622,7 @@ class Runner:
             return self._fail(
                 ticket,
                 said.say("answer-not-written"),
-                _line(error),
+                voice_module.line(error),
                 note=self._filed(
                     job, outcome, said.say("answer-on-disk", path=answer_file)
                 ),
@@ -1806,7 +1783,7 @@ class Runner:
         # Where the work is comes first, because it is what you act on: the
         # pull request when there is one, and the branch when there is not.
         facts = (
-            _pull_request(said, pull_request) or said.say("on-branch", branch=job.branch),
+            said.pull_request(pull_request) or said.say("on-branch", branch=job.branch),
             said.count(commits, "commit"),
             *said.spent(outcome.seconds, outcome.cost_usd),
         )
@@ -1931,7 +1908,7 @@ class Runner:
         try:
             return self._answer_thread(me, page_id, thread)
         except notion.NotionError as error:
-            self.say(f"    ! comment not answered: {_line(error)}")
+            self.say(f"    ! comment not answered: {voice_module.line(error)}")
         except (OSError, ValueError) as error:
             self.say(f"    ! comment not answered: {error}")
         return None
@@ -2007,7 +1984,7 @@ class Runner:
             said = self.voice
             answer = said.say(
                 "no-reply",
-                error=_line(outcome.error) or said.say("said-nothing"),
+                error=voice_module.line(outcome.error) or said.say("said-nothing"),
                 log=outcome.log,
             )
         self._comment(ticket, answer, discussion)
@@ -2050,7 +2027,9 @@ class Runner:
         # A resumed session already carries the frame; what it has not seen is
         # the new message, which is the last section of the prompt we built.
         prompt_text = (
-            prompt_module.follow_up(_message_of(text), self.voice.instruction(reply=True))
+            prompt_module.follow_up(
+                prompt_module.message_of(text), self.voice.instruction(reply=True)
+            )
             if resume
             else text
         )
@@ -2317,7 +2296,7 @@ class Runner:
         try:
             tickets, waiting = self.queue()
         except notion.NotionError as error:
-            self.say(f"  ! the board could not be read again: {_line(error)}")
+            self.say(f"  ! the board could not be read again: {voice_module.line(error)}")
             return []
         fresh = [ticket for ticket in tickets if ticket.id not in started]
         # Queued or held for later, both are work about to happen: `converse`

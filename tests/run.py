@@ -1749,7 +1749,7 @@ def a_conversation_prompt_says_what_it_is_not_allowed_to_do():
     )]
     assert order == sorted(order), order
     # A resumed session is sent the message and not the whole frame again.
-    assert runner_module._message_of(text) == "pourquoi ce nom ?"
+    assert prompt.message_of(text) == "pourquoi ce nom ?"
 
 
 @case
