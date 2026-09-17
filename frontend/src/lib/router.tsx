@@ -8,9 +8,10 @@ import { parseLink } from "react-resource-view"
  * behind it is `http.server` and the standard library: `/` is the one page it
  * serves, and a deep path would be a 404 before the JavaScript had a chance
  * to read it. So the board is `/?view=console/tickets/list`, a ticket is
- * `/?view=console/tickets/read/<id>` — the shape react-resource-view writes in
- * its `query` routing mode — and the panes that are not resources are
- * `/?page=live`, `/?page=schedules`, `/?page=settings`.
+ * `/?view=console/tickets/read/<id>`, one section of the settings is
+ * `/?view=console/settings/read/config/notify` — the shape react-resource-view
+ * writes in its `query` routing mode — and the panes that are not resources
+ * are `/?page=live`, `/?page=schedules`.
  *
  * The four primitives below are what that package asks of a router. Written
  * here rather than taken from TanStack: a console with a handful of pages has
@@ -81,13 +82,13 @@ export const navigation: NavigationPortInterface = {
 
 /* -- what an address means ------------------------------------------------ */
 
-export type Page = "live" | "schedules" | "settings" | "console"
+export type Page = "live" | "schedules" | "console"
 
 export type Route =
   | { kind: "page"; page: Page }
   | { kind: "resource"; params: ViewResourceContextParams }
 
-const PAGES: Page[] = ["live", "schedules", "settings", "console"]
+const PAGES: Page[] = ["live", "schedules", "console"]
 
 export const pageHref = (page: Page) => `/?page=${page}`
 

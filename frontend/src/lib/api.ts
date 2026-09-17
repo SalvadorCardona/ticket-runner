@@ -28,11 +28,20 @@ const GUARD = { "X-Ticket-Runner": "1" }
 
 export class ApiError extends Error {
   readonly status: number
+  /* The payload as it arrived, under the name react-resource-view looks for.
+   *
+   * A form drawn by that package hands whatever a write threw to its own
+   * `normalizeApiError`, which reads an error's `data` and passes it to the
+   * dialect. Without it the sentence the server refused with reaches the
+   * browser's console and nowhere else — and a save that fails quietly is a
+   * save you think worked. */
+  readonly data: { error: string }
 
   constructor(message: string, status: number) {
     super(message)
     this.name = "ApiError"
     this.status = status
+    this.data = { error: message }
   }
 }
 

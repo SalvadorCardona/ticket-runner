@@ -13,8 +13,10 @@ export type { MenuItemInterface }
 /** What the console adds: what the entry counts, and what it says under its name. */
 export interface PaneMenuItem extends MenuItemInterface {
   href: string
-  /** Which pane the entry is, for the one that is not an address of the board. */
+  /** Which pane the entry is, for the ones that are not a resource's address. */
   page?: Page
+  /** Which resource the entry opens, for the ones that are. */
+  resource?: string
   /** A number worth showing beside the name — tickets on the board, sessions live. */
   badge?: string | number
   /** Said under the name, and only where it says something. */

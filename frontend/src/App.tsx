@@ -7,7 +7,6 @@ import { Header } from "@/components/console/header"
 import { LivePane } from "@/components/console/live-pane"
 import { ResourcePane } from "@/components/console/resource-pane"
 import { SchedulesPane } from "@/components/console/schedules-pane"
-import { SettingsPane } from "@/components/console/settings-pane"
 import { TicketTalk } from "@/components/console/ticket-talk"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
@@ -15,8 +14,10 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { ConsoleProvider, useConsole } from "@/hooks/use-console"
 import { useBoard } from "@/lib/board-store"
 import { useT } from "@/lib/i18n"
-import { go, pageHref, useRoute, type Page } from "@/lib/router"
+import { useRoute, type Page } from "@/lib/router"
 import { cn } from "@/lib/utils"
+import { SETTINGS } from "@/resources/settings"
+import { TICKETS } from "@/resources/tickets"
 
 /* The shape of the page.
  *
@@ -33,7 +34,6 @@ const CRUMB: Record<Page, string> = {
   console: "console",
   live: "live",
   schedules: "schedules",
-  settings: "settings",
 }
 
 const ASIDE = "ticket-runner-aside"
@@ -42,12 +42,18 @@ function Console() {
   const route = useRoute()
   const board = useBoard()
   const t = useT()
-  const { ticket, openTicket, closeTicket, runCommand } = useConsole()
+  const { ticket, openTicket, closeTicket } = useConsole()
+
+  // Which resource the address names. An address that names none is the board.
+  const resourceId = route.kind === "resource" ? (route.params.resourceId ?? TICKETS) : null
 
   // The address says which ticket is open; the board says what it is, so the
   // discussion loads while the page is still being read.
   const ticketId =
-    route.kind === "resource" && route.params.resourceAction === ActionList.read && route.params.id
+    route.kind === "resource" &&
+    resourceId === TICKETS &&
+    route.params.resourceAction === ActionList.read &&
+    route.params.id
       ? String(route.params.id)
       : null
   React.useEffect(() => {
@@ -77,39 +83,17 @@ function Console() {
     })
   }
 
-  const check = (verb: string) => {
-    // On one column the console is a page of its own; on two it is beside you.
-    if (window.matchMedia("(max-width: 860px)").matches) go(pageHref("console"))
-    void runCommand(verb)
-  }
-
   // The bar says the path, not the title: `workspace / board / #3f2a1c`. The
   // page under it opens with the heading, so a ticket is named here by its id
   // — the short thing that fits a breadcrumb — rather than by its sentence.
   const crumbs =
     route.kind === "page"
       ? [t("workspace"), t(CRUMB[route.page])]
-      : ticketId
-        ? [t("workspace"), t("board"), `#${ticket?.short ?? String(ticketId).slice(-8)}`]
-        : [t("workspace"), t("board")]
-
-  // Each pane keeps its place while another is shown, so a ticket half-read
-  // and a setting half-typed survive a trip through the menu.
-  const cell = (name: "live" | "settings", child: React.ReactNode) => {
-    const shown = route.kind === "page" && route.page === name
-    return (
-      <div
-        key={name}
-        className={cn(
-          "col-start-1 row-start-1 min-h-0 overflow-hidden",
-          shown ? "flex flex-col" : "hidden",
-          name === "live" && "scroll-thin overflow-y-auto"
-        )}
-      >
-        {child}
-      </div>
-    )
-  }
+      : resourceId === SETTINGS
+        ? [t("workspace"), t("settings")]
+        : ticketId
+          ? [t("workspace"), t("board"), `#${ticket?.short ?? String(ticketId).slice(-8)}`]
+          : [t("workspace"), t("board")]
 
   const twoColumns = aside ? "min-[861px]:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]" : ""
 
@@ -136,10 +120,18 @@ function Console() {
                 <ResourcePane params={route.params} />
               </div>
             ) : null}
-            {cell("live", <LivePane />)}
-            {cell("settings", <SettingsPane onCheck={check} />)}
+            {/* Kept in place while another pane is shown, so a transcript
+                scrolled halfway survives a trip through the menu. */}
+            <div
+              className={cn(
+                "scroll-thin col-start-1 row-start-1 min-h-0 overflow-y-auto",
+                route.kind === "page" && route.page === "live" ? "flex flex-col" : "hidden"
+              )}
+            >
+              <LivePane />
+            </div>
 
-            {/* Not a `cell`: this one has nothing half-typed to keep, and the
+            {/* Not kept: this one has nothing half-read to hold on to, and the
                 only way to draw it is a Notion query — which a tab left open on
                 the board has no business making. */}
             {route.kind === "page" && route.page === "schedules" ? (
