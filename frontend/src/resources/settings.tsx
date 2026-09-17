@@ -275,6 +275,9 @@ export const settings = createViewResource<SettingsItem>(SETTINGS, {
       // The object is what the package reads the tabs off, so the getter on it
       // survives the copy `createViewResource` makes of the view itself.
       subViewResource: {
+        // Fourteen sections read as a column: a bar would push most of them off
+        // the screen, and the one you are on with them.
+        orientation: "vertical",
         get list() {
           return tabs()
         },
