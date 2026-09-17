@@ -43,7 +43,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import git, notion
+from . import git, store
 
 SKIP = {"node_modules", "vendor", ".git", "dist", "build", ".venv", "__pycache__"}
 
@@ -85,7 +85,7 @@ def _normalise(url: str) -> str:
     return "/".join(parts[-2:]).lower() if len(parts) >= 2 else url.lower()
 
 
-def _property(page: notion.Page, *names: str) -> object:
+def _property(page: store.Page, *names: str) -> object:
     """The first of those columns the project page actually carries.
 
     A project database is written by hand, so its columns are named by hand:
@@ -97,7 +97,7 @@ def _property(page: notion.Page, *names: str) -> object:
         key = lookup.get(name.lower())
         if key is None:
             continue
-        value = notion.read(page, key)
+        value = store.read(page, key)
         if value not in (None, "", []):
             return value
     return None
@@ -156,7 +156,7 @@ class Resolver:
                     self._by_remote.setdefault(_normalise(url), []).append(repo)
         return self._by_remote
 
-    def brief(self, client: notion.Client, page_id: str) -> str:
+    def brief(self, backend: store.Store, page_id: str) -> str:
         """Whatever is written on the project page, as standing instructions.
 
         A project is more than a path: it has an audience, a voice, conventions,
@@ -167,11 +167,11 @@ class Resolver:
         An empty project page costs nothing and changes nothing.
         """
         try:
-            return client.blocks_text(page_id)
-        except notion.NotionError:
+            return backend.blocks_text(page_id)
+        except store.StoreError:
             return ""
 
-    def resolve(self, client: notion.Client, page_id: str, *, clone: bool = False) -> Project:
+    def resolve(self, backend: store.Store, page_id: str, *, clone: bool = False) -> Project:
         """The project behind that page, and the repository its tickets run on.
 
         `clone` allows the last resort: a declared repository this machine does
@@ -179,7 +179,7 @@ class Resolver:
         by default, because reading the board must download nothing — only the
         run that is about to work on a ticket asks for it.
         """
-        page = client.page(page_id)
+        page = backend.page(page_id)
         name = page.title or page_id
         github = str(_property(page, "Repository", "github", "repo") or "")
 
@@ -198,7 +198,7 @@ class Resolver:
                     + ". Correct it: the fallback is what its tickets run on."
                 )
             return Project(
-                name, path, page_id, github, self.brief(client, page_id), note, fetched
+                name, path, page_id, github, self.brief(backend, page_id), note, fetched
             )
 
         for source, declared in (
@@ -224,7 +224,7 @@ class Resolver:
             # from the project's name would be worse than useless here — it
             # would silently turn a writing task into a commit on some repo that
             # merely happens to be named alike.
-            return Project(name, None, page_id, "", self.brief(client, page_id))
+            return Project(name, None, page_id, "", self.brief(backend, page_id))
 
         # Only these are somebody's mistake. What the GitHub ways below add is
         # "there is no clone here", which is not a wrong declaration and has no

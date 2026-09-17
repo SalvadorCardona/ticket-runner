@@ -3,8 +3,10 @@ import { ActionList } from "react-data-form"
 
 import { AppSidebar } from "@/components/console/app-sidebar"
 import { ConsolePane } from "@/components/console/console-pane"
+import { ContextPane } from "@/components/console/context-pane"
 import { Header } from "@/components/console/header"
 import { LivePane } from "@/components/console/live-pane"
+import { ProjectsPane } from "@/components/console/projects-pane"
 import { ResourcePane } from "@/components/console/resource-pane"
 import { SchedulesPane } from "@/components/console/schedules-pane"
 import { SettingsPane } from "@/components/console/settings-pane"
@@ -32,6 +34,8 @@ import { cn } from "@/lib/utils"
 const CRUMB: Record<Page, string> = {
   console: "console",
   live: "live",
+  projects: "projects",
+  context: "context",
   schedules: "schedules",
   settings: "settings",
 }
@@ -95,7 +99,7 @@ function Console() {
 
   // Each pane keeps its place while another is shown, so a ticket half-read
   // and a setting half-typed survive a trip through the menu.
-  const cell = (name: "live" | "settings", child: React.ReactNode) => {
+  const cell = (name: "live" | "settings" | "context", child: React.ReactNode) => {
     const shown = route.kind === "page" && route.page === name
     return (
       <div
@@ -138,13 +142,22 @@ function Console() {
             ) : null}
             {cell("live", <LivePane />)}
             {cell("settings", <SettingsPane onCheck={check} />)}
+            {/* A `cell` for the same reason the settings are one: it holds a
+                text somebody is half-way through rewriting, and a trip through
+                the menu must not cost it. */}
+            {cell("context", <ContextPane />)}
 
-            {/* Not a `cell`: this one has nothing half-typed to keep, and the
-                only way to draw it is a Notion query — which a tab left open on
-                the board has no business making. */}
+            {/* Not `cell`s: these two have nothing half-typed to keep, and the
+                only way to draw either is to ask the board — which a tab left
+                open on the tickets has no business making it do. */}
             {route.kind === "page" && route.page === "schedules" ? (
               <div className="scroll-thin col-start-1 row-start-1 min-h-0 overflow-y-auto">
                 <SchedulesPane />
+              </div>
+            ) : null}
+            {route.kind === "page" && route.page === "projects" ? (
+              <div className="scroll-thin col-start-1 row-start-1 min-h-0 overflow-y-auto">
+                <ProjectsPane />
               </div>
             ) : null}
 

@@ -1,6 +1,8 @@
 import {
   Activity,
+  BookOpen,
   CalendarClock,
+  FolderGit2,
   LayoutGrid,
   Moon,
   RefreshCw,
@@ -37,7 +39,7 @@ import { boardHref } from "@/resources/tickets"
 
 /* The left menu.
  *
- * Five addresses, and it says more than the addresses could: how many tickets
+ * Seven addresses, and it says more than the addresses could: how many tickets
  * are on the board and how many are ready, how many sessions are writing right
  * now, whether the timer is on. A menu that only navigates is a menu you read
  * once.
@@ -89,14 +91,32 @@ export function AppSidebar({ route }: { route: Route }) {
       detail: running ? t("{{count}} running", { count: String(running) }) : "",
     },
     {
+      name: t("Projects"),
+      href: pageHref("projects"),
+      page: "projects",
+      icon: FolderGit2,
+      priority: 18,
+      // No count and no badge, here as under Schedules: the only way to know is
+      // to ask the board, and this menu is redrawn every time it moves.
+      detail: t("what the tickets are about"),
+    },
+    {
       name: t("Schedules"),
       href: pageHref("schedules"),
       page: "schedules",
       icon: CalendarClock,
       priority: 15,
-      // No count and no badge: the only way to know is to ask Notion, and this
-      // menu is redrawn every time the board moves.
+      // No count and no badge: the only way to know is to ask the board, and
+      // this menu is redrawn every time it moves.
       detail: t("what comes back on its own"),
+    },
+    {
+      name: t("Context"),
+      href: pageHref("context"),
+      page: "context",
+      icon: BookOpen,
+      priority: 12,
+      detail: t("what every ticket is told first"),
     },
     {
       name: t("Settings"),

@@ -35,7 +35,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
-from . import markdown, notion, voice as voice_module
+from . import markdown, store, voice as voice_module
 
 # The default cadence, in seconds. Ten is short enough to feel live and long
 # enough that a page is not rewritten under the reader's eyes.
@@ -207,7 +207,7 @@ class Live:
 
     def __init__(
         self,
-        client: notion.Client,
+        backend: store.Store,
         page_id: str,
         *,
         database: str = "",
@@ -218,7 +218,7 @@ class Live:
         clock: Callable[[], float] = time.monotonic,
         say: Callable[[str], None] = lambda message: None,
     ) -> None:
-        self.client = client
+        self.client = backend
         self.page_id = page_id
         self.database = database
         self.property_name = property_name
@@ -279,7 +279,7 @@ class Live:
             return 0
         try:
             self.client.append_blocks(self._toggle, self._blocks(steps))
-        except notion.NotionError as error:
+        except store.StoreError as error:
             self._failed(error)
             return 0
         self._failures = 0
@@ -326,7 +326,7 @@ class Live:
             return False
         try:
             self.client.append_blocks(self._toggle, [_paragraph(Step(_prose(text)))])
-        except notion.NotionError as error:
+        except store.StoreError as error:
             self._failed(error)
             return False
         return True
@@ -378,7 +378,7 @@ class Live:
                     }
                 ],
             )
-        except notion.NotionError as error:
+        except store.StoreError as error:
             self._failed(error)
             return False
         if not created:
@@ -405,7 +405,7 @@ class Live:
                     }
                 },
             )
-        except notion.NotionError as error:
+        except store.StoreError as error:
             self._failed(error)
 
     def _publish(self, line: str) -> None:
@@ -414,7 +414,7 @@ class Live:
             return
         try:
             self.client.update(self.database, self.page_id, {self.property_name: line})
-        except notion.NotionError as error:
+        except store.StoreError as error:
             self._failed(error)
 
     def _cap(self) -> None:
@@ -435,7 +435,7 @@ class Live:
                 self._toggle,
                 [_bullet(Step("…", f"more than {MAX_STEPS} steps — the rest is in the log"))],
             )
-        except notion.NotionError:
+        except store.StoreError:
             pass
 
     def _tally(self) -> str:
@@ -443,7 +443,7 @@ class Live:
         return f"{self.words.count(self.written, 'step')} · {self.words.minutes(elapsed)}"
 
 
-    def _failed(self, error: notion.NotionError) -> None:
+    def _failed(self, error: store.StoreError) -> None:
         self._failures += 1
         if self._failures < MAX_FAILURES:
             return

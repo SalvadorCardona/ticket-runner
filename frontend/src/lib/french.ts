@@ -244,6 +244,63 @@ export const FRENCH: Record<string, string> = {
   "nothing is born": "rien ne naît",
   "at the next pass": "à la prochaine passe",
   "its last ticket": "son dernier ticket",
+  // Writing one, rather than opening Notion to write it.
+  "New schedule": "Nouvelle récurrence",
+  "A ticket that comes back": "Un ticket qui revient",
+  new: "nouvelle",
+  Change: "Modifier",
+  name: "nom",
+  "nothing said": "rien de précisé",
+  "Weekly dependency review": "Revue hebdomadaire des dépendances",
+  "Monday, or 1 to 31": "Lundi, ou 1 à 31",
+  "on — a ticket is born at the hour above": "active — un ticket naît à l'heure ci-dessus",
+  "Created unticked: nothing is born until you turn it on.":
+    "Créée décochée : rien ne naît tant que vous ne l'activez pas.",
+  "A schedule needs a name": "Une récurrence a besoin d'un nom",
+  "Schedule saved": "Récurrence enregistrée",
+  "Schedule created, left unticked": "Récurrence créée, laissée décochée",
+  "The schedule was not saved": "La récurrence n'a pas été enregistrée",
+  "Saving…": "Enregistrement…",
+
+  /* -- the projects ----------------------------------------------------------- */
+  "what the tickets are about": "ce dont parlent les tickets",
+  "What the tickets are about.": "Ce dont parlent les tickets.",
+  "A project says where the work happens and what conventions hold there. One with no repository is not a mistake: its tickets come back as a document.":
+    "Un projet dit où se fait le travail et quelles conventions y règnent. Un projet sans dépôt n'est pas une erreur : ses tickets reviennent sous forme de document.",
+  "code work": "travail de code",
+  "document work": "travail de rédaction",
+  "{{count}} ticket(s)": "{{count}} ticket(s)",
+  repository: "dépôt",
+  "on this machine": "sur cette machine",
+  "wherever the clone is": "là où se trouve le clone",
+  "Nothing declares a repository, so its tickets produce a document rather than a pull request.":
+    "Rien ne déclare de dépôt : ses tickets produisent un document plutôt qu'une pull request.",
+  "from the configuration": "depuis la configuration",
+  "path set in the configuration": "chemin fixé dans la configuration",
+  "{{count}} of {{total}} on a repository": "{{count}} sur {{total}} sur un dépôt",
+  "Reading the projects…": "Lecture des projets…",
+  "No project yet — a ticket without one comes back as a document.":
+    "Aucun projet pour l'instant — un ticket sans projet revient sous forme de document.",
+  "is where a repository is looked for, and cloned into when it is nowhere.":
+    "est l'endroit où un dépôt est cherché, et cloné quand il n'est nulle part.",
+
+  /* -- the standing context --------------------------------------------------- */
+  Context: "Contexte",
+  "what every ticket is told first": "ce qu'on dit d'abord à chaque ticket",
+  "What every ticket is told first.": "Ce qu'on dit d'abord à chaque ticket.",
+  "Before the project's brief and before the ticket itself. It is what makes an answer sound like you rather than like nobody — and you pay for it on every single ticket.":
+    "Avant le brief du projet et avant le ticket lui-même. C'est ce qui fait qu'une réponse vous ressemble plutôt que de ne ressembler à personne — et vous le payez sur chaque ticket.",
+  "{{count}} characters in every prompt": "{{count}} caractères dans chaque prompt",
+  "Reading the context…": "Lecture du contexte…",
+  "This workspace has no “{{page}}” page, so there is nowhere to write.":
+    "Cet espace de travail n'a pas de page « {{page}} » : il n'y a nulle part où écrire.",
+  "Who you are, what the team does, the stack, the conventions, the things never to do. Keep it to one screen.":
+    "Qui vous êtes, ce que fait l'équipe, la stack, les conventions, ce qu'il ne faut jamais faire. Tenez-vous à un écran.",
+  "saved to the “{{page}}” page, and read again on the next run.":
+    "enregistré dans la page « {{page}} », relu à la prochaine passe.",
+  "The context is saved": "Le contexte est enregistré",
+  "Every ticket from here on is told this.": "Chaque ticket à partir de maintenant le reçoit.",
+  "The context was not saved": "Le contexte n'a pas été enregistré",
 
   /* -- the settings page, in its own words ----------------------------------- */
   "Configure the runner.": "Configurez le runner.",
@@ -477,6 +534,22 @@ export const FRENCH: Record<string, string> = {
   "One desktop notification per ticket": "Une notification bureau par ticket",
   "The old switch, kept: “Notify this machine's screen” above defaults to it.":
     "L'ancien interrupteur, conservé : « Prévenir sur l'écran de cette machine » ci-dessus s'y replie par défaut.",
+
+  "Where the board lives": "Où vit le tableau",
+  "Notion is the default and changes nothing. Markdown is the same board as files on disk, and never asks Notion anything — no token, no sharing, no network. Both keeps the two in step.":
+    "Notion est le choix par défaut et ne change rien. Markdown, c'est le même tableau sous forme de fichiers, sans jamais rien demander à Notion — ni jeton, ni partage, ni réseau. Both tient les deux au même pas.",
+  "The board": "Le tableau",
+  "`notion` reads and writes Notion, as it always has. `markdown` reads and writes files. `both` does the two, and reconciles them.":
+    "`notion` lit et écrit dans Notion, comme toujours. `markdown` lit et écrit des fichiers. `both` fait les deux, et les réconcilie.",
+  "Where the files are": "Où sont les fichiers",
+  "One directory, with `tickets/`, `projects/`, `agents/`, `schedules/` and `context.md` in it. A directory you can put under git, which is most of the point.":
+    "Un répertoire, avec `tickets/`, `projects/`, `agents/`, `schedules/` et `context.md` dedans. Un répertoire que vous pouvez mettre sous git, ce qui est presque tout l'intérêt.",
+  "When the two disagree": "Quand les deux divergent",
+  "A page changed on both sides since the last reconciliation. `newest` keeps the later of the two — and writes the other into the journal, so nothing is lost quietly.":
+    "Une page modifiée des deux côtés depuis la dernière réconciliation. `newest` garde la plus récente — et écrit l'autre dans le journal, pour que rien ne se perde en silence.",
+  "Reconcile before every pass": "Réconcilier avant chaque passe",
+  "Off, and the two boards only meet when you run `ticket-runner sync`.":
+    "Désactivé, les deux tableaux ne se rencontrent que lorsque vous lancez `ticket-runner sync`.",
 
   Projects: "Projets",
   "A Notion project, and the repository it means on this machine. Only needed when the project page says nothing: a `path` or a `github` property on the page keeps the mapping on the board, where every machine can read it.":

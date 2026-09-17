@@ -22,7 +22,7 @@ import re
 import time
 from pathlib import Path
 
-from . import channels, conversation, credits, notion, session
+from . import channels, conversation, credits, session, store
 from . import voice as voice_module
 from .base import Base
 from .ticket import Job, Ticket
@@ -56,7 +56,7 @@ class Reports(Base):
             return
         try:
             self.client.update(self.database, ticket.page.id, values)
-        except notion.NotionError as error:
+        except store.StoreError as error:
             status = self.config.notion.prop("status")
             if status not in values:
                 raise
@@ -110,9 +110,9 @@ class Reports(Base):
         and the ticket opens a session of its own.
         """
         flag = self.waiting_flag()
-        if not flag or not notion.read(ticket.page, flag):
+        if not flag or not store.read(ticket.page, flag):
             return ""
-        raw = str(notion.read(ticket.page, self.config.notion.prop("session")) or "").strip()
+        raw = str(store.read(ticket.page, self.config.notion.prop("session")) or "").strip()
         if "://" in raw:
             raw = raw.split("?")[0].rstrip("/").rsplit("/", 1)[-1]
         return raw if _SESSION_ID.fullmatch(raw) else ""
@@ -131,7 +131,7 @@ class Reports(Base):
             return
         try:
             self.client.comment(ticket.page.id, text, discussion)
-        except notion.NotionError as error:
+        except store.StoreError as error:
             hint = ""
             if "403" in str(error):
                 hint = (
@@ -146,7 +146,7 @@ class Reports(Base):
             self.ledger.remember_page(ticket.page.id)
             self.ledger.save()
 
-    def comments(self, page_id: str) -> list[notion.Comment]:
+    def comments(self, page_id: str) -> list[store.Comment]:
         """The comments of a page, once per run, and never a reason to fail.
 
         An integration without the *Read comments* capability is the common
@@ -177,7 +177,7 @@ class Reports(Base):
         """
         try:
             comments = self.comments(ticket.page.id)
-        except notion.NotionError as error:
+        except store.StoreError as error:
             hint = ""
             if "403" in str(error):
                 hint = (
@@ -291,7 +291,7 @@ class Reports(Base):
                     continue
                 try:
                     self.client.comment(reply.ticket, channels.answer(reply))
-                except notion.NotionError as error:
+                except store.StoreError as error:
                     self.say(f"    ! the answer could not be written to Notion: {error}")
                     channel.acknowledge(reply, self.voice.say("notion-refused", error=error))
                     continue
@@ -553,7 +553,7 @@ class Reports(Base):
         when = credits.when(until or self.under_reserve() or credits.held())
         parked: list[dict] = []
         for ticket in tickets:
-            if notion.read(ticket.page, flag):
+            if store.read(ticket.page, flag):
                 continue
             self.say(f"  ⏸ {ticket.title} — {said.say('credit-parked', when=when)}")
             # The Session cell is emptied on the way in, and that is what tells

@@ -75,7 +75,7 @@ component, or click a node through to the file it is drawn from.
 
 ### Where each piece lives
 
-A run is deliberately one object — one Notion client, one reading of the workspace, one
+A run is deliberately one object — one store, one reading of the workspace, one
 cache of a page's comments — so what is split is the work, not the state. `base.py` holds
 that state and says why the split is shaped the way it is; `runner.py` keeps the pass
 itself and nothing else. The rest is one chapter per module:
@@ -84,7 +84,7 @@ itself and nothing else. The rest is one chapter per module:
 | --- | --- |
 | `runner.py` | the pass: what a run is made of, and how places are kept filled |
 | `base.py` | the state of a run, and what every chapter has under its hand |
-| `board.py` | reading the board, and the two tidyings a pass does first |
+| `board.py` | reading the board, and the tidyings a pass does first |
 | `preparation.py` | locating the project, naming the nameless, claiming the ticket |
 | `execution.py` | the session, and the two ways a ticket comes back from one |
 | `delivery.py` | the validated column: merging, or publishing what the ticket holds |
@@ -93,9 +93,10 @@ itself and nothing else. The rest is one chapter per module:
 | `reports.py` | what is written on a ticket, and what reaches your phone |
 | `ticket.py` | `Ticket` and `Job`, the two nouns everything else passes around |
 
-Around them sit the modules a run leans on rather than consists of: `notion.py`,
-`git.py`, `session.py`, `voice.py`, `progress.py`, `conversation.py`, `schedules.py`,
-`credits.py`, `channels/` and `web/`.
+Around them sit the modules a run leans on rather than consists of: `store.py` and the
+two boards behind it (`notion.py`, `files.py`, `sync.py`), `git.py`, `session.py`,
+`voice.py`, `progress.py`, `conversation.py`, `schedules.py`, `credits.py`, `channels/`
+and `web/`.
 
 ### Regenerating it
 
@@ -313,6 +314,10 @@ for reading rather than for filling in.
 | `runner.prompt_file` | `""` | your own prompt template, for repository tickets |
 | `runner.document_prompt_file` | `""` | the same, for tickets with no repository |
 | `runner.delivery_prompt_file` | `""` | the same, for publishing a validated ticket |
+| `storage.mode` | `"notion"` | which board answers — `notion`, `markdown`, or `both` kept in step. See *Without Notion: the board as Markdown files* below |
+| `storage.path` | `~/.local/state/ticket-runner/board` | the directory the Markdown board lives in |
+| `storage.conflict` | `"newest"` | in `both`, who wins when the same page moved on each side |
+| `storage.on_every_pass` | `true` | in `both`, reconcile before each pass — `false` leaves it to `ticket-runner sync` |
 | `notion.workspace` | `""` | the database whose rows are your master pages |
 | `notion.tickets_database` | `""` | one database instead of a workspace; wins when both are set |
 | `[notion.pages]` | | which row of the workspace is the tickets database, the projects database, the agents database, the context page |
@@ -432,6 +437,102 @@ entirely. A line naming an account `gh` is *not* signed in as is not a ticket's 
 either: the command runs as the active account, and `ticket-runner doctor` is what says
 the line is dead. The table is also a section of the console's **Settings** tab, *Your
 GitHub accounts*.
+
+---
+
+## Without Notion: the board as Markdown files
+
+Notion is the default and stays it. What this adds is that it is now **a choice**: the
+runner talks to a board through one interface (`src/ticket_runner/store.py`), and which
+board answers is one line.
+
+```toml
+[storage]
+mode = "markdown"          # "notion" (the default) · "markdown" · "both"
+path = ""                  # empty: ~/.local/state/ticket-runner/board
+```
+
+In `markdown` mode nothing reaches the network. There is no token to create, no page to
+share, no integration to grant capabilities to; `ticket-runner doctor` stops asking Notion
+who you are, and `require_usable` stops asking you for a token. The board is a directory:
+
+```
+board/
+  context.md                     who the work is for — read into every prompt
+  tickets/<slug>-<id>.md
+  projects/<slug>-<id>.md
+  agents/<slug>-<id>.md
+  schedules/<slug>-<id>.md
+  comments/<id>.md               one page's discussion, oldest first
+```
+
+One file is one page. Properties go in a YAML frontmatter under the names your board
+spells them with, the content goes under it as Markdown:
+
+```markdown
+---
+id: 3de451680af4811586ecde68ff380c89
+title: Corriger l'entête de la page d'accueil
+created: 2026-09-14T09:00:00+00:00
+edited: 2026-09-14T09:12:31.884210+00:00
+Status: Ready
+Priority: High
+Project:
+  - a5f1c2b7e1f04c0e9c8d1b2a3f4e5d60
+---
+
+Le titre déborde sur deux lignes en dessous de 380px.
+```
+
+Four keys are the page's own — `id`, `title`, `created`, `edited` — and everything else is
+a column. The column *types* are not declared twice: they come from `provision.py`, which
+is the same place the Notion databases are built from, so a property the runner learns to
+read is one both boards read the same day. Moving a ticket to the ready column is changing
+one word in one file, which is the whole point: `git`, `grep` and `$EDITOR` become the
+board's interface, and the directory can live in a repository of its own.
+
+The console works against it exactly as against Notion — the board, a ticket's page, its
+discussion, the live steps. And it gained three screens that make a Markdown-only
+installation self-sufficient: **Projects** (every project this installation knows of, the
+board's and the ones only `[projects]` names), **Context** (the standing text every ticket
+is told first, editable rather than read-only) and an editable **Schedules** — a row opens
+into a form, and a new schedule is created unticked, whatever the form said.
+
+### Both, and what happens when they disagree
+
+```toml
+[storage]
+mode = "both"
+conflict = "newest"
+on_every_pass = true
+```
+
+A pass reconciles before it reads the queue, and every write the run makes lands on both
+sides at once — so a ticket claimed at 14:02 does not spend thirteen minutes reading
+*Ready* in the files while a session works on it.
+
+Three rules, and they are the ones worth arguing about.
+
+- **The newest wins, and the loser is written down.** A page changed on both sides since
+  the last reconciliation is a conflict; `conflict = "newest"` keeps the later
+  `last_edited_time`, and the version that lost goes into the journal with both
+  timestamps and the name of the side that won. Nothing is overwritten quietly.
+- **Nothing is deleted, ever.** A page that was on both sides and is now on one is
+  journalled as a deletion and left exactly as it is on the side that still has it. A file
+  disappears for a hundred reasons — a bad merge, a stray `rm`, an editor writing to the
+  wrong place — and none of them is a decision to delete a ticket.
+- **A page that never existed on the other side is created there.** Which is what makes
+  the switch work from a board that is already full: the first reconciliation copies
+  everything across, in whichever direction it is missing. A page born in a file then
+  takes Notion's identifier, because that is what its URL, its relations and every report
+  about it will carry from then on.
+
+The journal is `~/.local/state/ticket-runner/sync.jsonl`, one JSON object per line:
+
+```sh
+ticket-runner sync             # reconcile now, and say what moved
+ticket-runner sync --journal   # what past reconciliations did
+```
 
 ---
 
@@ -1573,6 +1674,8 @@ ticket-runner history      # what has been handled, with the pull requests
 ticket-runner projects     # Notion project → local repository mapping
 ticket-runner schedules    # what comes back on its own, and when it next does
 ticket-runner schedules --run <name>  # make its ticket now, without waiting for the hour
+ticket-runner sync         # reconcile the Notion board and the Markdown one
+ticket-runner sync --journal         # what past reconciliations carried, and what they refused
 ticket-runner doctor       # full diagnostics
 ticket-runner clean --force          # remove worktrees, their branches, and scratch dirs
 ticket-runner update       # move the installation to the newest version

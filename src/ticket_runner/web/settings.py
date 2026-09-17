@@ -32,6 +32,7 @@ from pathlib import Path
 from .. import config as config_module
 from .. import voice
 from ..config import EVENTS, MERGE_METHODS, Config
+from ..store import CONFLICTS, MODES
 
 # What Claude Code accepts, and what each of them means for a runner nobody is
 # watching. `bypassPermissions` is the working default: a session that stops to
@@ -121,6 +122,42 @@ SECTIONS: tuple[Section, ...] = (
                 "notion", "mention", "text", "How you call it",
                 "The word that asks it to answer in a comment rather than to work. Its own "
                 "integration name always works too.",
+            ),
+        ),
+    ),
+    Section(
+        key="storage",
+        title="Where the board lives",
+        blurb=(
+            "Notion is the default and changes nothing. Markdown is the same board as "
+            "files on disk, and never asks Notion anything — no token, no sharing, no "
+            "network. Both keeps the two in step."
+        ),
+        fields=(
+            Field(
+                "storage", "mode", "choice", "The board",
+                "`notion` reads and writes Notion, as it always has. `markdown` reads and "
+                "writes files. `both` does the two, and reconciles them.",
+                choices=MODES,
+                after="restart",
+            ),
+            Field(
+                "storage", "path", "path", "Where the files are",
+                "One directory, with `tickets/`, `projects/`, `agents/`, `schedules/` and "
+                "`context.md` in it. A directory you can put under git, which is most of "
+                "the point.",
+                after="restart",
+            ),
+            Field(
+                "storage", "conflict", "choice", "When the two disagree",
+                "A page changed on both sides since the last reconciliation. `newest` "
+                "keeps the later of the two — and writes the other into the journal, so "
+                "nothing is lost quietly.",
+                choices=CONFLICTS,
+            ),
+            Field(
+                "storage", "on_every_pass", "bool", "Reconcile before every pass",
+                "Off, and the two boards only meet when you run `ticket-runner sync`.",
             ),
         ),
     ),
@@ -525,6 +562,7 @@ def _fallback(config: Config, entry: Field) -> object:
         "notify": config.notify,
         "web": config.web,
         "openrouter": config.openrouter,
+        "storage": config.storage,
     }.get(entry.table)
     if holder is None:  # a channel table: nothing is defaulted into it
         return ""

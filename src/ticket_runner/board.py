@@ -1,4 +1,4 @@
-"""Reading the board, and the two tidyings a pass does before reading it.
+"""Reading the board, and the tidyings a pass does before reading it.
 
 Everything a pass wants to know before it starts working: which tickets are to
 be run now, which are waiting for their date, which have been answered since
@@ -11,16 +11,17 @@ and the ready column, the validated column and the calendar all ask that one
 question — two readings of a date that drifted apart would be a bug nobody
 would ever find.
 
-`sweep` and `close_merged` write, and belong here anyway: they say what the
-board *should* have said, from what the board and GitHub already know, and a
-pass runs them at its top precisely so that what it reads next is true.
+`reconcile`, `sweep` and `close_merged` write, and belong here anyway: they say
+what the board *should* have said, from what the other board, this board and
+GitHub already know, and a pass runs them at its top precisely so that what it
+reads next is true.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from . import conversation, git, notion, state
+from . import conversation, git, state, store
 from . import voice as voice_module
 from .base import Base
 from .config import PRIORITIES
@@ -43,7 +44,7 @@ class Board(Base):
         merge or the publication — and they must not drift apart on what a date
         means.
         """
-        return scheduled_for(notion.read(ticket.page, self.config.notion.prop("due")))
+        return scheduled_for(store.read(ticket.page, self.config.notion.prop("due")))
 
     def queue(self) -> tuple[list[Ticket], list[tuple[Ticket, datetime]]]:
         """The tickets to run now, and those waiting for their date.
@@ -87,7 +88,7 @@ class Board(Base):
             eligible.append(ticket)
 
         def rank(ticket: Ticket) -> tuple[int, int, float, str]:
-            value = notion.read(ticket.page, self.config.notion.prop("priority"))
+            value = store.read(ticket.page, self.config.notion.prop("priority"))
             return (
                 0 if ticket.id in interrupted else 1,
                 priorities.get(str(value), default),
@@ -147,7 +148,7 @@ class Board(Base):
         name = self.config.notion.prop("waiting")
         try:
             return name if self.client.schema(self.database).get(name) == "checkbox" else ""
-        except notion.NotionError:
+        except store.StoreError:
             return ""
 
     def parked(self, tickets: list[Ticket]) -> set[str]:
@@ -162,7 +163,7 @@ class Board(Base):
         flag = self.waiting_flag()
         if not flag:
             return set()
-        held = {ticket.id for ticket in tickets if notion.read(ticket.page, flag)}
+        held = {ticket.id for ticket in tickets if store.read(ticket.page, flag)}
         # Said only by a pass that can act on it. A wait lasts hours, and a pass
         # that will start nothing announcing what it is not starting would be
         # the whole of the journal by the time the window rolls over.
@@ -211,12 +212,12 @@ class Board(Base):
         off the comment: reports open on a verdict now, not on a host, and the
         column is where the host was always written down anyway.
         """
-        agent = str(notion.read(ticket.page, self.config.notion.prop("agent")) or "")
+        agent = str(store.read(ticket.page, self.config.notion.prop("agent")) or "")
         if agent and agent != self.agent_label:
             return False
         try:
             comments = self.comments(ticket.page.id)
-        except notion.NotionError:
+        except store.StoreError:
             # Comments the integration cannot read already cost a ticket its
             # discussion; they are not going to become a reason to run it again.
             # `discussion` is where that is said out loud, once per ticket.
@@ -251,7 +252,7 @@ class Board(Base):
         if self._me is None:
             try:
                 self._me = self.client.me()
-            except notion.NotionError as error:
+            except store.StoreError as error:
                 self._me = ""
                 self._identity_error = voice_module.line(error)
         return self._me
@@ -266,7 +267,7 @@ class Board(Base):
         if self._spellings is None:
             try:
                 integration = self.client.my_name()
-            except notion.NotionError:
+            except store.StoreError:
                 integration = ""
             self._spellings = conversation.names(self.config.notion.mention, integration)
         return self._spellings
@@ -274,18 +275,18 @@ class Board(Base):
     def _project_of(self, ticket: Ticket) -> Project:
         """The ticket's project, or none at all. Never a failure: a conversation
         about a ticket whose repository has moved is still a conversation."""
-        relation = notion.read(ticket.page, self.config.notion.prop("project")) or []
+        relation = store.read(ticket.page, self.config.notion.prop("project")) or []
         if not relation:
             return Project(name="", path=None)
         try:
             return self.resolver.resolve(self.client, relation[0])
-        except (LookupError, notion.NotionError):
+        except (LookupError, store.StoreError):
             return Project(name="", path=None)
 
     def _body(self, ticket: Ticket) -> str:
         try:
             return self.client.blocks_text(ticket.page.id)
-        except notion.NotionError:
+        except store.StoreError:
             return ""
 
     def fetch_one(self, reference: str) -> Ticket:
@@ -293,6 +294,34 @@ class Board(Base):
         if "://" in page_id:
             page_id = page_id.split("?")[0].rstrip("/").rsplit("/", 1)[-1].rsplit("-", 1)[-1]
         return Ticket(self.client.page(page_id.replace("-", "")))
+
+    def reconcile(self) -> None:
+        """Carry across whatever changed on the other board. Only in `both` mode.
+
+        At the top of a pass, before anything is read: a ticket you dragged in
+        Notion and a ticket you edited in a file have to be the same ticket by
+        the time the queue is built, or the pass would act on half the truth.
+
+        Never a reason to fail a pass. A Notion that will not answer, a
+        directory that will not be written to: both are one line, and the run
+        goes on against the board it *can* read — which is Notion, since that is
+        what a mirror reads from.
+        """
+        from . import sync as sync_module
+
+        if not isinstance(self.client, sync_module.Mirror):
+            return
+        if self.dry_run or not self.config.storage.on_every_pass:
+            return
+        report = self.client.synchronise(self.config.notion)
+        for problem in report.problems:
+            self.say(f"  ! sync: {problem}")
+        for entry in report.conflicts:
+            self.say(f"  ⇄ {entry.title or entry.page} — {entry.detail}")
+        for entry in report.deletions:
+            self.say(f"  ⌫ {entry.title or entry.page} — {entry.detail}")
+        if carried := report.carried:
+            self.say(f"  ⇄ {len(carried)} page(s) carried across")
 
     def sweep(self) -> int:
         """Put back tickets a dead runner left claimed.
@@ -322,7 +351,7 @@ class Board(Base):
         )
         recovered = 0
         for page in running:
-            if notion.read(page, self.config.notion.prop("agent")) != self.agent_label:
+            if store.read(page, self.config.notion.prop("agent")) != self.agent_label:
                 continue
             edited = page.raw.get("last_edited_time", "")
             try:
@@ -389,7 +418,7 @@ class Board(Base):
         )
         closed = 0
         for page in pages:
-            url = str(notion.read(page, self.config.notion.prop("pull_request")) or "")
+            url = str(store.read(page, self.config.notion.prop("pull_request")) or "")
             if (
                 not url.startswith("http")
                 or git.pull_request_state(url, self.config.github) != "MERGED"

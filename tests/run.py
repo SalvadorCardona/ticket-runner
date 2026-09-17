@@ -28,7 +28,7 @@ import time
 import traceback
 import contextlib
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -36,7 +36,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from ticket_runner import config as C  # noqa: E402
 from ticket_runner import agents, channels, conversation, credits, markdown, naming, notion  # noqa: E402
 from ticket_runner import notify, openrouter, progress, projects, prompt, provision  # noqa: E402
-from ticket_runner import schedules, session, state, systemd  # noqa: E402
+from ticket_runner import schedules, session, state, store, sync, systemd  # noqa: E402
+from ticket_runner import files  # noqa: E402
 from ticket_runner.channels import slack as slack_channel, telegram as telegram_channel  # noqa: E402
 from ticket_runner import update, voice, workspace  # noqa: E402
 from ticket_runner import ticket as ticket_module  # noqa: E402
@@ -633,7 +634,7 @@ def the_rows_of_a_workspace_become_the_runners_databases():
         {"Tickets": "p-tickets", "Projects": "p-projects", "Context": "p-context"},
         text="Je suis Salvador Cardona.",
     )
-    space = workspace.resolve(client, _settings())
+    space = workspace.from_notion(client, _settings())
     assert space.tickets == "db-of-p-tickets"
     assert space.projects == "db-of-p-projects"
     assert space.context == "Je suis Salvador Cardona."
@@ -643,7 +644,7 @@ def the_rows_of_a_workspace_become_the_runners_databases():
 @case
 def a_row_is_found_however_its_title_is_capitalised():
     client = _FakeClient({"tickets": "p-tickets", "CONTEXT": "p-context"}, text="x")
-    space = workspace.resolve(client, _settings())
+    space = workspace.from_notion(client, _settings())
     assert space.tickets == "db-of-p-tickets"
     assert space.context == "x"
 
@@ -661,7 +662,7 @@ def a_board_built_before_the_names_were_settled_still_resolves():
         {"Master Tickets": "p-tickets", "Master project": "p-projects", "Soul": "p-soul"},
         text="who I am",
     )
-    space = workspace.resolve(client, _settings())
+    space = workspace.from_notion(client, _settings())
     assert space.tickets == "db-of-p-tickets"
     assert space.projects == "db-of-p-projects"
     assert space.context == "who I am"
@@ -669,12 +670,12 @@ def a_board_built_before_the_names_were_settled_still_resolves():
 
     # The new names win when a board carries both, rather than the older row.
     both = _FakeClient({"Tickets": "p-new", "Master Tickets": "p-old"})
-    assert workspace.resolve(both, _settings()).tickets == "db-of-p-new"
+    assert workspace.from_notion(both, _settings()).tickets == "db-of-p-new"
 
     # And a configuration that names a row is never second-guessed.
     named = _settings(pages={"tickets": "Backlog"})
     try:
-        workspace.resolve(_FakeClient({"Master Tickets": "p-old"}), named)
+        workspace.from_notion(_FakeClient({"Master Tickets": "p-old"}), named)
     except notion.NotionError as error:
         assert "Backlog" in str(error)
     else:
@@ -684,23 +685,23 @@ def a_board_built_before_the_names_were_settled_still_resolves():
 @case
 def a_missing_context_page_warns_but_never_fails_a_run():
     client = _FakeClient({"Tickets": "p-tickets"})
-    space = workspace.resolve(client, _settings())
+    space = workspace.from_notion(client, _settings())
     assert space.tickets == "db-of-p-tickets"
     assert space.context == "" and space.projects == ""
     assert any("Context" in warning for warning in space.warnings)
 
     # Present but unreadable, and present but empty, are both worth saying too.
     unreadable = _FakeClient({"Tickets": "p-t", "Context": "p-context"}, broken={"p-context"})
-    assert any("unreadable" in warning for warning in workspace.resolve(unreadable, _settings()).warnings)
+    assert any("unreadable" in warning for warning in workspace.from_notion(unreadable, _settings()).warnings)
     empty = _FakeClient({"Tickets": "p-t", "Context": "p-context"}, text="   ")
-    assert any("empty" in warning for warning in workspace.resolve(empty, _settings()).warnings)
+    assert any("empty" in warning for warning in workspace.from_notion(empty, _settings()).warnings)
 
 
 @case
 def a_missing_tickets_page_is_the_one_thing_that_fails():
     client = _FakeClient({"Context": "p-context", "Projects": "p-projects"})
     try:
-        workspace.resolve(client, _settings())
+        workspace.from_notion(client, _settings())
     except notion.NotionError as error:
         assert "Tickets" in str(error)
         assert "Context" in str(error), "the message lists what was actually found"
@@ -711,11 +712,11 @@ def a_missing_tickets_page_is_the_one_thing_that_fails():
 @case
 def an_explicit_database_still_wins_over_the_workspace():
     client = _FakeClient({"Tickets": "p-tickets"})
-    space = workspace.resolve(client, _settings(tickets_database="chosen"))
+    space = workspace.from_notion(client, _settings(tickets_database="chosen"))
     assert space.tickets == "db-of-chosen"
 
     # And a configuration written before workspaces existed resolves the same.
-    legacy = workspace.resolve(client, _settings(workspace="", tickets_database="chosen"))
+    legacy = workspace.from_notion(client, _settings(workspace="", tickets_database="chosen"))
     assert legacy.tickets == "db-of-chosen"
     assert legacy.rows == {} and not legacy.warnings
 
@@ -1609,11 +1610,15 @@ class _TalkingClient(_ThreadClient):
 
 
 @contextmanager
-def _no_session(answer: str = "Parce que la branche d'hier était déjà en revue.", ok=True):
+def _no_session(
+    answer: str = "Parce que la branche d'hier était déjà en revue.", ok=True, writes=None
+):
     """Claude, replaced by its answer. Records how it was asked.
 
     `ok` may be a list, read one entry per call: that is how a session that
-    cannot be resumed is told from one that has nothing to say.
+    cannot be resumed is told from one that has nothing to say. `writes` is
+    `{name: text}` left in the working directory — which is how a document
+    ticket answers, the session writing ANSWER.md rather than saying anything.
     """
     calls: list[dict] = []
     verdicts = list(ok) if isinstance(ok, (list, tuple)) else None
@@ -1621,6 +1626,8 @@ def _no_session(answer: str = "Parce que la branche d'hier était déjà en revu
     def fake_run(prompt_text, **kwargs):
         calls.append({"prompt": prompt_text, **kwargs})
         good = verdicts.pop(0) if verdicts else (ok if verdicts is None else True)
+        for name, text in (writes or {}).items():
+            (Path(kwargs["cwd"]) / name).write_text(text, encoding="utf-8")
         return session.Outcome(
             ok=good, blocked=False, session_id=kwargs.get("session_id", "s-1"),
             summary="", log=Path("/tmp/none.jsonl"), answer=answer if good else "",
@@ -2369,14 +2376,14 @@ def the_occurrence_is_taken_before_it_is_made():
 def a_workspace_with_nothing_that_repeats_is_a_workspace_that_runs():
     """The whole feature is optional: no row, no warning, no difference."""
     client = _FakeClient({"Tickets": "p-tickets", "Context": "p-context"}, text="x")
-    space = workspace.resolve(client, _settings())
+    space = workspace.from_notion(client, _settings())
     assert space.schedules == ""
     assert not space.warnings
 
     present = _FakeClient(
         {"Tickets": "p-tickets", "Context": "p-context", "Schedules": "p-schedules"}, text="x"
     )
-    assert workspace.resolve(present, _settings()).schedules == "db-of-p-schedules"
+    assert workspace.from_notion(present, _settings()).schedules == "db-of-p-schedules"
 
     # And a Runner reading a workspace without one asks Notion nothing at all.
     runner = _recurring([])
@@ -5102,6 +5109,7 @@ def every_setting_the_file_holds_is_one_the_console_can_reach():
         ("web", C.Web()),
         ("notify", C.Notify()),
         ("openrouter", C.OpenRouter()),
+        ("storage", C.Storage()),
     ):
         for name in vars(holder):
             # The two channel tables are their own sections, and `projects` is a
@@ -6556,6 +6564,732 @@ def the_version_is_rewritten_where_the_product_reads_it():
         release.write_version("9.9.9", init)
         assert release.read_version(init) == "9.9.9"
         assert '__version__ = "9.9.9"' in init.read_text(encoding="utf-8")
+
+
+# -- a board made of files ----------------------------------------------------
+
+
+@contextmanager
+def _board(**settings_overrides):
+    """A throwaway Markdown board, and the naming settings it is read under."""
+    directory = tempfile.mkdtemp()
+    try:
+        yield files.Board(Path(directory) / "board", _settings(**settings_overrides))
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+@case
+def a_frontmatter_survives_the_round_trip():
+    """What `render` writes, `parse` has to read back — every shape of it.
+
+    The file is the board: a value that comes back as something else is a
+    status nobody can filter on, or a day of the month that is no longer one.
+    """
+    front = {
+        "id": "a" * 32,
+        "title": "Corriger l'entête « à faire »",
+        "created": "2026-09-14T09:00:00+00:00",
+        "Status": "In review",
+        "Active": False,
+        "Cost": 1.25,
+        "Day": "1",
+        "Project": ["p1", "p2"],
+        "Empty": "",
+    }
+    back, body = files.parse(files.render(front, "# Titre\n\nUn corps."))
+    assert back == front, back
+    assert body == "# Titre\n\nUn corps."
+    # Twice through, byte for byte: a pass that rewrote the same file would
+    # otherwise look like a change to the sync, for ever.
+    once = files.render(front, "x")
+    assert files.render(*files.parse(once)) == once
+
+
+@case
+def a_file_with_no_frontmatter_is_all_body():
+    front, body = files.parse("Je suis Salvador Cardona.\n")
+    assert front == {} and body == "Je suis Salvador Cardona."
+
+
+@case
+def tickets_are_written_and_read_back_as_markdown():
+    with _board() as board:
+        page_id = board.create_row(
+            "tickets", "Corriger l'entête", {"Status": "Ready", "Priority": "High"}
+        )
+        board.append_markdown(page_id, "## À faire\n\nRelire la page.")
+        page = board.page(page_id)
+        assert page.title == "Corriger l'entête"
+        assert store.read(page, "Status") == "Ready"
+        assert store.read(page, "Priority") == "High"
+        assert "Relire la page." in board.blocks_text(page_id)
+        # The file is where somebody would look for it, named after the ticket.
+        written = list((board.root / "tickets").glob("*.md"))
+        assert len(written) == 1 and written[0].name.startswith("corriger-l-entete-")
+
+        board.update("tickets", page_id, {"Status": "In progress", "Runner": "ticket-runner@here"})
+        assert store.read(board.page(page_id), "Status") == "In progress"
+        assert store.read(board.page(page_id), "Runner") == "ticket-runner@here"
+        # And the body is untouched by a property write.
+        assert "Relire la page." in board.blocks_text(page_id)
+
+
+@case
+def a_markdown_board_answers_the_filters_the_runner_builds():
+    with _board() as board:
+        ready = board.create_row("tickets", "À faire", {"Status": "Ready"})
+        board.create_row("tickets", "Finie", {"Status": "Done"})
+        found = board.query("tickets", {"property": "Status", "select": {"equals": "Ready"}})
+        assert [page.id for page in found] == [ready]
+        # The woken filter: everything but the statuses that speak for a ticket.
+        awake = board.query(
+            "tickets",
+            {"and": [
+                {"property": "Status", "select": {"does_not_equal": "Ready"}},
+                {"property": "Status", "select": {"does_not_equal": "Done"}},
+            ]},
+        )
+        assert awake == []
+        # A filter this cannot read must not silently empty the board.
+        assert len(board.query("tickets", {"timestamp": "created_time"})) == 2
+
+
+@case
+def projects_the_context_and_the_schedules_live_in_files_too():
+    """The three things the ticket's UI has to be able to show without Notion."""
+    with _board() as board:
+        project = board.create_row("projects", "ticket-runner", {"Repository": "user/repo"})
+        assert store.read(board.page(project), "Repository") == "user/repo"
+
+        board.set_context("Je suis Salvador Cardona, développeur web.")
+        assert board.context() == "Je suis Salvador Cardona, développeur web."
+        assert board.blocks_text(files.CONTEXT_PAGE) == board.context()
+
+        schedule = board.create_row(
+            "schedules",
+            "Revue des dépendances",
+            {"Cadence": "Weekly", "At": "09:00", "Day": "Monday", "Active": True},
+        )
+        row = schedules.read(board.page(schedule), board.settings())
+        assert row.cadence == "Weekly" and row.at == "09:00" and row.day == "Monday"
+        assert row.active is True and not row.problem
+        # And a schedule turned off from the console comes back off.
+        board.update("schedules", schedule, {"Active": False})
+        assert schedules.read(board.page(schedule), board.settings()).active is False
+
+
+@case
+def a_markdown_board_keeps_a_discussion_per_page():
+    with _board() as board:
+        page_id = board.create_row("tickets", "Une question", {})
+        board.comment(page_id, "La question ?")
+        board.comment(page_id, "Et la suite,\n\navec un blanc au milieu.", discussion_id="d-1")
+        said = board.comments(page_id)
+        assert [comment.text for comment in said] == [
+            "La question ?",
+            "Et la suite,\n\navec un blanc au milieu.",
+        ]
+        assert said[1].discussion_id == "d-1"
+        assert all(comment.created_by == board.me() for comment in said)
+
+
+@case
+def the_whole_runner_runs_against_files_with_no_notion_at_all():
+    """A full pass in `storage.mode = "markdown"`, network unplugged.
+
+    The one test that answers the question the mode exists for: does the runner
+    — the queue, the claim, the session, the report — work when there is no
+    integration, no token and no workspace to resolve? Notion's own client is
+    replaced by something that raises if it is so much as constructed, so a
+    single call that reached for it would fail here rather than in production.
+    """
+    with _state_home(), _board() as board:
+        path = Path(tempfile.mkdtemp()) / "config.toml"
+        path.write_text(
+            f'[storage]\nmode = "markdown"\npath = "{board.root}"\n'
+            "[runner]\ndry_run = false\nprogress = false\nreply = false\n"
+            "auto_update = false\nnotify = false\nattach_sessions = false\n",
+            encoding="utf-8",
+        )
+        configuration = C.load(path)
+        # Nothing here may be reached for. A configuration with no token would
+        # only have produced a 401; this produces a traceback naming the caller.
+        def refuse(*_args, **_kwargs):
+            raise AssertionError("markdown mode must never construct a Notion client")
+
+        page_id = board.create_row("tickets", "Écrire l'annonce", {"Status": "Ready"})
+        board.append_markdown(page_id, "Rédige une annonce courte.")
+        board.set_context("Je suis Salvador Cardona.")
+
+        real_client = notion.Client
+        notion.Client = refuse
+        try:
+            configuration.require_usable()  # no token, and that is not a fault
+            run = Runner(configuration, quiet=True)
+            assert isinstance(run.client, files.Board)
+            assert run.database == "tickets"
+            assert run.workspace.context == "Je suis Salvador Cardona."
+            ready = run.ready()
+            assert [ticket.title for ticket in ready] == ["Écrire l'annonce"]
+
+            with _no_session(answer="C'est écrit.", writes={"ANSWER.md": "# Annonce\n\nVoilà."}):
+                results = run.tick()
+        finally:
+            notion.Client = real_client
+
+        assert [result["status"] for result in results] == ["done"], results
+        done = board.page(page_id)
+        assert store.read(done, "Status") == "Done"
+        assert "Voilà." in board.blocks_text(page_id), board.blocks_text(page_id)
+        # The report went into the ticket's discussion, as it does on Notion.
+        assert any(voice.is_report(comment.text) for comment in board.comments(page_id))
+
+
+# -- the two boards, kept in step --------------------------------------------
+
+
+class _NotionBoard:
+    """Notion reduced to a dictionary, with the surface the mirror uses.
+
+    Not a mock: it keeps pages, bodies and `last_edited_time`, because the whole
+    of the reconciliation is about which side moved and when. What it does not
+    have is a network, which is the point.
+    """
+
+    def __init__(self, context: str = "") -> None:
+        self.pages: dict[str, store.Page] = {}
+        self.bodies: dict[str, str] = {}
+        self.where: dict[str, str] = {}   # page id -> database
+        self.context = context
+        self.said: list[tuple[str, str]] = []
+        self._counter = 0
+
+    # -- the shape -----------------------------------------------------------
+
+    def resolve_database(self, identifier):
+        return identifier
+
+    def forget_database(self, database_id):
+        pass
+
+    def schema(self, database_id):
+        return files.schemas(_settings())[database_id]
+
+    def options(self, database_id, name):
+        return []
+
+    def title_property(self, database_id):
+        return "Name"
+
+    def workspace(self, settings):
+        space = workspace.Workspace(
+            tickets="tickets", projects="projects", agents="agents", schedules="schedules",
+            rows={"Context": "ctx"}, context_page="ctx",
+        )
+        space.context = self.context
+        return space
+
+    # -- reading -------------------------------------------------------------
+
+    def query(self, database_id, filter_=None):
+        return [
+            page for page_id, page in self.pages.items()
+            if self.where[page_id] == database_id
+        ]
+
+    def page(self, page_id):
+        if page_id not in self.pages:
+            raise store.StoreError(f"no such page: {page_id}")
+        return self.pages[page_id]
+
+    def blocks_text(self, block_id, depth=0):
+        if block_id == "ctx":
+            return self.context
+        return self.bodies.get(block_id, "")
+
+    def comments(self, page_id):
+        return []
+
+    def me(self):
+        return "notion-user"
+
+    def my_name(self):
+        return "Ticket Runner"
+
+    # -- writing -------------------------------------------------------------
+
+    def _touch(self, page_id, at=""):
+        page = self.pages[page_id]
+        page.raw["last_edited_time"] = at or _stamp()
+
+
+    def create_row(self, database_id, title, values=None, at=""):
+        self._counter += 1
+        page_id = f"{self._counter:032x}"
+        self.pages[page_id] = store.Page(
+            id=page_id, url=f"https://notion.so/{page_id}", title=title,
+            properties={"Name": store.written("title", title)},
+            raw={"created_time": at or _stamp(), "last_edited_time": at or _stamp()},
+        )
+        self.where[page_id] = database_id
+        self.update(database_id, page_id, values or {}, at=at)
+        return page_id
+
+    def update(self, database_id, page_id, values, at=""):
+        page = self.pages[page_id]
+        schema = self.schema(database_id)
+        for name, value in values.items():
+            if name == "Name":
+                page.title = str(value)
+            shape = store.written(schema.get(name, "rich_text"), value)
+            if shape is not None:
+                page.properties[name] = shape
+        self._touch(page_id, at)
+
+    def append_markdown(self, page_id, markdown, at=""):
+        if page_id == "ctx":
+            self.context = f"{self.context}\n\n{markdown}".strip()
+            return 1
+        self.bodies[page_id] = f"{self.bodies.get(page_id, '')}\n\n{markdown}".strip()
+        self._touch(page_id, at)
+        return 1
+
+    def replace_markdown(self, page_id, markdown, at=""):
+        if page_id == "ctx":
+            self.context = markdown.strip()
+            return 1
+        self.bodies[page_id] = markdown.strip()
+        self._touch(page_id, at)
+        return 1
+
+    def comment(self, page_id, text, discussion_id=""):
+        self.said.append((page_id, text))
+
+    def append_blocks(self, block_id, blocks):
+        return []
+
+    def update_block(self, block_id, payload):
+        pass
+
+
+def _stamp() -> str:
+    """The fake Notion's clock: the real one, to the microsecond.
+
+    To the microsecond because that is the resolution the reconciliation reads
+    both sides at — two writes in the same second would otherwise be one write
+    as far as it could tell, and a conflict test would pass by accident.
+    """
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
+
+
+@contextmanager
+def _mirror(context: str = ""):
+    """Both boards and a fresh set of stamps, with nothing shared between runs."""
+    directory = Path(tempfile.mkdtemp())
+    try:
+        here = _NotionBoard(context)
+        there = files.Board(directory / "board", _settings())
+        both = sync.Mirror(here, there)
+        yield here, there, both, sync.Stamps(directory / "sync.json")
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+@case
+def a_ticket_written_in_notion_appears_in_the_files():
+    with _mirror("Je suis Salvador Cardona.") as (here, there, both, marks):
+        page_id = here.create_row("tickets", "Corriger l'entête", {"Status": "Ready"})
+        here.replace_markdown(page_id, "Relire la page d'accueil.")
+
+        report = both.synchronise(_settings(), stamps=marks)
+        assert [entry.what for entry in report.carried] == [
+            "created-in-markdown", "notion→markdown"
+        ], [entry.what for entry in report.carried]
+        mirrored = there.page(page_id)
+        assert mirrored.title == "Corriger l'entête"
+        assert store.read(mirrored, "Status") == "Ready"
+        assert there.blocks_text(page_id) == "Relire la page d'accueil."
+        assert there.context() == "Je suis Salvador Cardona."
+
+        # A second pass on an unchanged board carries nothing: without that,
+        # every fifteen minutes would rewrite every file on the disk.
+        assert not both.synchronise(_settings(), stamps=marks).carried
+
+        # And a change in Notion afterwards reaches the file.
+        here.update("tickets", page_id, {"Status": "Done"})
+        again = both.synchronise(_settings(), stamps=marks)
+        assert [entry.what for entry in again.carried] == ["notion→markdown"]
+        assert store.read(there.page(page_id), "Status") == "Done"
+
+
+@case
+def a_ticket_written_in_a_file_appears_in_notion():
+    with _mirror() as (here, there, both, marks):
+        local = there.create_row("tickets", "Écrire l'annonce", {"Status": "Ready"})
+        there.replace_markdown(local, "Une annonce courte.")
+
+        report = both.synchronise(_settings(), stamps=marks)
+        assert [entry.what for entry in report.carried] == ["created-in-notion"]
+        created = report.carried[0].page
+        assert here.pages[created].title == "Écrire l'annonce"
+        assert store.read(here.pages[created], "Status") == "Ready"
+        assert here.bodies[created] == "Une annonce courte."
+        # The file now wears Notion's identifier: the URL, the relations and
+        # every report from here on carry that one, and nothing carries its own.
+        assert there.page(created).title == "Écrire l'annonce"
+
+        # Changed in the file afterwards, and carried the other way.
+        there.update("tickets", created, {"Status": "In review"})
+        there.replace_markdown(created, "Une annonce, relue.")
+        again = both.synchronise(_settings(), stamps=marks)
+        assert [entry.what for entry in again.carried] == ["markdown→notion"]
+        assert store.read(here.pages[created], "Status") == "In review"
+        assert here.bodies[created] == "Une annonce, relue."
+
+
+@case
+def a_page_moved_on_both_sides_is_a_conflict_the_newest_wins():
+    """The rule `storage.conflict` names, and the line it leaves behind.
+
+    Losing an edit is not the failure mode to avoid here — one of the two is
+    going to lose whatever the rule says. The failure mode is losing it
+    *quietly*, so the conflict is journalled with both timestamps and the name
+    of the side that won.
+    """
+    with _mirror() as (here, there, both, marks):
+        page_id = here.create_row("tickets", "Le ticket", {"Status": "Ready"})
+        both.synchronise(_settings(), stamps=marks)
+
+        # Both move, and Notion moves last.
+        there.update("tickets", page_id, {"Status": "Blocked"})
+        here.update("tickets", page_id, {"Status": "Done"})
+
+        report = both.synchronise(_settings(), stamps=marks)
+        assert len(report.conflicts) == 1
+        said = report.conflicts[0].detail
+        assert "Notion wins" in said and "newest" in said
+        assert store.read(there.page(page_id), "Status") == "Done"
+
+        # And the other way round: the file is the later one.
+        here.update("tickets", page_id, {"Status": "Failed"})
+        there.update("tickets", page_id, {"Status": "In review"})
+        back = both.synchronise(_settings(), stamps=marks)
+        assert len(back.conflicts) == 1
+        assert "Markdown wins" in back.conflicts[0].detail
+        assert store.read(here.pages[page_id], "Status") == "In review"
+
+
+@case
+def a_deletion_is_written_down_and_never_carried_across():
+    """Nothing the sync does may remove a page. It says so instead.
+
+    A file disappears for a hundred reasons — a bad merge, a stray `rm`, an
+    editor writing to the wrong place — and none of them is a decision to delete
+    a ticket. The same holds the other way: a Notion page somebody archived is
+    not a reason to throw away the file they may have been editing.
+    """
+    with _mirror() as (here, there, both, marks):
+        page_id = here.create_row("tickets", "Le ticket", {"Status": "Ready"})
+        both.synchronise(_settings(), stamps=marks)
+        _, path = there._find(page_id)
+        path.unlink()
+
+        report = both.synchronise(_settings(), stamps=marks)
+        assert [entry.what for entry in report.deletions] == ["deleted-in-markdown"]
+        assert page_id in here.pages, "the Notion page must be left exactly as it was"
+        assert not report.carried, "a gone file is not a page to create again"
+
+        # And it stays said: the next pass repeats it rather than re-creating.
+        assert both.synchronise(_settings(), stamps=marks).deletions
+
+        # The other way: the Notion page goes, the file stays.
+        local = there.create_row("tickets", "L'autre", {"Status": "Ready"})
+        both.synchronise(_settings(), stamps=marks)
+        created = [page for page in here.pages if here.pages[page].title == "L'autre"][0]
+        del here.pages[created]
+        gone = both.synchronise(_settings(), stamps=marks)
+        assert "deleted-in-notion" in [entry.what for entry in gone.deletions]
+        assert there.page(created).title == "L'autre"
+        del local
+
+
+@case
+def the_journal_keeps_what_the_reconciliations_did():
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "sync.jsonl"
+        report = sync.Report()
+        report.note("conflict", "tickets", "abc", "Le ticket", "both moved")
+        report.note("deleted-in-notion", "tickets", "def", "L'autre", "gone")
+        sync.write_journal(report, path)
+        sync.write_journal(report, path)
+        entries = sync.journal(3, path)
+        assert len(entries) == 3, "the journal appends rather than replaces"
+        assert entries[-1]["what"] == "deleted-in-notion"
+        assert entries[-1]["title"] == "L'autre"
+        assert entries[-1]["at"]
+
+
+@case
+def the_standing_context_travels_both_ways():
+    with _mirror("Écrit dans Notion.") as (here, there, both, marks):
+        both.synchronise(_settings(), stamps=marks)
+        assert there.context() == "Écrit dans Notion."
+
+        there.set_context("Réécrit dans le fichier.")
+        report = both.synchronise(_settings(), stamps=marks)
+        assert [entry.what for entry in report.carried] == ["markdown→notion"]
+        assert here.context == "Réécrit dans le fichier."
+
+        here.context = "Réécrit dans Notion."
+        back = both.synchronise(_settings(), stamps=marks)
+        assert [entry.what for entry in back.carried] == ["notion→markdown"]
+        assert there.context() == "Réécrit dans Notion."
+
+
+@case
+def a_mirrored_write_lands_on_both_boards_at_once():
+    """Between two reconciliations, the run's own work must be on both sides.
+
+    A ticket claimed at 14:02 and reconciled at 14:15 would otherwise spend
+    thirteen minutes reading "Ready" in the files while a session works on it.
+    """
+    with _mirror() as (here, there, both, marks):
+        page_id = here.create_row("tickets", "Le ticket", {"Status": "Ready"})
+        both.synchronise(_settings(), stamps=marks)
+
+        both.update("tickets", page_id, {"Status": "In progress"})
+        assert store.read(there.page(page_id), "Status") == "In progress"
+        both.append_markdown(page_id, "Un rapport.")
+        assert "Un rapport." in there.blocks_text(page_id)
+        both.comment(page_id, "Fini.")
+        assert [comment.text for comment in there.comments(page_id)] == ["Fini."]
+        # And what the mirror reads is still Notion's answer.
+        assert both.page(page_id).title == "Le ticket"
+
+
+# -- the configuration that chooses a board -----------------------------------
+
+
+@case
+def the_storage_mode_decides_which_store_is_opened():
+    configuration = _config("")
+    assert configuration.storage.mode == "notion"
+    assert isinstance(store.open(configuration), notion.Client)
+
+    with tempfile.TemporaryDirectory() as directory:
+        markdown_only = _config(f'[storage]\nmode = "markdown"\npath = "{directory}/board"\n')
+        assert markdown_only.storage.path == Path(directory) / "board"
+        assert isinstance(store.open(markdown_only), files.Board)
+        both = _config(f'[storage]\nmode = "both"\npath = "{directory}/board"\n')
+        assert isinstance(store.open(both), sync.Mirror)
+
+    # A word nobody meant must not quietly decide where the board lives.
+    assert _config('[storage]\nmode = "postgres"\n').storage.mode == "notion"
+    assert _config('[storage]\nconflict = "mine"\n').storage.conflict == "newest"
+
+
+@case
+def a_markdown_installation_needs_neither_token_nor_workspace():
+    path = Path(tempfile.mkdtemp()) / "config.toml"
+    path.write_text('[storage]\nmode = "markdown"\n', encoding="utf-8")
+    C.load(path).require_usable()  # must not raise
+
+    # And a Notion one still says exactly what it is missing.
+    empty = Path(tempfile.mkdtemp()) / "config.toml"
+    empty.write_text("[notion]\n", encoding="utf-8")
+    try:
+        C.load(empty).require_usable()
+    except C.ConfigError as error:
+        assert "notion.token" in str(error)
+        assert "markdown" in str(error), "the way out is worth naming here"
+    else:
+        raise AssertionError("a Notion installation with no token must not be usable")
+
+
+# -- the three screens that must work without Notion --------------------------
+
+
+def _markdown_api(board: files.Board) -> web_api.Api:
+    """An Api reading a board made of files, and nothing else built.
+
+    The same shape `_bare_api` builds, with the store swapped and a
+    `[storage]` that says so: these three panes exist to be usable on an
+    installation where there is no integration to ask anything of.
+    """
+    api = _bare_api(board, me=board.me())
+    api._config = C.Config(
+        notion=C.Notion(),
+        runner=C.Runner(),
+        projects={},
+        path=Path("/nowhere/config.toml"),
+        web=C.Web(),
+        storage=C.Storage(mode="markdown", path=board.root),
+    )
+    api._runner.config = api._config
+    api._runner._workspace = board.workspace(api._config.notion)
+    # What `state()` folds in and nothing here exercises: the chat and the
+    # command line are the console's own, and have no board behind them.
+    api.chat = type("Chat", (), {"state": lambda self: {}})()
+    api.commands = type("Commands", (), {"allowed": (), "busy": False})()
+    return api
+
+
+@case
+def the_console_lists_every_project_it_knows_of():
+    """The board's own, and the ones only the configuration names.
+
+    A name the file maps to a path and the board has never heard of is still a
+    project of this installation — and the row says so, rather than sending
+    somebody looking for a page that does not exist.
+    """
+    with _board() as board:
+        code = board.create_row("projects", "ticket-runner", {"Repository": "user/repo"})
+        board.create_row("projects", "Site vitrine", {})
+        ticket = board.create_row("tickets", "Un ticket", {"Status": "Ready"})
+        board.update("tickets", ticket, {"Project": [code]})
+
+        api = _markdown_api(board)
+        api._config.projects["Jeu d'usine"] = "/home/salva/workspace/usine"
+        drawn = api.all_projects()
+
+    rows = {project["name"]: project for project in drawn["projects"]}
+    assert set(rows) == {"ticket-runner", "Site vitrine", "Jeu d'usine"}
+    assert rows["ticket-runner"]["kind"] == "code"
+    assert rows["ticket-runner"]["repository"] == "user/repo"
+    assert rows["ticket-runner"]["tickets"] == 1
+    # No repository declared anywhere: a document project, not a broken one.
+    assert rows["Site vitrine"]["kind"] == "document"
+    assert rows["Jeu d'usine"]["source"] == "config"
+    assert rows["Jeu d'usine"]["path"] == "/home/salva/workspace/usine"
+    assert drawn["storage"] == "markdown"
+
+
+@case
+def the_console_reads_and_rewrites_the_standing_context():
+    """Rewrites, never appends: the context is a value, not a history.
+
+    Saving it twice has to leave one text. Everything else this console writes
+    appends — a comment under a question, a report under a ticket — so this is
+    the one place the distinction has to be made on purpose.
+    """
+    with _board() as board:
+        board.set_context("Première version.")
+        api = _markdown_api(board)
+        assert api.context()["text"] == "Première version."
+        assert api.context()["editable"]
+
+        api.save_context("Deuxième version.")
+        assert board.context() == "Deuxième version."
+        api = _markdown_api(board)
+        api.save_context("Deuxième version.")
+        assert board.context() == "Deuxième version.", "a second save must not stack"
+
+        # A workspace with nowhere to write says so rather than offering a save
+        # that could only fail.
+        blind = _markdown_api(board)
+        blind._runner._workspace.context_page = ""
+        assert not blind.context()["editable"]
+        try:
+            blind.save_context("x")
+        except ValueError as error:
+            assert "Context" in str(error)
+        else:
+            raise AssertionError("a context with no page must not pretend to save")
+
+
+@case
+def the_console_writes_a_schedule_without_touching_what_a_pass_writes_back():
+    """`Next`, `Last` and `Last ticket` are the runner's, not the form's.
+
+    Letting the console edit them would let somebody make an occurrence happen
+    twice, or never — which is the one thing the calendar must not allow.
+    """
+    with _board() as board:
+        api = _markdown_api(board)
+        created = api.create_schedule(
+            "Revue des dépendances",
+            {"cadence": "Weekly", "at": "09:00", "day": "Monday", "active": True},
+        )
+        row = schedules.read(board.page(created["id"]), board.settings())
+        assert row.name == "Revue des dépendances"
+        assert (row.cadence, row.at, row.day) == ("Weekly", "09:00", "Monday")
+        assert row.active is False, "a new schedule is created unticked, whatever was asked"
+        assert not row.problem
+
+        api.save_schedule(created["id"], {"active": True, "at": "07:30", "priority": "High"})
+        again = schedules.read(board.page(created["id"]), board.settings())
+        assert again.active is True and again.at == "07:30" and again.priority == "High"
+        assert again.next is None and again.last is None
+
+        # What a pass writes back is not the form's to set — so a payload made
+        # only of those is refused, rather than quietly doing nothing.
+        try:
+            api.save_schedule(created["id"], {"next": "2030-01-01", "last": "2030-01-01"})
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("a change with nothing to change must say so")
+        untouched = schedules.read(board.page(created["id"]), board.settings())
+        assert untouched.next is None and untouched.last is None
+
+
+@case
+def the_console_says_which_board_it_is_looking_at():
+    """The panes read it: a Notion link is worth drawing on one and not the other."""
+    with _board() as board:
+        with _state_home():
+            said = _markdown_api(board).state()
+    assert said["storage"] == "markdown"
+    assert said["board_path"] == str(board.root)
+
+
+@case
+def a_block_reads_back_whichever_end_of_the_wire_it_came_from():
+    """`plain` serves two callers, and they hand it two shapes.
+
+    Notion returns a piece of rich text with `plain_text` on it; a block this
+    code has just built carries `text.content`. Reading only the first left the
+    live report writing a file full of empty bullets.
+    """
+    built = markdown.to_blocks("- une puce")[0]
+    assert "plain_text" not in json.dumps(built), "premise: a built block has no plain_text"
+    assert markdown.plain(built) == "- une puce"
+    returned = {
+        "type": "bulleted_list_item",
+        "bulleted_list_item": {"rich_text": [{"plain_text": "une puce"}]},
+    }
+    assert markdown.plain(returned) == "- une puce"
+
+
+@case
+def the_live_report_writes_its_steps_into_the_file():
+    """A text file has no fold to hide a session's steps in, so it keeps them.
+
+    The toggle's title is the one thing lost — there is no line to rewrite in
+    place — and `update_block` says so by doing nothing. What must not happen is
+    the report disabling itself: the board's live column comes off the same
+    flush, and a Markdown installation would silently stop having one.
+    """
+    with _board() as board:
+        page_id = board.create_row("tickets", "Un ticket", {"Status": "Ready"})
+        live = progress.Live(
+            board, page_id, database="tickets", property_name="Progress",
+            interval=0, words=voice.Voice(""),
+        )
+        live.add(progress.Step("Read", "src/x.py"))
+        live.flush()
+        assert store.read(board.page(page_id), "Progress") == "Read · src/x.py"
+        live.add(progress.Step("J'ai lu le fichier.", said=True))
+        live.flush()
+        live.close("Fini.", ok=True)
+
+        assert not live.disabled
+        written = board.blocks_text(page_id)
+        assert "- Read  src/x.py" in written, written
+        assert "J'ai lu le fichier." in written
+        # Cleared on the way out, exactly as on a Notion board.
+        assert store.read(board.page(page_id), "Progress") == ""
 
 
 def main() -> int:

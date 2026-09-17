@@ -1,5 +1,5 @@
 import * as React from "react"
-import { CalendarClock, RefreshCw } from "lucide-react"
+import { CalendarClock, Pencil, Plus, RefreshCw } from "lucide-react"
 import { Link } from "react-resource-view"
 
 import { Button } from "@/components/ui/button"
@@ -10,14 +10,19 @@ import { cn } from "@/lib/utils"
 import { ticketHref } from "@/resources/tickets"
 
 import { Eyebrow, Fact, Facts, PageHead, Panel } from "./frame"
+import { ScheduleForm } from "./schedule-form"
 import { Chip } from "./ticket-bits"
 
 /* What comes back on its own.
  *
  * The Schedules database, read the way `ticket-runner schedules` reads it: what
- * repeats, when the next one is due, and how the last one went. Nothing is
- * written from here — a schedule is a Notion page, and the way to change one is
- * to open it, which is what the link on its name is for.
+ * repeats, when the next one is due, and how the last one went — and, since the
+ * board may be a directory of files with no Notion behind it, written from here
+ * too. A row opens into a form; the link on its name still goes to the page,
+ * where there is one.
+ *
+ * What the form does *not* offer is the three columns a pass writes back —
+ * `Next`, `Last` and the ticket the last occurrence made. See `schedule-form`.
  *
  * The page asks the server when it is opened rather than living on the stream:
  * a schedule moves four times a day at the very most, and this is the only pane
@@ -43,8 +48,9 @@ function rhythm(schedule: Schedule): string {
   return [schedule.cadence || t("no cadence"), clock].filter(Boolean).join(" · ")
 }
 
-function Row({ schedule }: { schedule: Schedule }) {
+function Row({ schedule, onSaved }: { schedule: Schedule; onSaved: () => void }) {
   const t = useT()
+  const [editing, setEditing] = React.useState(false)
   return (
     <Panel
       eyebrow={rhythm(schedule)}
@@ -59,24 +65,46 @@ function Row({ schedule }: { schedule: Schedule }) {
         </a>
       }
       action={
-        <span
-          className={cn(
-            "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
-            schedule.active
-              ? "border-tr-green/30 bg-tr-green/10 text-tr-green"
-              : "text-muted-foreground"
-          )}
-        >
+        <>
           <span
             className={cn(
-              "size-1.5 rounded-full",
-              schedule.active ? "bg-tr-green" : "bg-muted-foreground"
+              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
+              schedule.active
+                ? "border-tr-green/30 bg-tr-green/10 text-tr-green"
+                : "text-muted-foreground"
             )}
-          />
-          {schedule.active ? t("on") : t("unticked")}
-        </span>
+          >
+            <span
+              className={cn(
+                "size-1.5 rounded-full",
+                schedule.active ? "bg-tr-green" : "bg-muted-foreground"
+              )}
+            />
+            {schedule.active ? t("on") : t("unticked")}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setEditing((shown) => !shown)}
+            aria-label={t("Change")}
+          >
+            <Pencil />
+          </Button>
+        </>
       }
     >
+      {editing ? (
+        <div className="mb-3">
+          <ScheduleForm
+            schedule={schedule}
+            onSaved={() => {
+              setEditing(false)
+              onSaved()
+            }}
+            onCancel={() => setEditing(false)}
+          />
+        </div>
+      ) : null}
       {/* A schedule nobody can read holds nobody up — the pass steps over it —
           so it says what is wrong with it instead of a date it does not have. */}
       {schedule.problem ? (
@@ -125,6 +153,7 @@ export function SchedulesPane() {
   const t = useT()
   const [drawn, setDrawn] = React.useState<Schedules | null>(null)
   const [problem, setProblem] = React.useState("")
+  const [writing, setWriting] = React.useState(false)
 
   const load = React.useCallback(async () => {
     try {
@@ -151,10 +180,20 @@ export function SchedulesPane() {
           "A row says what to make and how often; when the moment comes the runner writes the ticket into the ready column and steps back."
         )}
         action={
-          <Button variant="outline" size="sm" onClick={() => void load()}>
-            <RefreshCw />
-            {t("Reread")}
-          </Button>
+          <>
+            <Button variant="outline" size="sm" onClick={() => void load()}>
+              <RefreshCw />
+              {t("Reread")}
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => setWriting((shown) => !shown)}
+              disabled={!drawn?.database}
+            >
+              <Plus />
+              {t("New schedule")}
+            </Button>
+          </>
         }
       >
         <span className="text-muted-foreground inline-flex items-center gap-1.5 font-mono text-[0.7rem]">
@@ -167,6 +206,23 @@ export function SchedulesPane() {
             : t("nothing yet")}
         </span>
       </PageHead>
+
+      {writing && drawn?.database ? (
+        <Panel
+          eyebrow={t("new")}
+          title={t("A ticket that comes back")}
+          className="mb-3"
+        >
+          <ScheduleForm
+            schedule={null}
+            onSaved={() => {
+              setWriting(false)
+              void load()
+            }}
+            onCancel={() => setWriting(false)}
+          />
+        </Panel>
+      ) : null}
 
       {/* Three ways this page has nothing to show, and they are three different
           things to do about it: the token failed, the workspace has no such
@@ -196,7 +252,7 @@ export function SchedulesPane() {
       ) : (
         <div className="space-y-3">
           {rows.map((schedule) => (
-            <Row key={schedule.id} schedule={schedule} />
+            <Row key={schedule.id} schedule={schedule} onSaved={() => void load()} />
           ))}
         </div>
       )}

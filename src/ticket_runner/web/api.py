@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import config as config_module
-from .. import conversation, credits, notion, session, state, systemd, voice
+from .. import conversation, credits, session, state, store, systemd, voice
 from .. import schedules as schedules_module
 from .. import update as update_module
 from ..config import Config
@@ -104,7 +104,7 @@ class Api:
                 self.runner.client.forget_database(self.runner.database)
                 self._schema_at = time.time()
             pages = self.runner.client.query(self.runner.database)
-        except notion.NotionError:
+        except store.StoreError:
             self.forget()
             raise
         names = {settings.state(key): key for key in COLUMNS}
@@ -124,7 +124,7 @@ class Api:
             ) and validated in self.runner.client.options(
                 self.runner.database, settings.prop("status")
             )
-        except notion.NotionError:
+        except store.StoreError:
             offers = False
 
         order = {key: index for index, key in enumerate(COLUMNS)}
@@ -141,14 +141,14 @@ class Api:
             ],
         }
 
-    def _ticket(self, page: notion.Page, names: dict[str, str], projects: dict, host: str) -> dict:
+    def _ticket(self, page: store.Page, names: dict[str, str], projects: dict, host: str) -> dict:
         """One page of the tickets database, as a card reads it."""
         settings = self.config.notion
-        status = str(notion.read(page, settings.prop("status")) or "")
-        relation = notion.read(page, settings.prop("project")) or []
+        status = str(store.read(page, settings.prop("status")) or "")
+        relation = store.read(page, settings.prop("project")) or []
         project = projects.get(relation[0]) if relation else None
-        session_id = _session_id(str(notion.read(page, settings.prop("session")) or ""))
-        moment = scheduled_for(notion.read(page, settings.prop("due")))
+        session_id = _session_id(str(store.read(page, settings.prop("session")) or ""))
+        moment = scheduled_for(store.read(page, settings.prop("due")))
         return {
             "id": page.id.replace("-", ""),
             "short": short_id(page.id),
@@ -158,15 +158,15 @@ class Api:
             "column": names.get(status, "other"),
             "project": (project or {}).get("name", ""),
             "kind": (project or {}).get("kind", ""),
-            "priority": str(notion.read(page, settings.prop("priority")) or ""),
-            "model": str(notion.read(page, settings.prop("model")) or ""),
-            "progress": str(notion.read(page, settings.prop("progress")) or ""),
-            "runner": str(notion.read(page, settings.prop("agent")) or ""),
-            "pull_request": str(notion.read(page, settings.prop("pull_request")) or ""),
+            "priority": str(store.read(page, settings.prop("priority")) or ""),
+            "model": str(store.read(page, settings.prop("model")) or ""),
+            "progress": str(store.read(page, settings.prop("progress")) or ""),
+            "runner": str(store.read(page, settings.prop("agent")) or ""),
+            "pull_request": str(store.read(page, settings.prop("pull_request")) or ""),
             "session": session_id,
             "session_link": session.deep_link(session_id, host=host) if session_id else "",
-            "cost": notion.read(page, settings.prop("cost")),
-            "duration": notion.read(page, settings.prop("duration")),
+            "cost": store.read(page, settings.prop("cost")),
+            "duration": store.read(page, settings.prop("duration")),
             "scheduled": moment.isoformat(timespec="minutes") if moment else "",
             "created": page.raw.get("created_time", ""),
         }
@@ -185,14 +185,14 @@ class Api:
         try:
             page = self.runner.client.page(page_id)
             content = self.runner.client.blocks_text(page_id)
-        except notion.NotionError:
+        except store.StoreError:
             self.forget()
             raise
         card = self._ticket(page, names, self.projects(), self.config.runner.session_host)
         return {**card, "content": content}
 
     def projects(self) -> dict[str, dict]:
-        """{page id: {name, kind}} — one query, kept for a few minutes.
+        """{page id: {name, kind, …}} — one query, kept for a few minutes.
 
         Read from the projects database in one go rather than resolved ticket by
         ticket: resolving costs two API calls per project, and the board asks
@@ -205,23 +205,173 @@ class Api:
             database = self.runner.workspace.projects
             if database:
                 for page in self.runner.client.query(database):
-                    declared = any(
-                        notion.read(page, name)
-                        for name in ("Repository", "repository", "github", "Path", "path")
-                    )
+                    repository = _first(page, "Repository", "repository", "github", "repo")
+                    path = _first(page, "Path", "path")
                     index[page.id] = {
                         "id": page.id.replace("-", ""),
                         "name": page.title or "(untitled project)",
-                        "kind": "code" if declared else "document",
+                        "kind": "code" if (repository or path) else "document",
                         "url": page.url,
+                        "repository": repository,
+                        "path": path,
                     }
-        except notion.NotionError:
+        except store.StoreError:
             # A projects database that cannot be read costs the board its
             # project names, and nothing else. The tickets still show.
             return self._projects
         self._projects = index
         self._projects_at = time.time()
         return index
+
+    def all_projects(self) -> dict:
+        """Every project this installation knows of, from wherever it knows it.
+
+        Three sources, and the pane shows the three as one list because that is
+        how somebody thinks of their projects: the board's own database; the
+        `[projects]` table of the configuration, which is a path this machine
+        maps a name onto; and — for either of those — where the repository
+        actually turned out to be on this disk.
+
+        A configuration entry for a project the board already has is not a
+        second project: it is the same one, with its path resolved. Only a name
+        the board has never heard of adds a row, and it is marked as coming from
+        the file so that nobody goes looking for its page.
+        """
+        rows: list[dict] = []
+        try:
+            known = self.projects()
+        except store.StoreError:
+            known = {}
+        overrides = dict(self.config.projects)
+        for project in sorted(known.values(), key=lambda item: item["name"].lower()):
+            declared = overrides.pop(project["name"], "")
+            rows.append({**project, "configured": declared, "source": "board"})
+        for name, path in sorted(overrides.items(), key=lambda pair: pair[0].lower()):
+            rows.append(
+                {
+                    "id": "",
+                    "name": name,
+                    "kind": "code",
+                    "url": "",
+                    "repository": "",
+                    "path": path,
+                    "configured": path,
+                    "source": "config",
+                }
+            )
+        counts: dict[str, int] = {}
+        try:
+            for page in self.runner.client.query(self.runner.database):
+                for page_id in store.read(page, self.config.notion.prop("project")) or []:
+                    key = str(page_id).replace("-", "")
+                    counts[key] = counts.get(key, 0) + 1
+        except store.StoreError:
+            counts = {}
+        for row in rows:
+            row["tickets"] = counts.get(row["id"], 0)
+        return {
+            "projects": rows,
+            "workspace_root": str(self.config.runner.workspace_root),
+            "storage": self.config.storage.mode,
+        }
+
+    # -- the standing context -------------------------------------------------
+
+    def context(self) -> dict:
+        """What reaches every ticket before the ticket itself does.
+
+        Read as text rather than as blocks, which is what the runner puts in the
+        prompt anyway — so what this pane shows is exactly what an agent is told,
+        and editing it here is editing that.
+        """
+        space = self.runner.workspace
+        return {
+            "text": space.context,
+            "page": space.context_page,
+            "where": self.config.notion.page("context"),
+            "storage": self.config.storage.mode,
+            # No page to write to is not an error, it is a workspace without a
+            # context row — the pane says so rather than offering a save button
+            # that could only fail.
+            "editable": bool(space.context_page),
+        }
+
+    def save_context(self, text: str) -> dict:
+        """Rewrite the standing context. The one page the console replaces.
+
+        Replacing, not appending: this is a value, not a history — saving it
+        twice must leave one text, not two copies of it under each other. Every
+        other write in this console appends, and for the opposite reason.
+        """
+        space = self.runner.workspace
+        if not space.context_page:
+            raise ValueError(
+                f"this workspace has no “{self.config.notion.page('context')}” page to write to"
+            )
+        self.runner.client.replace_markdown(space.context_page, text)
+        # The workspace was resolved with the old text in it.
+        self.forget()
+        self.hub.publish("context", saved=True)
+        return {"ok": True, "text": text.strip()}
+
+    # -- what comes back on its own, as something you can change --------------
+
+    def save_schedule(self, page_id: str, values: dict) -> dict:
+        """Change one row of the Schedules database from the console.
+
+        Only the seven columns a schedule is *written* in — the cadence, the
+        hour, the day, the tick, and the three a ticket inherits. Never `Next`
+        or `Last`: those are what a pass writes back, and a console that let you
+        edit them would let you make an occurrence happen twice.
+        """
+        database = self.runner.workspace.schedules
+        if not database:
+            raise ValueError("this workspace has no schedules database")
+        settings = self.config.notion
+        writable = {
+            "cadence": settings.prop("cadence"),
+            "at": settings.prop("at"),
+            "day": settings.prop("day"),
+            "active": settings.prop("active"),
+            "model": settings.prop("model"),
+            "priority": settings.prop("priority"),
+        }
+        written: dict[str, Any] = {}
+        for key, name in writable.items():
+            if key not in values:
+                continue
+            value = values[key]
+            written[name] = bool(value) if key == "active" else str(value or "")
+        if "project" in values:
+            written[settings.prop("project")] = [values["project"]] if values["project"] else []
+        if "name" in values and str(values["name"]).strip():
+            written[self.runner.client.title_property(database)] = str(values["name"]).strip()
+        if not written:
+            raise ValueError("nothing to change")
+        self.runner.client.update(database, page_id, written)
+        if "body" in values:
+            self.runner.client.replace_markdown(page_id, str(values["body"]))
+        self.hub.publish("schedules", saved=page_id)
+        return {"id": page_id.replace("-", "")}
+
+    def create_schedule(self, name: str, values: dict) -> dict:
+        """A new row in the Schedules database, left unticked.
+
+        Unticked deliberately, whatever the form said: a schedule that starts
+        producing tickets the second it is typed is a schedule nobody dares
+        write. You look at it, then you turn it on.
+        """
+        name = str(name).strip()
+        if not name:
+            raise ValueError("a schedule needs a name")
+        database = self.runner.workspace.schedules
+        if not database:
+            raise ValueError("this workspace has no schedules database")
+        page_id = self.runner.client.create_row(
+            database, name, {self.config.notion.prop("active"): False}
+        )
+        self.save_schedule(page_id, {**values, "active": False})
+        return {"id": page_id.replace("-", ""), "name": name}
 
     def schedules(self) -> dict:
         """What comes back on its own, as `ticket-runner schedules` says it.
@@ -239,7 +389,7 @@ class Api:
         try:
             rows = self.runner.schedules()
             database = bool(self.runner.workspace.schedules)
-        except notion.NotionError:
+        except store.StoreError:
             self.forget()
             raise
         projects = self.projects()
@@ -298,6 +448,13 @@ class Api:
             "credits": waiting,
             "credits_at": credits.when(waiting) if waiting else "",
             "workspace_root": str(configuration.runner.workspace_root),
+            # Which board this console is looking at. The panes read it to know
+            # whether a Notion link is worth drawing, and whether the sync has
+            # anything to say — in `markdown` mode neither does.
+            "storage": configuration.storage.mode,
+            "board_path": str(configuration.storage.path)
+            if configuration.storage.markdown
+            else "",
             "interval_seconds": configuration.runner.interval_seconds,
             "model": configuration.runner.model or "default",
             "permission_mode": configuration.runner.permission_mode,
@@ -479,7 +636,7 @@ class Api:
         ]
         try:
             context = self.runner.workspace.context.strip()
-        except notion.NotionError:
+        except store.StoreError:
             context = ""
         projects = self.projects()
         if projects:
@@ -491,7 +648,21 @@ class Api:
         return "\n".join(lines)
 
 
-def _voice(comment: notion.Comment, me: str) -> str:
+def _first(page: store.Page, *names: str) -> str:
+    """The first of those columns the page actually carries, as text.
+
+    A project database is written by hand, so its columns are named by hand:
+    "Repository", "repository", or the bare "github" the runner used to ask for.
+    `projects.py` reads them the same way, for the same reason.
+    """
+    for name in names:
+        value = store.read(page, name)
+        if value not in (None, "", []):
+            return str(value)
+    return ""
+
+
+def _voice(comment: store.Comment, me: str) -> str:
     """Who said this: the runner, or you.
 
     `conversation.ours` is the answer wherever Notion will say who we are. Where
@@ -505,7 +676,7 @@ def _voice(comment: notion.Comment, me: str) -> str:
     return "runner" if voice.is_report(comment.text) else "you"
 
 
-def _thread(comments: list[notion.Comment], me: str) -> str:
+def _thread(comments: list[store.Comment], me: str) -> str:
     """The discussion a message typed at a ticket belongs in.
 
     The last one the runner has spoken in, which is where an answer to its

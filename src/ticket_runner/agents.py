@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from . import notion
+from . import store
 
 
 @dataclass
@@ -31,7 +31,7 @@ class Agent:
         return bool(self.name)
 
 
-def resolve(client: notion.Client, page_id: str, model_property: str = "Model") -> Agent:
+def resolve(backend: store.Store, page_id: str, model_property: str = "Model") -> Agent:
     """The agent a ticket points at. An unreadable page is no agent at all.
 
     Failing a ticket because the page describing its tone could not be fetched
@@ -39,14 +39,14 @@ def resolve(client: notion.Client, page_id: str, model_property: str = "Model") 
     already makes.
     """
     try:
-        page = client.page(page_id)
-    except notion.NotionError:
+        page = backend.page(page_id)
+    except store.StoreError:
         return Agent()
     name = page.title.strip()
     if not name:
         return Agent()
     try:
-        brief = client.blocks_text(page_id)
-    except notion.NotionError:
+        brief = backend.blocks_text(page_id)
+    except store.StoreError:
         brief = ""
-    return Agent(name, brief, str(notion.read(page, model_property) or "").strip())
+    return Agent(name, brief, str(store.read(page, model_property) or "").strip())

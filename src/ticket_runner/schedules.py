@@ -28,7 +28,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from . import notion
+from . import store
 from .config import Notion
 
 # What a cadence may say. A select rather than free text, for the same reason as
@@ -52,7 +52,7 @@ class Schedule:
     others go on being born.
     """
 
-    page: notion.Page
+    page: store.Page
     name: str
     cadence: str            # "" when absent or unknown
     at: str                 # "09:00"
@@ -84,14 +84,14 @@ def scheduled_for(value: object) -> datetime | None:
     return moment.astimezone() if moment.tzinfo is None else moment
 
 
-def read(page: notion.Page, settings: Notion) -> Schedule:
+def read(page: store.Page, settings: Notion) -> Schedule:
     """One schedule, and what — if anything — makes it unreadable.
 
     Never raises. A row somebody half filled in is a row the pass steps over,
     not a pass that stops: one broken schedule must not take the others with it.
     """
     def value(key: str) -> object:
-        return notion.read(page, settings.prop(key))
+        return store.read(page, settings.prop(key))
 
     def first(key: str) -> str:
         related = value(key) or []

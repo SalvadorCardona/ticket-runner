@@ -21,7 +21,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import agents, conversation, notion, session, state
+from . import agents, conversation, session, state, store
 from . import prompt as prompt_module
 from . import voice as voice_module
 from .base import Base
@@ -107,7 +107,7 @@ class Replies(Base):
                 continue
             try:
                 comments = self.comments(page_id)
-            except notion.NotionError:
+            except store.StoreError:
                 # Unreadable comments, or a page that has since been deleted.
                 # Neither is this pass's business to report on.
                 continue
@@ -126,7 +126,7 @@ class Replies(Base):
         """Answer one comment, in its thread. Never raises."""
         try:
             return self._answer_thread(me, page_id, thread)
-        except notion.NotionError as error:
+        except store.StoreError as error:
             self.say(f"    ! comment not answered: {voice_module.line(error)}")
         except (OSError, ValueError) as error:
             self.say(f"    ! comment not answered: {error}")
@@ -151,7 +151,7 @@ class Replies(Base):
             workdir = conversation.talk_dir(short)
             where = f"Working directory: {workdir} — this ticket has no repository."
 
-        role = notion.read(ticket.page, self.config.notion.prop("role")) or []
+        role = store.read(ticket.page, self.config.notion.prop("role")) or []
         agent = (
             agents.resolve(self.client, role[0], self.config.notion.prop("model"))
             if role
@@ -253,7 +253,7 @@ class Replies(Base):
             else text
         )
         chosen = (
-            str(notion.read(ticket.page, self.config.notion.prop("model")) or "")
+            str(store.read(ticket.page, self.config.notion.prop("model")) or "")
             or agent.model
             or self.config.runner.model
         )

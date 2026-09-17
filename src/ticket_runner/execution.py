@@ -30,7 +30,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import git, notion, progress, session, state
+from . import git, progress, session, state, store
 from . import prompt as prompt_module
 from . import voice as voice_module
 from .base import Base
@@ -379,7 +379,7 @@ class Execution(Base):
     # -- a ticket that has none -------------------------------------------------
 
     def _execute_document(self, job: Job) -> dict:
-        """A ticket with no repository: the deliverable is the Notion page."""
+        """A ticket with no repository: the deliverable is the ticket's own page."""
         ticket = job.ticket
         job.workdir.mkdir(parents=True, exist_ok=True)
         try:
@@ -433,7 +433,7 @@ class Execution(Base):
                 ticket.page.id,
                 f"\n---\n{content}\n\n*ticket-runner · {stamp} · session `{outcome.session_id}`*",
             )
-        except notion.NotionError as error:
+        except store.StoreError as error:
             return self._fail(
                 ticket,
                 said.say("answer-not-written"),

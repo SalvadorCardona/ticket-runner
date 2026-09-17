@@ -8,6 +8,10 @@ lets you rename a column in Notion, or switch `Status` from a status property to
 a select, without touching the code: values are encoded according to the
 declared type, and a property that does not exist is skipped silently rather
 than failing the ticket.
+
+It is one implementation of `store.Store`, and the one everything was written
+against — `Page`, `Comment` and `read` are that module's now, re-exported here
+because a Notion page is still what they were shaped after.
 """
 
 from __future__ import annotations
@@ -18,8 +22,9 @@ import os
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
 from typing import Any
+
+from .store import Comment, Page, StoreError, read
 
 API = "https://api.notion.com/v1"
 # The one seam in this file, and it exists for `tests/functional.py`: the
@@ -31,41 +36,18 @@ API_ENV = "TICKET_RUNNER_NOTION_API"
 VERSION = "2022-06-28"
 MAX_ATTEMPTS = 4
 
+# Re-exported so that `notion.Page`, `notion.Comment` and `notion.read` keep
+# meaning what they always meant.
+__all__ = ["API", "Client", "Comment", "NotionError", "Page", "VERSION", "read"]
+
 
 def endpoint() -> str:
     """Where the API lives: Notion's, unless `TICKET_RUNNER_NOTION_API` says."""
     return os.environ.get(API_ENV, "").strip().rstrip("/") or API
 
 
-class NotionError(Exception):
+class NotionError(StoreError):
     """The API returned an error, or the network is unreachable."""
-
-
-@dataclass
-class Comment:
-    """One comment, and what it takes to answer it where it was written.
-
-    `discussion_id` is the thread it belongs to: Notion groups comments into
-    discussions, and answering *into* one is the whole difference between a
-    conversation and a page covered in unrelated remarks. `created_by` is who
-    wrote it — which is how the runner tells its own words from yours without
-    having to recognise its own signature in a string.
-    """
-
-    text: str
-    created_time: str = ""
-    id: str = ""
-    discussion_id: str = ""
-    created_by: str = ""
-
-
-@dataclass
-class Page:
-    id: str
-    url: str
-    title: str
-    properties: dict[str, Any] = field(default_factory=dict)
-    raw: dict[str, Any] = field(default_factory=dict)
 
 
 class Client:
@@ -337,6 +319,41 @@ class Client:
         self.append_blocks(page_id, blocks)
         return len(blocks)
 
+    def replace_markdown(self, page_id: str, markdown: str) -> int:
+        """Make a page say this and nothing else. Returns the block count.
+
+        The one destructive write in this client, and it exists for the two
+        places where a page is *a value* rather than a history: the standing
+        context, which the console edits as a text area, and a page the Markdown
+        side of a mirrored board has just won a conflict over. Appending there
+        would grow a second copy under the first every time either is saved.
+
+        Everything that is not those two appends — a report, an answer, a
+        ticket's body — because a ticket's own description is what the agent was
+        asked to work from, and destroying it to make room would be a poor trade.
+        """
+        self.delete_children(page_id)
+        return self.append_markdown(page_id, markdown)
+
+    def delete_children(self, block_id: str) -> int:
+        """Empty a page, block by block, and say how many went.
+
+        Notion has no "delete the contents of this page": archiving a block is
+        one request each, and there is no batch. A hundred at a time is what
+        `children` hands over, and the loop asks again until it hands over none.
+        """
+        gone = 0
+        while True:
+            payload = self._request("GET", f"/blocks/{block_id}/children?page_size=100")
+            blocks = payload.get("results", [])
+            if not blocks:
+                return gone
+            for block in blocks:
+                self._request("DELETE", f"/blocks/{block['id']}")
+                gone += 1
+            if not payload.get("has_more"):
+                return gone
+
     def append_blocks(self, block_id: str, blocks: list[dict]) -> list[str]:
         """Append blocks under a page *or* under a block, and return their IDs.
 
@@ -400,6 +417,21 @@ class Client:
         remark about the weather.
         """
         return str(self._identity().get("name", "")).strip()
+
+    def workspace(self, settings):
+        """The databases and the standing context of this board. See workspace.py.
+
+        Part of the store interface rather than of `workspace.resolve`, because
+        "what is this board made of" is the one question each backend answers in
+        its own terms: a Notion workspace is a directory database whose rows
+        hold inline databases, and a Markdown board is four directories.
+
+        Imported here rather than at the top: `workspace` reads pages through
+        this very client, and the two modules would otherwise import each other.
+        """
+        from . import workspace as workspace_module
+
+        return workspace_module.from_notion(self, settings)
 
     def _identity(self) -> dict:
         """Who Notion says we are. Cached on success only, so a network blip
@@ -507,45 +539,16 @@ def _to_page(raw: dict) -> Page:
     )
 
 
-def read(page: Page, name: str) -> Any:
-    """A property's value, reduced to a plain Python type."""
-    prop = page.properties.get(name)
-    if not prop:
-        return None
-    kind = prop.get("type")
-    if kind in ("rich_text", "title"):
-        return "".join(part.get("plain_text", "") for part in prop.get(kind, [])).strip()
-    if kind == "status":
-        return (prop.get("status") or {}).get("name")
-    if kind == "select":
-        return (prop.get("select") or {}).get("name")
-    if kind == "url":
-        return prop.get("url")
-    if kind == "relation":
-        return [item.get("id") for item in prop.get("relation", [])]
-    if kind == "people":
-        return [item.get("id") for item in prop.get("people", [])]
-    if kind == "checkbox":
-        return prop.get("checkbox")
-    if kind == "number":
-        return prop.get("number")
-    if kind == "date":
-        # A Notion date may be a range. The deadline is where it ends.
-        value = prop.get("date") or {}
-        return value.get("end") or value.get("start")
-    if kind == "formula":
-        inner = prop.get("formula") or {}
-        return inner.get(inner.get("type", ""), None)
-    return prop.get(kind)
-
-
 def _encode(kind: str | None, value: Any) -> dict | None:
     if kind is None or value is None:
         return None
     if kind == "status":
         return {"status": {"name": str(value)}}
     if kind == "select":
-        return {"select": {"name": str(value)}}
+        # An empty name is not an option, and Notion answers 400 to one. What
+        # emptying a select means is clearing the cell, and `null` is how that
+        # is said — which is what the console's "nothing said" sends.
+        return {"select": {"name": str(value)} if str(value) else None}
     if kind == "url":
         return {"url": str(value) or None}
     if kind in ("rich_text", "title"):
@@ -571,51 +574,11 @@ def _rich_text(text: str) -> list[dict]:
     return [{"type": "text", "text": {"content": chunk}} for chunk in chunks[:20]]
 
 
-def _plain(block: dict, kind: str) -> str:
-    return "".join(
-        part.get("plain_text", "") for part in block.get(kind, {}).get("rich_text", [])
-    )
-
-
 def _block_text(block: dict, depth: int) -> str:
-    kind = block.get("type", "")
-    if kind == "paragraph":
-        return _plain(block, kind)
-    if kind in ("heading_1", "heading_2", "heading_3"):
-        level = "#" * int(kind[-1])
-        return f"{level} {_plain(block, kind)}"
-    if kind == "bulleted_list_item":
-        return f"- {_plain(block, kind)}"
-    if kind == "numbered_list_item":
-        return f"1. {_plain(block, kind)}"
-    if kind == "to_do":
-        done = block.get(kind, {}).get("checked")
-        return f"- [{'x' if done else ' '}] {_plain(block, kind)}"
-    if kind == "quote":
-        return f"> {_plain(block, kind)}"
-    if kind == "callout":
-        return f"> {_plain(block, kind)}"
-    if kind == "toggle":
-        return _plain(block, kind)
-    if kind == "code":
-        language = block.get(kind, {}).get("language", "")
-        return f"```{language}\n{_plain(block, kind)}\n```"
-    if kind == "divider":
-        return "---"
-    if kind in ("image", "file", "pdf"):
-        payload = block.get(kind, {})
-        source = payload.get("external", {}).get("url") or payload.get("file", {}).get("url", "")
-        caption = "".join(part.get("plain_text", "") for part in payload.get("caption", []))
-        label = caption or kind
-        # The S3 URL is signed and expires: it is indicative only.
-        return f"[{label} attached to the ticket: {source.split('?')[0]}]"
-    if kind == "bookmark":
-        return block.get(kind, {}).get("url", "")
-    if kind == "child_page":
-        return f"[sub-page: {block.get(kind, {}).get('title', '')}]"
-    if kind in ("table", "table_row", "column_list", "column"):
-        return ""
-    return _plain(block, kind)
+    """One block as text. See `markdown.plain`, where the conversion lives."""
+    from . import markdown as converter
+
+    return converter.plain(block)
 
 
 def _indent(text: str) -> str:

@@ -56,7 +56,7 @@ que sur un tag.
 ## Arborescence utile
 
 - `src/ticket_runner/` — le cœur. Un run reste **un seul objet**, découpé par
-  responsabilité : `base.py` porte son état (client Notion, caches, voix) et
+  responsabilité : `base.py` porte son état (le board, caches, voix) et
   son docstring explique la forme choisie ; `runner.py` ne garde que la passe
   (`tick`, `_work`) ; chaque chapitre a son module — `board.py` (lire le
   tableau, le remettre d'aplomb), `preparation.py` (localiser le projet,
@@ -65,9 +65,11 @@ que sur un tag.
   `recurrence.py` (les tickets qui reviennent seuls), `replies.py` (répondre
   aux commentaires), `reports.py` (ce qui s'écrit sur un ticket et ce qui
   atteint ton téléphone), `ticket.py` (`Ticket` et `Job`, sans dépendance).
-- `src/ticket_runner/` — autour du run : `config.py`, `notion.py`, `git.py`,
-  `session.py`, `voice.py` (les mots et la langue), `channels/` (Telegram,
-  Slack), `web/` (serveur de la console et API).
+- `src/ticket_runner/` — autour du run : `config.py`, `store.py` (la couture
+  vers un tableau, quel qu'il soit) et les trois qui la remplissent —
+  `notion.py`, `files.py` (le board en fichiers Markdown), `sync.py` (les deux
+  en phase) —, `git.py`, `session.py`, `voice.py` (les mots et la langue),
+  `channels/` (Telegram, Slack), `web/` (serveur de la console et API).
 - `src/ticket_runner/web/static/` — **généré**, pas du code source à modifier
   à la main (voir Pièges connus).
 - `frontend/` — sous-projet React/TypeScript/Vite de la console web.
