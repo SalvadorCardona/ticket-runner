@@ -3325,6 +3325,58 @@ def a_place_freed_mid_pass_is_filled_without_waiting_for_the_long_session():
 
 
 @case
+def a_place_that_was_never_filled_is_looked_at_before_a_session_ends():
+    """The other half of the same fault, and the one that shows on a board.
+
+    Tickets arrive one at a time: the first is started, the second place stays
+    empty, and the pass then waited for the session in flight before reading the
+    board again. Nothing else could read it either — the run lock is the pass's
+    until it ends, and the timer meets it and leaves — so `max_concurrent = 2`
+    ran one ticket at a time for as long as a ticket was in progress.
+
+    Here: one long ticket, one free place, and a second ticket made ready while
+    it runs. It must start while the long one is still in flight, without
+    anything having ended.
+    """
+    second_started = threading.Event()
+    started: list[str] = []
+    witnessed: list[str] = []
+    guard = threading.Lock()
+
+    with _state_home():
+        runner = _board_runner([_ready("p-long")], {})
+        runner.config.runner.max_concurrent = 2
+        # The cadence the pass looks at the board on, made a test's length.
+        runner.config.runner.interval_seconds = 1
+        runner.prepare = lambda ticket: runner_module.Job(
+            ticket,
+            projects.Project(name="", path=None),
+            branch="",
+            base="",
+            workdir=Path(tempfile.mkdtemp()) / "doc",
+        )
+
+        def execute(job):
+            name = job.ticket.page.id
+            with guard:
+                started.append(name)
+            if name == "p-long":
+                runner.client._pages.append(_ready("p-second"))
+                second_started.wait(10)
+                with guard:
+                    witnessed.extend(started)
+            else:
+                second_started.set()
+            return {"ticket": name, "id": name, "status": "done"}
+
+        runner.execute = execute
+        results = runner._work(runner.queue()[0], None, refill=True)
+
+    assert "p-second" in witnessed, "the empty place was filled with nothing ended"
+    assert sorted(result["id"] for result in results) == ["p-long", "p-second"]
+
+
+@case
 def a_limit_caps_the_tickets_a_pass_takes_rather_than_the_column():
     """`--limit` names a number of tickets, and a queue that refills itself
     would otherwise run the whole board on a `--limit 1`."""

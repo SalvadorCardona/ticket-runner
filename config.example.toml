@@ -199,13 +199,16 @@ workspace_root = "~/workspace"
 # Seconds between two passes. Changing this takes effect on the next
 # `ticket-runner enable`, which rewrites the systemd timer from this value.
 # A pass with nothing to do costs one Notion query, so a short interval is
-# cheap: 10 means a ticket starts being worked on within ten seconds.
+# cheap: 10 means a ticket starts being worked on within ten seconds. It is
+# also how often a pass already running looks for a ticket to put in a place
+# it has left empty — the timer cannot, the run lock is that pass's.
 interval_seconds = 1800
 
-# Places, not a batch size: this many sessions run side by side, and a place
-# that frees is filled from the board straight away — a ticket made ready while
-# a long session runs does not wait for it. Each place costs a full Claude
-# session. A pass ends when nothing is ready and nothing is in flight.
+# Places, not a batch size: this many sessions run side by side, and a place is
+# filled from the board straight away — whether a session just freed it or it
+# was never taken, so tickets arriving one at a time still run side by side.
+# Each place costs a full Claude session. A pass ends when nothing is ready and
+# nothing is in flight.
 max_concurrent = 2
 
 # Past this, the session is killed and the ticket goes back as failed.
