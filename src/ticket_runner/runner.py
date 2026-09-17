@@ -99,7 +99,14 @@ class Runner(
         # on your phone is in the very cache the queue is about to read.
         self._comments.clear()
         self._claimed = set()
+        self._usage_warned = False
         self.answers()
+        # The softer of the two lines, and it stops less: the window is not
+        # spent, it is down to the share you asked to keep. Nothing is *started*
+        # past it — no ticket, no publication, no answer in a thread — while
+        # everything that costs no credit carries on, so a pull request you
+        # validated this morning is still merged this afternoon.
+        reserved = self.under_reserve()
         # What the board asked for before any new work: the tickets you
         # validated, merged or published on their way to done.
         delivered: list[dict] = []
@@ -139,6 +146,17 @@ class Runner(
             # with an hour on it: counted together, so a pass says how much of
             # the board is waiting for a date rather than half of it.
             held = len(waiting) + len(self._deferred)
+            if reserved:
+                # The board says it rather than the journal: a ready column
+                # that stays full while nothing runs reads as a broken runner,
+                # which is the one thing this is not. Said once — the column is
+                # empty by the next pass, and a ticket already in it is skipped.
+                parked = self.park(tickets)
+                for done in parked:
+                    state.record(done)
+                if self.announce_idle and not parked and not delivered:
+                    self.say(f"Nothing new started until {credits.when(reserved)}.")
+                return delivered + parked
             if not tickets:
                 replies = self.converse()
                 if self.announce_idle and not replies and not delivered:
@@ -206,7 +224,23 @@ class Runner(
 
         with ThreadPoolExecutor(max_workers=width) as pool:
             while True:
-                while queued and len(flight) < width and (remaining is None or remaining > 0):
+                # The reserve, asked again at every free place rather than once
+                # at the top: the sessions in flight are what fills the window,
+                # so a pass that started under the line can cross it halfway
+                # through. What is running is left to finish — killing a session
+                # to save credit would spend what it has already cost.
+                if not stalled and self.under_reserve():
+                    stalled = True
+                    for parked in self.park(queued):
+                        results.append(parked)
+                        state.record(parked)
+                    queued = []
+                while (
+                    queued
+                    and not stalled
+                    and len(flight) < width
+                    and (remaining is None or remaining > 0)
+                ):
                     ticket = queued.pop(0)
                     if ticket.id in started:
                         continue
@@ -237,14 +271,19 @@ class Runner(
                     result = future.result()
                     results.append(result)
                     state.record(result)
-                stalled = bool(self.waiting_for_credits())
-                if stalled:
+                spent = 0.0 if stalled else self.waiting_for_credits()
+                if spent:
                     # A session died on the quota while this pass was running.
                     # Every one it could still start would die on the same
                     # sentence, so nothing more is begun — what is in flight is
-                    # left to finish, and the first pass after the wait picks
-                    # the board up where it was.
+                    # left to finish, and what was queued says on the board why
+                    # it did not start, exactly as the reserve's tickets do.
+                    stalled = True
+                    for parked in self.park(queued, spent):
+                        results.append(parked)
+                        state.record(parked)
                     queued = []
+                if stalled:
                     continue
                 if (done or empty) and refill and (remaining is None or remaining > 0):
                     queued = self._again(started)

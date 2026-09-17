@@ -25,7 +25,7 @@ import socket
 import threading
 from datetime import datetime
 
-from . import conversation, notify, notion, openrouter
+from . import channels, conversation, notify, notion, openrouter
 from . import voice as voice_module
 from . import workspace as workspace_module
 from .config import Config
@@ -71,6 +71,9 @@ class Base:
         self._claimed: set[str] = set()
         # What the last `deliver` left for later, so a pass can say so.
         self._deferred: list[tuple[Ticket, datetime]] = []
+        # Whether this run has already said it cannot read the subscription's
+        # usage. Said once — see `under_reserve`, which asks at every free place.
+        self._usage_warned = False
 
     @property
     def workspace(self) -> workspace_module.Workspace:
@@ -118,3 +121,18 @@ class Base:
     ) -> None:
         if self.config.notify.desktop and not self.dry_run:
             notify.send(title, body, urgent=urgent, link=link)
+
+    def _announce(self, title: str, body: str) -> None:
+        """Something about the runner itself, said everywhere you are reachable.
+
+        Not `_tell`, which is about a ticket: this has no page to link to and no
+        verdict to open with, and it is not filtered by `notify.events` either —
+        those name the three moments of a *ticket*, and "the runner has stopped
+        starting things" is not one of them. It is worth a phone precisely
+        because nothing on the board will say it.
+        """
+        self._notify(title, body)
+        settings = self.config.notify
+        if self.dry_run or not settings.remote:
+            return
+        channels.announce(settings, f"{voice_module.MARKS['waiting']} {title}\n{body}")

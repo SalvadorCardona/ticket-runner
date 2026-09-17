@@ -115,6 +115,12 @@ class Runner:
     # behaviour — an exhausted quota is reported as the session failure it looks
     # like. See credits.py.
     wait_for_credits: bool = True
+    # How much of the window to leave alone, as a percentage. The runner starts
+    # nothing new past `100 - this`, so there is still a subscription left to
+    # open a terminal with — a runner that spends the last of it is a runner you
+    # end up turning off. Capped at 50: past that it is not a reserve, it is a
+    # decision to halve the machine.
+    credit_reserve_percent: int = 5
     model: str = ""
     # The language the runner writes its reports in, and the one it asks a
     # session to answer in. Empty is English, and it is more than that: a file
@@ -166,6 +172,12 @@ class Runner:
 # a typo here would only be discovered by GitHub refusing the one merge you were
 # watching.
 MERGE_METHODS = ("squash", "merge", "rebase")
+
+
+# The most of the subscription a reserve may hold back. Half is already an
+# extreme setting — the runner would then stop at 50 % of every window — and
+# anything past it describes a runner you meant to switch off instead.
+MOST_RESERVED = 50
 
 
 # The three moments worth a message. `blocked` is the one that matters: it is
@@ -302,6 +314,13 @@ _DEFAULT_PROPERTIES = {
     # A date here holds the ticket until that moment. It is a start gate, not a
     # deadline — "Due Date" said the opposite of what the runner does with it.
     "due": "Scheduled",
+    # Ticked while the subscription's window is spent under a ticket. A checkbox
+    # and not an eighth column: what happened to that ticket is that *nothing*
+    # happened to it, which is not a moment of its life — it is still ready, or
+    # still validated, with a note saying why nobody has got to it yet. A column
+    # would have said it left the board, and would have had to be typed into
+    # Notion by hand on top of that, since the API cannot widen a `status`.
+    "waiting": "Waiting for credit",  # checkbox: ticked while the credit is out
     # Relation to the Agents database. It carries the same word as the database
     # it points at, because it is the same thing.
     "role": "Agent",
@@ -358,6 +377,10 @@ PRIORITIES = ("Urgent", "High", "Normal", "Low")
 # merges the pull request, or it publishes what the ticket holds, and only then
 # is anything Done. A board that does not offer the column has no such moment,
 # and nothing changes: you merge by hand, as before.
+#
+# There is no column for "the credit ran out": a ticket nothing was started for
+# has not moved, so nothing on the board should say it did. It stays where it
+# was and is ticked — see `waiting` in `_DEFAULT_PROPERTIES`.
 _DEFAULT_STATUS = {
     "ready": "Ready",
     "running": "In progress",
@@ -623,6 +646,16 @@ def load(path: Path | None = None) -> Config:
         timeout_minutes=max(1, int(runner_raw.get("timeout_minutes", defaults.timeout_minutes))),
         wait_for_credits=bool(
             runner_raw.get("wait_for_credits", defaults.wait_for_credits)
+        ),
+        # Both ends clamped rather than refused: a file saying 150 meant "keep
+        # plenty", not "never run again", and a negative reserve is a typo for
+        # none at all.
+        credit_reserve_percent=max(
+            0,
+            min(
+                MOST_RESERVED,
+                int(runner_raw.get("credit_reserve_percent", defaults.credit_reserve_percent)),
+            ),
         ),
         model=str(runner_raw.get("model", defaults.model)).strip(),
         # Kept as the file wrote it: `voice` reads it down to a language it

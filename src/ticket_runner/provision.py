@@ -1,8 +1,9 @@
 """Building the Notion side of the runner from one page link.
 
 Setting this up by hand means five databases, a score of properties, four relations
-and six status options spelled *exactly* as the configuration spells them. Get
-one character wrong and the runner finds nothing, for ever, without saying why.
+and a column of status options spelled *exactly* as the configuration spells
+them. Get one character wrong and the runner finds nothing, for ever, without
+saying why.
 So the machine does it: you share one page with the integration, and everything
 under it is created here.
 
@@ -174,6 +175,11 @@ def tickets_schema(settings: Notion, projects: str = "", agents: str = "") -> di
         settings.prop("cost"): {"number": {"format": "dollar"}},
         settings.prop("duration"): {"number": {"format": "number"}},
         settings.prop("due"): {"date": {}},
+        # The one thing the credit does to a ticket, and a checkbox is all it
+        # takes: a property *can* be added to a board built before it existed,
+        # where an option on a real `status` cannot. So the whole wait lands on
+        # an old board by running `init` again, rather than by being typed in.
+        settings.prop("waiting"): {"checkbox": {}},
     }
     # Single-property relations: the ticket points at its project, and the
     # projects database is not given a back-reference it would never read.

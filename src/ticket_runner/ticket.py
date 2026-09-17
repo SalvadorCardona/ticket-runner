@@ -55,6 +55,10 @@ class Job:
     comments: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     resumed: bool = False
+    # Whether `session_id` names a conversation Claude Code already has, to be
+    # carried on rather than opened. Only ever true for a ticket that came back
+    # ticked as waiting for credit — see `prepare`.
+    resume: bool = False
     # The folded block this job's session wrote its steps into, once it has one.
     # Kept on the job because what goes in it is decided after the session ends:
     # a run that failed files its trace there rather than in the report.

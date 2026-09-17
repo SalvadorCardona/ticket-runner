@@ -350,10 +350,27 @@ def command_status(args: argparse.Namespace) -> int:
         ok("no run in progress")
 
     # A runner that is on, has tickets and does nothing looks broken. It is not:
-    # the subscription's window is spent, and the wait is the point.
+    # the subscription's window is spent — or down to the share you asked to
+    # keep — and the wait is the point. Both are said, because they stop
+    # different things: the first stops everything, the second only what would
+    # start a session.
     until = credits.held()
     if until:
         warn(f"out of credit — nothing is run until {credits.when(until)}")
+    reserved = credits.held(what="reserve")
+    reading = credits.used()
+    if reserved:
+        warn(
+            f"{configuration.runner.credit_reserve_percent}% of the subscription is "
+            f"held in reserve — nothing new is started until {credits.when(reserved)}"
+        )
+    elif reading is None:
+        warn("how much of the subscription is spent could not be read — the reserve is idle")
+    else:
+        ok(
+            f"{reading[0]:.0f}% of the subscription spent, "
+            f"{configuration.runner.credit_reserve_percent}% held in reserve"
+        )
 
     title("Board")
     try:
@@ -745,6 +762,7 @@ def command_doctor(args: argparse.Namespace) -> int:
         ("duration", "number", "how long it took, in minutes"),
         ("progress", "rich_text", "what the session is doing, while it does it"),
         ("due", "date", "hold the ticket until that date, then run — or publish — it"),
+        ("waiting", "checkbox", "ticked while the credit is out; it comes back on its own"),
         ("role", "relation", "which agent handles the ticket; its page is the role"),
     )
     for key, preferred, why in optional:

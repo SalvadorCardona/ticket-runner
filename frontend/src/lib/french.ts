@@ -324,6 +324,9 @@ export const FRENCH: Record<string, string> = {
   "Wait when the credits run out": "Attendre quand les crédits sont épuisés",
   "A subscription is metered in windows. When one is spent, the ticket goes back where it came from and nothing is run until the window rolls over — off, an exhausted quota fails every ticket it touches.":
     "Un abonnement se compte par fenêtres. Quand l'une est consommée, le ticket retourne d'où il vient et plus rien ne tourne jusqu'à la fenêtre suivante — désactivé, un quota épuisé fait échouer chaque ticket qu'il touche.",
+  "Keep for yourself (%)": "Garder pour vous (%)",
+  "The share of each window the runner refuses to touch. At 5 it starts nothing past 95 % of the session or the week — what is already running finishes, and the tickets it did not start stay where they are, ticked as waiting for credit. 0 spends the lot.":
+    "La part de chaque fenêtre à laquelle le runner ne touche pas. À 5, il ne lance plus rien au-delà de 95 % de la session ou de la semaine — ce qui tourne déjà va au bout, et les tickets qu'il n'a pas démarrés restent où ils sont, cochés en attente de crédit. 0 consomme tout.",
   "Empty: whatever Claude Code is set to. A ticket's own Model column wins over this one.":
     "Vide : ce que Claude Code utilise. La colonne Model d'un ticket l'emporte sur celui-ci.",
   "Answer in": "Répondre en",
@@ -510,6 +513,9 @@ export const FRENCH: Record<string, string> = {
   due: "échéance",
   "a date here holds the ticket until that moment":
     "une date ici retient le ticket jusqu'à ce moment",
+  waiting: "en attente",
+  "ticked while the credit is out — it comes back on its own":
+    "cochée tant que le crédit est épuisé — il repart tout seul",
   role: "rôle",
   "relation to the agents database": "relation vers la base des agents",
   cadence: "cadence",

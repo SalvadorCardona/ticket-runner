@@ -283,7 +283,14 @@ class Api:
         # A timer that is on and a board that does not move is the one state
         # somebody would open a terminal for. `credits` is 0 the rest of the
         # time, which is how the header knows to say nothing.
-        waiting = credits.held() if configuration.runner.wait_for_credits else 0.0
+        # The reserve counts as being out of credit here, and deliberately so:
+        # to whoever is looking at the header, "nothing is being started and
+        # here is when that changes" is one state, not two.
+        waiting = (
+            credits.held() or credits.held(what="reserve")
+            if configuration.runner.wait_for_credits
+            else 0.0
+        )
         return {
             "timer": systemd.read().label,
             "running": bool(held),

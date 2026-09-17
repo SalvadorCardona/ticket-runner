@@ -95,6 +95,12 @@ class Preparation(Base):
             else agents.Agent()
         )
 
+        # A ticket ticked as waiting for credit already has a session, stopped
+        # mid-sentence by a spent window rather than finished. Carrying it on
+        # costs a message where starting over costs the whole ticket again
+        # — and the session is what remembers the half of the work that is not
+        # in a commit yet. Anything else gets a fresh identifier, as ever.
+        carried = self._carried_session(ticket)
         job = Job(
             ticket,
             project,
@@ -102,7 +108,8 @@ class Preparation(Base):
             base,
             workdir,
             body,
-            session_id=session.new_id(),
+            session_id=carried or session.new_id(),
+            resume=bool(carried),
             log=state.log_file(short),
             model=str(notion.read(ticket.page, self.config.notion.prop("model")) or ""),
             agent=agent,
@@ -130,6 +137,9 @@ class Preparation(Base):
                 **{
                     self.config.notion.prop("status"): self.config.notion.state("running"),
                     self.config.notion.prop("agent"): self.agent_label,
+                    # The wait is over for this one: see the same line in
+                    # `_publish`. Read before this write, by `_carried_session`.
+                    self.config.notion.prop("waiting"): False,
                     self.config.notion.prop("session"): self._session_value(
                         job.session_id, project.path
                     ),
