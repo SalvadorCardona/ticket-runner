@@ -25,10 +25,8 @@ import re
 import shutil
 import socket
 import threading
-import unicodedata
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import agents, channels, conversation, credits, git, naming, notion, notify
@@ -43,71 +41,7 @@ from .projects import Project, Resolver
 # because a date on a ticket and a date on a schedule mean the same thing, and
 # two readings of them that drift apart is a bug nobody would ever find.
 from .schedules import scheduled_for
-
-
-@dataclass
-class Ticket:
-    page: notion.Page
-
-    @property
-    def id(self) -> str:
-        return self.page.id.replace("-", "")
-
-    @property
-    def title(self) -> str:
-        return self.page.title or "(untitled ticket)"
-
-    @property
-    def url(self) -> str:
-        return self.page.url
-
-
-@dataclass
-class Job:
-    ticket: Ticket
-    project: Project
-    branch: str
-    base: str
-    workdir: Path
-    body: str = ""
-    session_id: str = ""
-    log: Path | None = None
-    session_home: Path | None = None
-    model: str = ""
-    agent: agents.Agent = field(default_factory=agents.Agent)
-    comments: list[str] = field(default_factory=list)
-    notes: list[str] = field(default_factory=list)
-    resumed: bool = False
-    # The folded block this job's session wrote its steps into, once it has one.
-    # Kept on the job because what goes in it is decided after the session ends:
-    # a run that failed files its trace there rather than in the report.
-    live: progress.Live | None = None
-
-
-def short_id(page_id: str) -> str:
-    """Eight characters that actually tell two tickets apart.
-
-    Notion page IDs are time-ordered: two tickets created the same day share a
-    long *prefix*. Taking the first eight gave both of the first two tickets
-    written for this tool the same short id — which would have had them fight
-    over one scratch directory. The tail is where the entropy is.
-    """
-    return page_id.replace("-", "")[-8:]
-
-
-def is_blank(body: str) -> bool:
-    """A ticket body that says nothing, template headings included.
-
-    A database template fills a new page with empty headings. They are not
-    blank text, so they would travel into the prompt as noise and — worse —
-    stop the "everything is in the title" fallback from firing on a ticket
-    whose whole content is its title.
-    """
-    for line in body.splitlines():
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#") and set(stripped) != {"-"}:
-            return False
-    return True
+from .ticket import Job, Ticket, is_blank, short_id, slugify
 
 
 # How much of a ticket's own history is worth carrying into the prompt.
@@ -142,12 +76,6 @@ def _pull_request(said: voice_module.Voice, url: str) -> str:
     """
     found = re.search(r"/pull/(\d+)", str(url or ""))
     return said.say("pull-request", number=found.group(1)) if found else ""
-
-
-def slugify(text: str, limit: int = 40) -> str:
-    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
-    text = re.sub(r"[^a-zA-Z0-9]+", "-", text).strip("-").lower()
-    return (text[:limit].rstrip("-")) or "ticket"
 
 
 class Runner:

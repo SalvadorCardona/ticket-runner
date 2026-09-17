@@ -40,6 +40,7 @@ from ticket_runner import schedules, session, state, systemd  # noqa: E402
 from ticket_runner.channels import slack as slack_channel, telegram as telegram_channel  # noqa: E402
 from ticket_runner import update, voice, workspace  # noqa: E402
 from ticket_runner import runner as runner_module  # noqa: E402
+from ticket_runner import ticket as ticket_module  # noqa: E402
 from ticket_runner.runner import Runner  # noqa: E402
 from ticket_runner import __version__  # noqa: E402
 from ticket_runner.__main__ import _names, banner, subcommands, welcome  # noqa: E402
@@ -49,7 +50,7 @@ from ticket_runner.web import api as web_api  # noqa: E402
 from ticket_runner.web import console as web_console  # noqa: E402
 from ticket_runner.web import settings as web_settings  # noqa: E402
 from ticket_runner.web import live as web_live  # noqa: E402
-from ticket_runner.runner import short_id, slugify  # noqa: E402
+from ticket_runner.ticket import short_id, slugify  # noqa: E402
 from ticket_runner.projects import _normalise  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
@@ -2601,8 +2602,8 @@ def a_ticket_the_credits_ran_out_on_goes_back_to_ready_rather_than_failing():
     """
     page = _reviewed("p-doc", "In progress", None)
     runner = _out_of_credit(page)
-    job = runner_module.Job(
-        runner_module.Ticket(page),
+    job = ticket_module.Job(
+        ticket_module.Ticket(page),
         projects.Project(name="", path=None),
         branch="",
         base="",
@@ -2633,8 +2634,8 @@ def _that_failed(page: notion.Page, *, folded: bool) -> tuple[Runner, list[str],
 
     runner._run_session = stopped
     filed: list[str] = []
-    job = runner_module.Job(
-        runner_module.Ticket(page),
+    job = ticket_module.Job(
+        ticket_module.Ticket(page),
         projects.Project(name="", path=None),
         branch="",
         base="",
@@ -2687,7 +2688,7 @@ def a_publication_the_credits_ran_out_on_goes_back_to_validated():
         page = _reviewed("p-post", "Validated", None)
         runner = _out_of_credit(page)
         result = runner._publish(
-            runner_module.Ticket(page), projects.Project(name="", path=None)
+            ticket_module.Ticket(page), projects.Project(name="", path=None)
         )
     assert runner.client.written[0][1]["Status"] == "In progress", "claimed first"
     assert runner.client.written[-1] == ("p-post", {"Status": "Validated"})
@@ -2724,8 +2725,8 @@ def a_runner_told_not_to_wait_fails_on_the_quota_as_it_always_did():
         credits.hold(time.time() + 300)
         assert runner.waiting_for_credits() == 0.0, "a note nobody reads"
 
-        job = runner_module.Job(
-            runner_module.Ticket(page),
+        job = ticket_module.Job(
+            ticket_module.Ticket(page),
             projects.Project(name="", path=None),
             branch="",
             base="",
@@ -2747,7 +2748,7 @@ def a_template_only_body_counts_as_blank():
     They are not blank text, so without this they would travel into the prompt
     as noise and stop the "everything is in the title" fallback from firing.
     """
-    from ticket_runner.runner import is_blank
+    from ticket_runner.ticket import is_blank
 
     assert is_blank("## Ce qu'il faut faire\n## Où\n## Comment on saura\n")
     assert is_blank("")
@@ -3307,7 +3308,7 @@ def a_place_freed_mid_pass_is_filled_without_waiting_for_the_long_session():
         runner.config.runner.max_concurrent = 2
 
         def prepare(ticket):
-            return runner_module.Job(
+            return ticket_module.Job(
                 ticket,
                 projects.Project(name="", path=None),
                 branch="",
@@ -3372,7 +3373,7 @@ def a_place_that_was_never_filled_is_looked_at_before_a_session_ends():
         runner.config.runner.max_concurrent = 2
         # The cadence the pass looks at the board on, made a test's length.
         runner.config.runner.interval_seconds = 1
-        runner.prepare = lambda ticket: runner_module.Job(
+        runner.prepare = lambda ticket: ticket_module.Job(
             ticket,
             projects.Project(name="", path=None),
             branch="",
@@ -3407,7 +3408,7 @@ def a_limit_caps_the_tickets_a_pass_takes_rather_than_the_column():
     with _state_home():
         runner = _board_runner([_ready("p-1"), _ready("p-2"), _ready("p-3")], {})
         runner.config.runner.max_concurrent = 4
-        runner.prepare = lambda ticket: runner_module.Job(
+        runner.prepare = lambda ticket: ticket_module.Job(
             ticket,
             projects.Project(name="", path=None),
             branch="",
@@ -3429,7 +3430,7 @@ def a_pass_stops_filling_places_once_the_credits_run_out():
     with _state_home():
         runner = _board_runner([_ready("p-1"), _ready("p-2"), _ready("p-3")], {})
         runner.config.runner.max_concurrent = 1
-        runner.prepare = lambda ticket: runner_module.Job(
+        runner.prepare = lambda ticket: ticket_module.Job(
             ticket,
             projects.Project(name="", path=None),
             branch="",
@@ -3504,7 +3505,7 @@ def _nameless(title: str, body: str, refuse: bool = False):
     runner.client = _NamelessClient(body, refuse)
     runner.config.runner.base_branch = "main"  # so git is never asked anything
     runner.resolver = _OneRepository()
-    return runner, runner_module.Ticket(page)
+    return runner, ticket_module.Ticket(page)
 
 
 @contextmanager

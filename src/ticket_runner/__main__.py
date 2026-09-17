@@ -24,7 +24,8 @@ from . import session, state, systemd
 from . import update as update_module
 from . import workspace as workspace_module
 from .projects import Resolver
-from .runner import Runner, short_id
+from .runner import Runner
+from .ticket import short_id
 
 BOLD, DIM, GREEN, RED, YELLOW, RESET = "", "", "", "", "", ""
 if sys.stdout.isatty():
