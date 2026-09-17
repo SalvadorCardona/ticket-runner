@@ -22,20 +22,17 @@ when the ready column is empty and nothing is left in flight — see `_work`.
 from __future__ import annotations
 
 import shutil
-import socket
-import threading
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from pathlib import Path
 
-from . import agents, channels, conversation, credits, git, naming, notion, notify
-from . import openrouter, progress
+from . import agents, base, channels, conversation, credits, git, naming, notion, notify
+from . import progress
 from . import prompt as prompt_module, schedules as schedules_module, session, state
 from . import update as update_module
 from . import voice as voice_module
-from . import workspace as workspace_module
-from .config import PRIORITIES, Config, state_dir
-from .projects import Project, Resolver
+from .config import PRIORITIES, state_dir
+from .projects import Project
 # The one reading of a Notion date in the project. It lives beside the calendar
 # because a date on a ticket and a date on a schedule mean the same thing, and
 # two readings of them that drift apart is a bug nobody would ever find.
@@ -48,91 +45,8 @@ COMMENT_LIMIT = 10
 COMMENT_CHARS = 2000
 
 
-class Runner:
-    def __init__(
-        self,
-        config: Config,
-        *,
-        dry_run: bool = False,
-        quiet: bool = False,
-        announce_idle: bool = True,
-    ) -> None:
-        self.config = config
-        self.dry_run = dry_run or config.runner.dry_run
-        self.quiet = quiet
-        # At a ten-second cadence, saying "nothing to do" writes six lines a
-        # minute into the systemd journal forever, and buries the runs that
-        # matter. A terminal wants the reassurance; a log does not.
-        self.announce_idle = announce_idle
-        self.client = notion.Client(config.notion.token)
-        self.resolver = Resolver(config.runner.workspace_root, config.projects)
-        self.agent_label = f"ticket-runner@{socket.gethostname()}"
-        self._workspace: workspace_module.Workspace | None = None
-        # The comments of a page, read once per run. Three things want them —
-        # what wakes a ticket, what goes into its prompt, and what is waiting
-        # for an answer — and asking Notion three times for the same thread is
-        # how a board with forty tickets becomes a rate limit problem.
-        self._comments: dict[str, list[notion.Comment]] = {}
-        self._ledger: conversation.Ledger | None = None
-        self._ledger_lock = threading.Lock()
-        self._spellings: tuple[str, ...] | None = None
-        self._me: str | None = None
-        self._identity_error = ""
-        # The tickets this run is about to handle. A comment on one of them is
-        # already going into its prompt: answering it as well would be the
-        # runner talking over itself.
-        self._claimed: set[str] = set()
-        # What the last `deliver` left for later, so a pass can say so.
-        self._deferred: list[tuple[Ticket, datetime]] = []
-
-    @property
-    def workspace(self) -> workspace_module.Workspace:
-        """The databases and the standing context, resolved once per run.
-
-        Once, because a run can hold several tickets and they all read the same
-        thing — and because the context page would otherwise be fetched again
-        for every ticket, to be told the same story.
-        """
-        if self._workspace is None:
-            self._workspace = workspace_module.resolve(self.client, self.config.notion)
-        return self._workspace
-
-    @property
-    def database(self) -> str:
-        """The tickets database ID, resolved once for the whole session."""
-        return self.workspace.tickets
-
-    @property
-    def voice(self) -> voice_module.Voice:
-        """Everything the runner says on a ticket, in the configured language.
-
-        Read off the configuration each time rather than kept, so that a file
-        edited in the console — where `runner.language` is one field of a form —
-        is heard on the next run without the service being restarted.
-        """
-        return voice_module.Voice(self.config.runner.language)
-
-    @property
-    def environment(self) -> dict[str, str]:
-        """What every session this run starts is given, beyond what it inherits.
-
-        The OpenRouter key when there is one, and nothing at all when there is
-        not. Read off the configuration each time, for the same reason as
-        `voice`: a key typed into the console is a key the next run uses.
-        """
-        return openrouter.environment(self.config.openrouter)
-
+class Runner(base.Base):
     # -- output --------------------------------------------------------------
-
-    def say(self, message: str) -> None:
-        if not self.quiet:
-            print(message, flush=True)
-
-    def _notify(
-        self, title: str, body: str, *, urgent: bool = False, link: str = ""
-    ) -> None:
-        if self.config.notify.desktop and not self.dry_run:
-            notify.send(title, body, urgent=urgent, link=link)
 
     def _tell(
         self,
