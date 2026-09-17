@@ -1,0 +1,62 @@
+# Ce qui protège une pull request avant qu'elle ne devienne un commit sur
+# `main` — le runner ouvre lui-même ses PR, et les installations suivent
+# `main` commit par commit sans jamais attendre un tag.
+#
+# Le job cœur tourne toujours : la suite n'a pas de dépendance, elle n'a pas
+# de raison d'être sautée. Le job frontend ne tourne que si `frontend/**` a
+# changé, pour ne pas payer npm sur des tickets qui n'y touchent pas.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: La suite du cœur
+        run: python3 tests/run.py
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            frontend:
+              - 'frontend/**'
+
+      - uses: actions/setup-node@v4
+        if: steps.changes.outputs.frontend == 'true'
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Installation
+        if: steps.changes.outputs.frontend == 'true'
+        run: npm ci
+        working-directory: frontend
+
+      - name: Lint
+        if: steps.changes.outputs.frontend == 'true'
+        run: npm run lint
+        working-directory: frontend
+
+      - name: Build
+        if: steps.changes.outputs.frontend == 'true'
+        run: npm run build
+        working-directory: frontend
