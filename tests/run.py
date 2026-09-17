@@ -39,7 +39,6 @@ from ticket_runner import notify, openrouter, progress, projects, prompt, provis
 from ticket_runner import schedules, session, state, systemd  # noqa: E402
 from ticket_runner.channels import slack as slack_channel, telegram as telegram_channel  # noqa: E402
 from ticket_runner import update, voice, workspace  # noqa: E402
-from ticket_runner import runner as runner_module  # noqa: E402
 from ticket_runner import ticket as ticket_module  # noqa: E402
 from ticket_runner.runner import Runner  # noqa: E402
 from ticket_runner import __version__  # noqa: E402
@@ -3250,13 +3249,13 @@ def publishing_hands_the_page_as_it_stands_to_a_session_and_then_closes_it():
             seconds=90.0, turns=4,
         )
 
-    original = runner_module.session.run
-    runner_module.session.run = fake_run
+    original = session.run
+    session.run = fake_run
     try:
         with _state_home():
             results = runner.deliver()
     finally:
-        runner_module.session.run = original
+        session.run = original
 
     # Claimed first, exactly as a run claims a ticket, and only then closed:
     # a second machine watching the board must not post the same thing twice.
@@ -3526,12 +3525,12 @@ def _naming_session(answer: str, missing: bool = False):
             answer=answer,
         )
 
-    original = runner_module.session.run
-    runner_module.session.run = fake_run
+    original = session.run
+    session.run = fake_run
     try:
         yield asked
     finally:
-        runner_module.session.run = original
+        session.run = original
 
 
 @case
