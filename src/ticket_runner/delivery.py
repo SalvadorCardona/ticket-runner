@@ -16,6 +16,11 @@ taking ten tickets a day does to a pull request opened this morning. A
 publication is a Claude session, so publications run the way tickets run — side
 by side, never more than `max_concurrent` at once — and are claimed before they
 are done, because publishing twice is the one mistake this must not make.
+
+And the column is read more than once. `deliver` settles it at the top of a
+pass; `delivering` is the same reading, offered to a pass that is already
+running, so that a ticket validated at 14:20 is merged at 14:20 rather than
+when the two-hour session that began at 14:04 finally ends — see `_work`.
 """
 
 from __future__ import annotations
@@ -70,14 +75,52 @@ class Delivery(Base):
         finish before the queue is looked at — a ticket you have accepted comes
         before a ticket nobody has read yet — but a board with four of them
         costs one session's wait rather than four.
+
+        This is the reading a pass does at its top, on a board nothing is
+        running against yet. The same column is read again while the pass runs,
+        by `delivering`, which is where the sorting actually lives.
+        """
+        results, publishing = self.delivering()
+        return results + self._publish_all(publishing)
+
+    def delivering(
+        self, taken: set[str] | None = None
+    ) -> tuple[list[dict], list[tuple[Ticket, Project]]]:
+        """Sort the validated column: what is settled here, what needs a session.
+
+        Two kinds of work sit in that column, and only one of them costs a
+        place. A merge is two `gh` calls, so it happens here and now, in the
+        thread that asked — which is what lets a pass with every place taken
+        still merge a pull request you validated while it ran. A publication is
+        a Claude session, so it is only *named* here: the caller runs it, in the
+        pool it already keeps, and `deliver` is the caller that runs them all at
+        once at the top of a pass.
+
+        `taken` is what this pass has already carried out. Notion may still be
+        serving the status a publication in flight has just overwritten, and
+        publishing twice is the one mistake this must not make — so a ticket the
+        caller has already taken off the column is skipped rather than trusted
+        to have moved.
+
+        A board that will not answer leaves the column where it is: the next
+        look asks again, and neither a pass in flight nor the sessions in it
+        have any business failing over a reading of a column they are not in.
         """
         settings = self.config.notion
+        taken = taken or set()
         results: list[dict] = []
         publishing: list[tuple[Ticket, Project]] = []
         held: list[tuple[Ticket, datetime]] = []
         now = datetime.now().astimezone()
-        for page in self.validated():
+        try:
+            pages = self.validated()
+        except notion.NotionError as error:
+            self.say(f"  ! the validated column could not be read: {voice_module.line(error)}")
+            return [], []
+        for page in pages:
             ticket = Ticket(page)
+            if ticket.id in taken:
+                continue
             url = str(notion.read(page, settings.prop("pull_request")) or "")
             moment = self._moment(ticket)
             if moment and moment > now:
@@ -132,7 +175,7 @@ class Delivery(Base):
                 continue
             publishing.append((ticket, project))
         self._deferred = sorted(held, key=lambda pair: pair[1])
-        return results + self._publish_all(publishing)
+        return results, publishing
 
     def validated(self) -> list[notion.Page]:
         """The pages sitting in the validated column.
@@ -267,9 +310,9 @@ class Delivery(Base):
         A batch, unlike the ticket queue in `_work`, and deliberately so: the
         whole list is handed to `pool.map`, which starts the next publication as
         soon as a worker frees, so no place is ever left idle. What it does not
-        do is look at the board again mid-list — and it has no reason to, since
-        a validated ticket is work you accepted before the pass began, and the
-        one you accept during it is published by the pass after.
+        do is look at the board again mid-list — and it has no reason to: this
+        is the top of a pass, and a ticket validated a minute later is picked up
+        by `_work`, which looks at that column for as long as the pass lasts.
         """
         if not publishing:
             return []

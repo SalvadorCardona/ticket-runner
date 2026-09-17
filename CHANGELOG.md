@@ -238,9 +238,25 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
   same cadence the timer reads it on, so a board watched every ten seconds
   starts a second ticket within ten seconds of it being made ready, and one
   watched every half hour behaves exactly as if the runner had been idle.
-  Nothing else moved — a full pool still waits for a completion and costs not
-  one extra request, `--limit` still caps the pass and not the width, and a
-  spent subscription still stops the pass from starting anything at all.
+  Nothing else moved — a full pool still asks the ready column for nothing and
+  costs it not one extra request, `--limit` still caps the pass and not the
+  width, and a spent subscription still stops the pass from starting anything at
+  all.
+- **A ticket you validate is carried out at once, and not when the sessions in
+  flight are over.** The *Validated* column was settled at the top of a pass and
+  never looked at again, so everything accepted while the pass ran waited for
+  it: a pull request validated at 14:20 was merged when the two-hour session
+  started at 14:04 ended — and on a board where something is nearly always in
+  progress, that is a column of finished work standing still behind work that
+  has nothing to do with it. A pass now reads that column for as long as it
+  lasts, every `interval_seconds`, **whether or not a place is free**: a merge
+  costs no place at all — two `gh` calls in the pass's own thread — so it
+  happens at 14:20 even with every session running, and a publication, which is
+  a session, takes the next place that frees, ahead of the ready column. What is
+  in progress goes on being in progress: nothing is interrupted, no session is
+  started beyond `max_concurrent`, and a validated ticket taken by the pass is
+  held out of the next reading so that nothing is ever published twice.
+  `--limit` counts tickets off the ready column and has never counted these.
 - The web console has been redrawn. Every page opens the same way — where you
   are, said as a path; a heading you can read from across the room; and the one
   line that says what the page is for — and the accent is a lime, so the button

@@ -3851,6 +3851,112 @@ def a_pass_stops_filling_places_once_the_credits_run_out():
     assert len(results) == 1
 
 
+# -- a validated ticket never waits for a session ----------------------------
+
+
+def _long_runner(pages: list[notion.Page]) -> Runner:
+    """A runner whose tickets are prepared for free and run for as long as asked."""
+    runner = _board_runner(pages, {})
+    # The cadence the pass looks at the board on, made a test's length.
+    runner.config.runner.interval_seconds = 1
+    runner.prepare = lambda ticket: ticket_module.Job(
+        ticket,
+        projects.Project(name="", path=None),
+        branch="",
+        base="",
+        workdir=Path(tempfile.mkdtemp()) / "doc",
+    )
+    return runner
+
+
+@case
+def a_pull_request_validated_mid_pass_is_merged_without_waiting_for_the_session():
+    """The fault on a real board: a column full of work you have accepted, and
+    a two-hour session it has nothing to do with standing in front of it.
+
+    Here the single place is taken for as long as the merge has not happened, so
+    the only way out of the test is the pass looking at the validated column
+    while its pool is full. The merge itself costs no place: two `gh` calls in
+    the pass's own thread.
+    """
+    merges: list[str] = []
+    merged = threading.Event()
+
+    with _state_home():
+        runner = _long_runner([_ready("p-long")])
+        runner.config.runner.max_concurrent = 1  # every place taken, throughout
+
+        def execute(job):
+            # Validated by you while the session runs, as it happens on a board.
+            runner.client._pages.append(
+                _reviewed("p-validated", "Validated", "https://github.com/x/y/pull/1")
+            )
+            merged.wait(10)
+            # Two more looks at the column, which still answers "Validated":
+            # the fake board only remembers what was written, it does not move.
+            time.sleep(2.2)
+            return {"id": job.ticket.page.id, "status": "done"}
+
+        def merge(url: str, method: str = "squash", accounts=None) -> str:
+            merges.append(url)
+            merged.set()
+            return "merged"
+
+        runner.execute = execute
+        with _github({"https://github.com/x/y/pull/1": "OPEN"}, merge=merge):
+            results = runner._work(runner.queue()[0], None, refill=True)
+
+    assert merged.is_set(), "merged while the session was still running"
+    assert merges == ["https://github.com/x/y/pull/1"], "and merged once, not at every look"
+    assert sorted(result["id"] for result in results) == ["p-long", "pvalidated"]
+    assert ("p-validated", {"Status": "Done"}) in runner.client.written
+
+
+@case
+def a_publication_validated_mid_pass_takes_the_next_free_place():
+    """A publication is a session, so it waits for a place — that one, not the
+    end of the pass. And it takes it before a ticket nobody has read yet."""
+    published: list[str] = []
+    out = threading.Event()
+
+    with _state_home():
+        runner = _long_runner([_ready("p-long")])
+        runner.config.runner.max_concurrent = 2  # one place taken, one free
+        runner._project_of = lambda ticket: projects.Project(name="Blog", path=None)
+
+        def publish(ticket, project):
+            published.append(ticket.id)
+            out.set()
+            return {"ticket": ticket.title, "id": ticket.id, "status": "done"}
+
+        def execute(job):
+            runner.client._pages.append(_reviewed("p-post", "Validated", None))
+            out.wait(10)
+            return {"id": job.ticket.page.id, "status": "done"}
+
+        runner._publish, runner.execute = publish, execute
+        results = runner._work(runner.queue()[0], None, refill=True)
+
+    assert published == ["ppost"], "published while the long session ran"
+    assert sorted(result["id"] for result in results) == ["p-long", "ppost"]
+
+
+@case
+def a_pass_that_refills_nothing_leaves_the_validated_column_alone():
+    """A named ticket and a dry run take nothing off the board — that column
+    included, which `tick` has already read for them."""
+    with _state_home():
+        runner = _long_runner([_ready("p-one")])
+        runner.client._pages.append(_reviewed("p-post", "Validated", None))
+        runner._publish = lambda ticket, project: (_ for _ in ()).throw(
+            AssertionError("published by a pass that refills nothing")
+        )
+        runner.execute = lambda job: {"id": job.ticket.page.id, "status": "done"}
+        results = runner._work(runner.queue()[0], None, refill=False)
+
+    assert [result["id"] for result in results] == ["p-one"]
+
+
 # -- naming a ticket nobody titled -------------------------------------------
 
 
