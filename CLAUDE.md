@@ -31,7 +31,8 @@ Deux mondes séparés, à ne pas mélanger :
 Cœur Python — pas de build, pas de lint séparé, ne pas en inventer :
 
 ```sh
-python3 tests/run.py
+python3 tests/run.py         # la partie pure : ne touche ni Notion, ni git, ni le réseau
+python3 tests/functional.py  # le parcours complet, sur des doublures locales
 ```
 
 Frontend, depuis `frontend/` :
@@ -46,10 +47,11 @@ npm run dev     # serveur de dev avec hot reload, proxy /api vers un console dé
 ## CI
 
 `.github/workflows/ci.yml` tourne sur chaque pull request et sur chaque push
-vers `main` : le job cœur relance `python3 tests/run.py`, sans installer quoi
-que ce soit ; le job frontend ne se déclenche que si `frontend/**` a changé, et
-y fait `npm ci`, `npm run lint`, `npm run build`. `release.yml` reste séparé et
-ne se déclenche que sur un tag.
+vers `main` : le job cœur relance `python3 tests/run.py` puis
+`python3 tests/functional.py`, sans installer quoi que ce soit ; le job frontend
+ne se déclenche que si `frontend/**` a changé, et y fait `npm ci`,
+`npm run lint`, `npm run build`. `release.yml` reste séparé et ne se déclenche
+que sur un tag.
 
 ## Arborescence utile
 
@@ -62,6 +64,10 @@ ne se déclenche que sur un tag.
 - `bin/ticket-runner.in` — gabarit du script installé par `install.sh`
   (`@APP_DIR@` et `@PYTHON@` y sont substitués).
 - `tests/run.py` — toute la suite de tests du cœur, sans framework.
+- `tests/functional.py` — les tests du parcours complet, avec leurs doublures :
+  un faux Notion en local (`http.server`), un dépôt git et son remote bare, un
+  `claude` et un `gh` en tête du `PATH`. Le seul point d'injection côté cœur est
+  `TICKET_RUNNER_NOTION_API` (voir `notion.endpoint`).
 - `systemd/` — gabarits des unités (`.service.in`, `.timer.in`) posées par
   `install.sh` pour le timer et la console.
 - `desktop/` — gabarit du handler `ticket-runner://` enregistré sur le bureau.

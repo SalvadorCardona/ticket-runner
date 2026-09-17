@@ -1703,16 +1703,32 @@ ssh tunnel above — never on `0.0.0.0` because it happened to be easier that ev
 
 ```sh
 python3 tests/run.py
+python3 tests/functional.py
 ```
 
 No framework and no dependency, for the same reason the runner has none: a suite that
-needs an install is a suite that stops being run. It covers the pure part — identifier
-collisions, status mapping, the markdown-to-Notion conversion, deep links, property
-encoding, which message answers which ticket, who a comment is addressed to — which is to
-say what has already gone wrong
-once, or would go wrong silently.
+needs an install is a suite that stops being run.
 
-`.github/workflows/ci.yml` runs this same suite on every pull request and on every push to
+The first covers the pure part — identifier collisions, status mapping, the
+markdown-to-Notion conversion, deep links, property encoding, which message answers which
+ticket, who a comment is addressed to — which is to say what has already gone wrong
+once, or would go wrong silently. It touches neither Notion, nor git, nor the network.
+
+The second covers the road itself, which is the half that breaks quietly: ready ticket →
+worktree → session → branch → pull request, and the status written back onto the ticket.
+Four scenarios — a code ticket that comes back as a pull request, a writing ticket
+answered in its own page without a single git command, a session that fails without
+leaving an orphan worktree, and a board with two projects where the ticket has to run in
+the repository its `Project` relation names. Nothing is mocked: a **Notion of its own**
+answers on a loopback port and keeps a state the assertions read back, a repository and a
+bare remote stand in for GitHub, and a `claude` and a `gh` at the head of `PATH` do what
+the real ones do minus the thinking and the network. Nothing leaves the machine, nothing
+is written outside a temporary directory — `XDG_STATE_HOME` moves with the test — and the
+four of them take a handful of seconds. The one thing the runner cannot guess is where
+Notion lives, so that is the one seam in the code: `TICKET_RUNNER_NOTION_API`, read at
+each request and unset in every installation.
+
+`.github/workflows/ci.yml` runs both suites on every pull request and on every push to
 `main` — the runner opens its own PRs, and none of them was checked before merge until
 this ran. A second job builds and lints `frontend/` the same way, but only when
 `frontend/**` changed. `.github/workflows/release.yml` is separate: it re-runs the suite
