@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import time
 import urllib.error
 import urllib.request
@@ -21,8 +22,19 @@ from dataclasses import dataclass, field
 from typing import Any
 
 API = "https://api.notion.com/v1"
+# The one seam in this file, and it exists for `tests/functional.py`: the
+# functional suite stands a Notion of its own on a local port and runs a whole
+# ticket against it. Read at each request rather than at import, so that the
+# tests can point the runner somewhere else once the modules are loaded — and
+# unset everywhere else, which is every installation.
+API_ENV = "TICKET_RUNNER_NOTION_API"
 VERSION = "2022-06-28"
 MAX_ATTEMPTS = 4
+
+
+def endpoint() -> str:
+    """Where the API lives: Notion's, unless `TICKET_RUNNER_NOTION_API` says."""
+    return os.environ.get(API_ENV, "").strip().rstrip("/") or API
 
 
 class NotionError(Exception):
@@ -68,7 +80,7 @@ class Client:
     def _request(self, method: str, path: str, body: dict | None = None) -> dict:
         data = json.dumps(body).encode() if body is not None else None
         request = urllib.request.Request(
-            f"{API}{path}",
+            f"{endpoint()}{path}",
             data=data,
             method=method,
             headers={

@@ -1870,6 +1870,30 @@ def a_deep_link_survives_a_round_trip():
 
 
 @case
+def the_api_is_notions_unless_a_test_says_otherwise():
+    """The one seam `tests/functional.py` needs, and what it must not become.
+
+    An installation talks to Notion and to nowhere else: the variable is unset,
+    and an empty one is as good as unset — otherwise a `TICKET_RUNNER_NOTION_API=`
+    left in a unit file would point a real runner at nothing at all.
+    """
+    previous = os.environ.get(notion.API_ENV)
+    try:
+        os.environ.pop(notion.API_ENV, None)
+        assert notion.endpoint() == notion.API
+        for blank in ("", "   "):
+            os.environ[notion.API_ENV] = blank
+            assert notion.endpoint() == notion.API, f"“{blank}” is not an endpoint"
+        os.environ[notion.API_ENV] = "http://127.0.0.1:8123/v1/"
+        assert notion.endpoint() == "http://127.0.0.1:8123/v1", "a trailing slash doubles one"
+    finally:
+        if previous is None:
+            os.environ.pop(notion.API_ENV, None)
+        else:
+            os.environ[notion.API_ENV] = previous
+
+
+@case
 def values_are_encoded_for_the_type_the_database_declares():
     assert notion._encode("status", "Done") == {"status": {"name": "Done"}}
     assert notion._encode("select", "Done") == {"select": {"name": "Done"}}

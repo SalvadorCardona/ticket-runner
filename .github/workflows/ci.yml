@@ -2,9 +2,11 @@
 # `main` — le runner ouvre lui-même ses PR, et les installations suivent
 # `main` commit par commit sans jamais attendre un tag.
 #
-# Le job cœur tourne toujours : la suite n'a pas de dépendance, elle n'a pas
-# de raison d'être sautée. Le job frontend ne tourne que si `frontend/**` a
-# changé, pour ne pas payer npm sur des tickets qui n'y touchent pas.
+# Le job cœur tourne toujours : les deux suites n'ont pas de dépendance, elles
+# n'ont pas de raison d'être sautées. `tests/functional.py` a besoin de `git`,
+# que le runner GitHub a déjà, et de rien d'autre : son Notion, son dépôt et son
+# `claude` sont à lui. Le job frontend ne tourne que si `frontend/**` a changé,
+# pour ne pas payer npm sur des tickets qui n'y touchent pas.
 
 name: CI
 
@@ -26,6 +28,9 @@ jobs:
 
       - name: La suite du cœur
         run: python3 tests/run.py
+
+      - name: Le parcours complet
+        run: python3 tests/functional.py
 
   frontend:
     runs-on: ubuntu-latest
