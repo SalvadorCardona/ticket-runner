@@ -43,6 +43,14 @@ npm run lint    # tsc -b --noEmit
 npm run dev     # serveur de dev avec hot reload, proxy /api vers un console déjà lancé
 ```
 
+## CI
+
+`.github/workflows/ci.yml` tourne sur chaque pull request et sur chaque push
+vers `main` : le job cœur relance `python3 tests/run.py`, sans installer quoi
+que ce soit ; le job frontend ne se déclenche que si `frontend/**` a changé, et
+y fait `npm ci`, `npm run lint`, `npm run build`. `release.yml` reste séparé et
+ne se déclenche que sur un tag.
+
 ## Arborescence utile
 
 - `src/ticket_runner/` — le cœur : `runner.py` (boucle principale), `config.py`,

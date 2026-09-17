@@ -1712,6 +1712,12 @@ encoding, which message answers which ticket, who a comment is addressed to — 
 say what has already gone wrong
 once, or would go wrong silently.
 
+`.github/workflows/ci.yml` runs this same suite on every pull request and on every push to
+`main` — the runner opens its own PRs, and none of them was checked before merge until
+this ran. A second job builds and lints `frontend/` the same way, but only when
+`frontend/**` changed. `.github/workflows/release.yml` is separate: it re-runs the suite
+once more, at the tagged commit, when a version is published.
+
 ---
 
 ## Releases and versions
