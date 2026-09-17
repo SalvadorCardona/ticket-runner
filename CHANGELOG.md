@@ -218,6 +218,14 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
   right of the screen, and up from the bottom on a phone, rather than landing in
   a dialog in the middle of it: a brief is written at full height with the board
   still there behind it, and the panel closes itself once the ticket is written.
+- `doctor` says how the console is opened. “We set up a sign-in and the page
+  still asks for a token” had no answer anywhere but in the configuration file:
+  the sign-in only exists once `web.email` *and* `web.password` are both set,
+  and the token never goes away in any case — it stays what a script and
+  `serve --print-token` carry. A *Console* section now names the address and
+  which of the two doors it opens on, and calls out half a sign-in — an email
+  without a password, which is not a way in — where the only sign of it used to
+  be a login page that never appeared.
 
 ### Added
 
