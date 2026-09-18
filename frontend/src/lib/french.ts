@@ -107,7 +107,6 @@ export const FRENCH: Record<string, string> = {
   // name are gone, and the words they were made of with them.
   "{{count}} turn(s)": "{{count}} tour(s)",
   "no conversation yet": "aucune conversation",
-  "{{version}} waiting": "{{version}} en attente",
 
   /* -- the bar ------------------------------------------------------------- */
   "timer on": "minuterie active",
