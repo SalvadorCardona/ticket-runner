@@ -245,6 +245,17 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
   "nobody decided": each session goes on answering in the language of the ticket
   it was given, exactly as before.
 
+### Fixed
+
+- **A branch is replayed on a machine that has no git identity of its own.** A
+  rebase writes commits, and git refuses to write one where it cannot tell who
+  is writing — a CI runner, a container, a server nobody ever configured. The
+  replay failed there on that, the failure read as the branch refusing to move,
+  and the ticket landed in Blocked saying the pull request would not merge:
+  true, and not the reason. The runner now lends git an identity where it finds
+  none, and leaves alone the machine that has one — the replay of your own
+  branch is still committed under your name.
+
 ### Changed
 
 - **The settings are a page per section, and a link you can send.** The Settings
