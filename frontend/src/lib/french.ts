@@ -335,19 +335,21 @@ export const FRENCH: Record<string, string> = {
   "No mapping here — the project pages carry it.":
     "Aucune correspondance ici — ce sont les pages de projet qui la portent.",
   "add a project": "ajouter un projet",
+  "Remove this project": "Retirer ce projet",
   Accounts: "Comptes",
   Owner: "Propriétaire",
   Account: "Compte",
   "As GitHub spells it in the URL of a repository, before the slash.":
     "Tel que GitHub l'écrit dans l'URL d'un dépôt, avant la barre oblique.",
-  "The account `gh auth status` lists, logged in once with `gh auth login`.":
-    "Le compte que `gh auth status` liste, connecté une fois avec `gh auth login`.",
+  "The account gh auth status names — logged in once with gh auth login.":
+    "Le compte que nomme gh auth status — connecté une fois avec gh auth login.",
   "A row with no owner names nobody.": "Une ligne sans propriétaire ne nomme personne.",
   "An owner mapped to nothing is a row to remove.":
     "Un propriétaire qui ne mène nulle part est une ligne à retirer.",
   "One GitHub here — everything goes out as whoever gh is signed in as.":
     "Un seul GitHub ici — tout part sous le compte auquel gh est connecté.",
   "add an account": "ajouter un compte",
+  "Remove this account": "Retirer ce compte",
   "one change, unsaved": "une modification non enregistrée",
   "{{count}} changes, unsaved": "{{count}} modifications non enregistrées",
   revert: "annuler",

@@ -67,6 +67,10 @@ interface Words {
   /** The button, and the dialog it opens. The console reads `create` as
    *  "New ticket", which is what the board means by it and not what this does. */
   add: string
+  /** Over the confirmation. Named rather than left to the package, which
+   *  builds `Delete — <list>` as it declares the view — a sentence half in
+   *  English wherever the console is read in French. */
+  remove: string
 }
 
 const PROJECTS: Words = {
@@ -88,6 +92,7 @@ const PROJECTS: Words = {
   },
   empty: "No mapping here — the project pages carry it.",
   add: "add a project",
+  remove: "Remove this project",
 }
 
 const GITHUB: Words = {
@@ -105,11 +110,13 @@ const GITHUB: Words = {
   value: {
     label: "Account",
     placeholder: "salva-at-acme",
-    description: "The account `gh auth status` lists, logged in once with `gh auth login`.",
+    // No code spans: a description is drawn as it is given, backticks and all.
+    description: "The account gh auth status names — logged in once with gh auth login.",
     missing: "An owner mapped to nothing is a row to remove.",
   },
   empty: "One GitHub here — everything goes out as whoever gh is signed in as.",
   add: "add an account",
+  remove: "Remove this account",
 }
 
 const item = (table: PairTable, row: Pair): PairItem => ({
@@ -245,6 +252,7 @@ function pairResource(table: PairTable, words: Words) {
         form: rowForm,
         behavior: { openIn: "popup" },
       },
+      [ActionList.delete]: { name: words.remove },
     },
   })
 }
