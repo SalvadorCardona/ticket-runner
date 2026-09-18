@@ -247,6 +247,32 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Fixed
 
+- **A link to a pane opened with the console's token lands on that pane.** The
+  token is moved out of the address and into a cookie as soon as it arrives, so
+  it does not sit in the history and in every screenshot — but everything beside
+  it went with it, and `/?token=…&view=console/projects/list` opened on the
+  board. What was carried is now carried back, the token excepted: a link to the
+  projects, to a ticket, to one section of the settings is a link you can send
+  to yourself with the token on it.
+
+- **The projects come back in the layout you left them in.** The two layouts of
+  the Projects screen — cards and table — moved on screen and nowhere else: a
+  reload, or the way back from a project, put you on the cards whichever one you
+  had picked. The layout is in the address now, and the links back to the list
+  carry it.
+
+- **The brief of a project stops asking for a message.** The empty box under
+  *The brief* offered “Votre message…”, which is what a chat box says and not
+  what the field is: a page of standing instructions every ticket of that
+  project is told before it is told the ticket. The repository and the path on
+  this machine are cut to the width of a card rather than shown whole, and are
+  now readable in full by resting on them.
+
+- **A project on a Markdown board no longer offers a link to Notion.** Its page
+  is a file on this disk, and the page's outward link pointed at it with
+  `file://` — an address a browser declines to follow from a console served over
+  HTTP, without saying so. The link is offered where it leads somewhere.
+
 - **A branch is replayed on a machine that has no git identity of its own.** A
   rebase writes commits, and git refuses to write one where it cannot tell who
   is writing — a CI runner, a container, a server nobody ever configured. The

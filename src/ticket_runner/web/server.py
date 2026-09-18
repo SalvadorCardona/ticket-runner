@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse
 
 from .. import config as config_module
 from .. import store
@@ -88,6 +88,18 @@ def token(config: Config) -> str:
     path.write_text(fresh + "\n", encoding="utf-8")
     path.chmod(0o600)
     return fresh
+
+
+def landing(query: str) -> str:
+    """Where a `?token=…` address goes once the token is in a cookie.
+
+    Everything the address carried except the token, because the rest of it is
+    not a secret, it is a destination: `serve` prints `/?token=…` and a deep
+    link is shared as `/?token=…&view=console/projects/list`. Redirecting both
+    to a bare `/` put the second one on the board.
+    """
+    rest = urlencode([pair for pair in parse_qsl(query) if pair[0] != "token"])
+    return f"/?{rest}" if rest else "/"
 
 
 @dataclass(frozen=True)
@@ -269,14 +281,17 @@ class Handler(BaseHTTPRequestHandler):
 
         # The token arrived in the URL: put it in a cookie and get it out of the
         # address bar, where it would otherwise sit in the history and in every
-        # screenshot of the console.
+        # screenshot of the console. The token, and nothing else: the rest of
+        # the address says *where* — `?token=…&view=console/projects/list` is
+        # how a deep link is shared — and a redirect to a bare `/` would strip
+        # the destination along with the secret and land on the board.
         if query.get("token") and route == "/":
             return self._send(
                 303,
                 b"",
                 "text/plain",
                 {
-                    "Location": "/",
+                    "Location": landing(parsed.query),
                     "Set-Cookie": (
                         f"{COOKIE}={query['token'][0]}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000"
                     ),

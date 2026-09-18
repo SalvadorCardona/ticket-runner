@@ -1,15 +1,10 @@
 import { ArrowLeft } from "lucide-react"
 import { ActionList } from "react-data-form"
-import {
-  Link,
-  ResourceViewButton,
-  generateLinkByResource,
-  useCurrentViewResourceContext,
-} from "react-resource-view"
+import { Link, ResourceViewButton, useCurrentViewResourceContext } from "react-resource-view"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { useT } from "@/lib/i18n"
-import { isAPage, type ProjectItem } from "@/resources/projects"
+import { isAPage, projectsHref, type ProjectItem } from "@/resources/projects"
 import { settingsHref } from "@/resources/settings"
 
 import { Eyebrow, Fact, Facts } from "./frame"
@@ -35,11 +30,16 @@ export function ProjectPage() {
   const project = context.data as ProjectItem | undefined
   const t = useT()
 
-  const back = generateLinkByResource({
-    resource: context.resource,
-    resourceAction: ActionList.list,
-  })
+  // The list, in the layout it was left in: coming back from a project onto the
+  // cards, when the table is what you were comparing eleven projects in, is
+  // losing your place.
+  const back = projectsHref()
   const page = project ? isAPage(project.id) : false
+  /* Where the project is really written, when that is somewhere a browser can
+   * go. A Markdown board's page is a file on this disk, and a `file://` link
+   * offered by a page served over HTTP is one Chrome declines to follow without
+   * saying anything — a link that does nothing reads as a broken console. */
+  const away = project?.url && /^https?:\/\//.test(project.url) ? project.url : ""
 
   return (
     <div className="min-w-0">
@@ -52,7 +52,7 @@ export function ProjectPage() {
           {t("projects")}
         </Link>
         <span className="flex-1" />
-        {project?.url ? <Away label="Notion" href={project.url} /> : null}
+        {away ? <Away label="Notion" href={away} /> : null}
       </div>
 
       {!project ? (
@@ -96,10 +96,12 @@ export function ProjectPage() {
 
           <Facts className="mt-4">
             <Fact label={t("repository")}>
-              <span className="font-mono text-xs">{project.repository || "—"}</span>
+              <span className="font-mono text-xs" title={project.repository || undefined}>
+                {project.repository || "—"}
+              </span>
             </Fact>
             <Fact label={t("on this machine")}>
-              <span className="font-mono text-xs">
+              <span className="font-mono text-xs" title={project.where || undefined}>
                 {project.where || t("wherever the clone is")}
               </span>
             </Fact>

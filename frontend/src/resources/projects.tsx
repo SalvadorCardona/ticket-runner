@@ -18,6 +18,7 @@ import { Chip } from "@/components/console/ticket-bits"
 import { api } from "@/lib/api"
 import { t } from "@/lib/i18n"
 import { SCOPE } from "@/lib/resource-view"
+import { go } from "@/lib/router"
 import type { Project, Projects } from "@/lib/types"
 
 /* The projects, declared once for react-resource-view.
@@ -156,6 +157,12 @@ const editForm: FormInterface = {
           "The audience, the voice, the conventions, the things never to do. Every ticket of this project is told it before it is told the ticket."
         )
       },
+      // Said here, because the package's own default for a text area is
+      // “Votre message…” — the placeholder of a chat box, on the one field of
+      // this console that is a page of standing instructions.
+      get placeholder() {
+        return t("Write it as you would brief somebody joining the project.")
+      },
       controller: TextAreaInputController,
     },
   },
@@ -214,11 +221,18 @@ function ProjectCard({ row }: RowComponentPropsInterface) {
 
       {project.repository || project.where ? (
         <Facts>
+          {/* A fact is one line and these two are longer than it — three cards
+              across, a path is cut about where it stops being a path. The title
+              is what makes the cut recoverable without opening the project. */}
           <Fact label={t("repository")}>
-            <span className="font-mono text-xs">{project.repository || "—"}</span>
+            <span className="font-mono text-xs" title={project.repository || undefined}>
+              {project.repository || "—"}
+            </span>
           </Fact>
           <Fact label={t("on this machine")}>
-            <span className="font-mono text-xs">{project.where || t("wherever the clone is")}</span>
+            <span className="font-mono text-xs" title={project.where || undefined}>
+              {project.where || t("wherever the clone is")}
+            </span>
           </Fact>
         </Facts>
       ) : (
@@ -241,9 +255,47 @@ function ProjectCard({ row }: RowComponentPropsInterface) {
 
 /* -- what sits around the list -------------------------------------------- */
 
+let layout = ""
+
+/* The layout you picked, written into the address.
+ *
+ * The package's tabs move the layout on the context and nowhere else, so the
+ * table you switched to was gone on the next reload — and gone again on the way
+ * back from a project, since that link is built from the list and knew nothing
+ * of it. The address already knows how to carry a layout: `variant=` is what
+ * `generateLinkByResource` writes and what the package reads on the way in.
+ * What was missing is somebody writing it there.
+ *
+ * Replaced rather than pushed: picking a layout is not a step you go back
+ * through. And left alone until you pick something other than the first one, so
+ * a link shared as `/?view=console/projects/list` stays what somebody typed.
+ */
+function useLayoutInTheAddress() {
+  const { view, viewVariant, resource } = useCurrentViewResourceContext()
+  const first = view?.viewVariants?.[0]?.id
+  React.useEffect(() => {
+    if (!viewVariant) return
+    // Kept here as well as in the address, because the pages that link back to
+    // the list — a project, the sidebar — have an address of their own to read
+    // and would otherwise send everybody back to the cards.
+    layout = viewVariant === first ? "" : viewVariant
+    const carried = new URLSearchParams(window.location.search).get("variant")
+    if (carried === viewVariant || (!carried && viewVariant === first)) return
+    go(
+      generateLinkByResource({
+        resource,
+        resourceAction: ActionList.list,
+        viewVariantId: viewVariant,
+      }),
+      true
+    )
+  }, [viewVariant, first, resource])
+}
+
 /** How many of them are worked on in git, said where the list opens. */
 function ProjectsTop() {
   const read = useProjects()
+  useLayoutInTheAddress()
   if (!read) return null
   const code = read.projects.filter((project) => project.kind === "code").length
   return (
@@ -385,9 +437,13 @@ export const projects = createViewResource<ProjectItem, ProjectItem, ProjectWrit
   },
 })
 
-/** Where the projects are. */
+/** Where the projects are, in the layout they were last worked in. */
 export const projectsHref = () =>
-  generateLinkByResource({ resource: projects, resourceAction: ActionList.list })
+  generateLinkByResource({
+    resource: projects,
+    resourceAction: ActionList.list,
+    viewVariantId: layout || undefined,
+  })
 
 /** Where one project is. */
 export const projectHref = (id: string) =>
