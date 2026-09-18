@@ -3,7 +3,7 @@ import { ExternalLink } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { useConsole } from "@/hooks/use-console"
-import { t, useT } from "@/lib/i18n"
+import { currentLanguage, t, useT } from "@/lib/i18n"
 import type { Ticket } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -73,6 +73,39 @@ export function ago(at: string): string {
     : t("{{count}}mo ago", { count: String(Math.round(days / 30)) })
 }
 
+/* The moment a ticket is due, in the words the console is set to.
+ *
+ * `/api/board` writes it as the board holds it — `2026-09-19T00:00+02:00` — and
+ * an ISO string beside "il y a 7 h" reads like something leaked out of a
+ * database. A start gate written as a day is a day: Notion's date column has no
+ * time in it, and the midnight the API adds is not something anybody chose. */
+export function when(at: string): string {
+  if (!at) return ""
+  const date = new Date(at)
+  if (Number.isNaN(date.getTime())) return at
+  const midnight = date.getHours() === 0 && date.getMinutes() === 0
+  return date.toLocaleString(currentLanguage(), {
+    dateStyle: "medium",
+    ...(midnight ? {} : { timeStyle: "short" }),
+  })
+}
+
+/** How long a run took, from the minutes the board counts them in. */
+export function lasted(minutes: number): string {
+  if (minutes < 60) return t("{{count}} min", { count: String(Math.round(minutes)) })
+  const hours = Math.floor(minutes / 60)
+  const rest = Math.round(minutes - hours * 60)
+  const said = t("{{count}} h", { count: String(hours) })
+  return rest ? `${said} ${String(rest).padStart(2, "0")}` : said
+}
+
+/* Whether a page's address is one a browser may be sent to.
+ *
+ * A Markdown board's page is a file on this disk, and a `file://` link offered
+ * by a page served over HTTP is one Chrome declines to follow without saying
+ * anything — a link that does nothing reads as a broken console. */
+export const reachable = (address: string): boolean => /^https?:\/\//.test(address)
+
 /** A tag: one word about a ticket, drawn small enough that five of them still read as one row. */
 export function Chip({
   children,
@@ -112,7 +145,7 @@ export function TicketLinks({ ticket }: { ticket: Ticket }) {
   const t = useT()
   return (
     <>
-      <Away label="Notion" href={ticket.url} />
+      {reachable(ticket.url) ? <Away label="Notion" href={ticket.url} /> : null}
       {ticket.pull_request ? <Away label={t("pull request")} href={ticket.pull_request} /> : null}
       {ticket.session_link ? <Away label={t("session")} href={ticket.session_link} /> : null}
     </>
@@ -126,14 +159,14 @@ export function TicketTags({ ticket }: { ticket: Ticket }) {
     <div className="flex flex-wrap gap-1.5">
       {ticket.priority ? <Chip>{ticket.priority}</Chip> : null}
       {ticket.model ? <Chip>{ticket.model}</Chip> : null}
-      {ticket.scheduled ? <Chip>⏱ {ticket.scheduled.replace("T", " ")}</Chip> : null}
+      {ticket.scheduled ? <Chip>⏱ {when(ticket.scheduled)}</Chip> : null}
     </div>
   )
 }
 
 /* The line along the bottom of a card: where the work goes, what it has cost,
- * and the way out to Notion. All three are facts rather than prose, so all
- * three are set in the mono face and read as a single ruled row. */
+ * and the way out to the page it is written on. All three are facts rather than
+ * prose, so all three are set in the mono face and read as a single ruled row. */
 export function TicketFoot({ ticket }: { ticket: Ticket }) {
   const t = useT()
   return (
@@ -144,7 +177,7 @@ export function TicketFoot({ ticket }: { ticket: Ticket }) {
       {typeof ticket.cost === "number" && ticket.cost ? (
         <span className="tabular-nums">${ticket.cost.toFixed(2)}</span>
       ) : null}
-      {ticket.url ? (
+      {reachable(ticket.url) ? (
         <a
           href={ticket.url}
           target="_blank"

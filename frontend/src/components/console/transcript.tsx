@@ -1,4 +1,5 @@
 import * as React from "react"
+import { ArrowDownIcon } from "lucide-react"
 
 import {
   MessageScroller,
@@ -8,6 +9,7 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller"
+import { useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
 /* A scrolling conversation, kept at its end while it grows.
@@ -24,13 +26,20 @@ export function Transcript({
   children: React.ReactNode
   className?: string
 }) {
+  const t = useT()
   return (
     <MessageScrollerProvider autoScroll defaultScrollPosition="end">
       <MessageScroller className={cn("min-h-0 flex-1", className)}>
         <MessageScrollerViewport className="scroll-thin p-3.5">
           <MessageScrollerContent className="gap-2">{children}</MessageScrollerContent>
         </MessageScrollerViewport>
-        <MessageScrollerButton />
+        {/* The label said here rather than in `message-scroller.tsx`: that file
+            is the component as shadcn writes it, and what it says by default is
+            English a screen reader would read out in a French console. */}
+        <MessageScrollerButton>
+          <ArrowDownIcon />
+          <span className="sr-only">{t("Scroll to the last message")}</span>
+        </MessageScrollerButton>
       </MessageScroller>
     </MessageScrollerProvider>
   )

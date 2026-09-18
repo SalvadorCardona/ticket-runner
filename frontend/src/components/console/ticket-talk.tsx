@@ -79,8 +79,13 @@ export function TicketTalk({
       </div>
 
       <Transcript>
+        {/* No anchor on a comment you wrote: an anchor is what pins a line to
+            the top of the scroller and pads the rest out under it, which is
+            what a live conversation wants and what a discussion read oldest
+            first does not — three comments opened with the first one cut in
+            half and a screen of nothing under the last. */}
         {talk.map((message, index) => (
-          <Line key={index} id={`talk-${index}`} anchor={message.role === "you"}>
+          <Line key={index} id={`talk-${index}`}>
             <Turn
               role={message.role}
               text={message.text}

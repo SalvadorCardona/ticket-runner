@@ -7,8 +7,8 @@ import { cn } from "@/lib/utils"
 import { Eyebrow, PageHead, Panel } from "./frame"
 import { Steps } from "./steps"
 
-/* What the running tickets are doing, straight from their session logs — no
- * Notion in the way. The newest session to say something is at the top.
+/* What the running tickets are doing, straight from their session logs —
+ * without asking the board. The newest session to say something is at the top.
  *
  * Above them, the three numbers somebody opens this page for: how many
  * sessions are writing, how often the timer comes round, what the runner has
@@ -62,10 +62,9 @@ export function LivePane() {
   return (
     <div className="p-3.5 sm:p-5">
       <PageHead
-        crumbs={[t("workspace"), t("live")]}
         title={t("See the work happen.")}
         blurb={t(
-          "What the running tickets are doing, straight from their session logs — no Notion in the way."
+          "What the running tickets are doing, straight from their session logs — without asking the board."
         )}
         action={
           <span

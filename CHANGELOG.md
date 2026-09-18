@@ -247,6 +247,57 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Fixed
 
+- **A ticket's page says how long the run took, and which machine took it.** The
+  runner has always written both back to the board, and the console drew
+  neither: a ticket home from a session said what it had cost and never how long
+  it had taken, and a board two machines share never said which of them had the
+  ticket in hand. Both are on the page now, beside the spend, and the *took*
+  column is in the table layout of the board — where it is read in words rather
+  than in minutes: `23 min`, `1 h 02`.
+
+- **A board that is not Notion's stops offering links to Notion.** On a Markdown
+  board a ticket's page is a file on this disk, and every card carried an
+  outward link pointing at it with `file://` — an address a browser declines to
+  follow from a console served over HTTP, without saying so. The link is offered
+  where it leads somewhere, as a project's already was. The board no longer
+  opens on "Notion holds the board" either, the live pane no longer says there
+  is "no Notion in the way", and a form that saves says *Written* rather than
+  *Written to Notion* — the same toast answers a project written to Notion, a
+  project written to a file, and a setting written to `config.toml`.
+
+- **A row of the board's table layout opens its ticket.** The table drew eight
+  columns and offered no way into any of them: a ticket picked out there had to
+  be found again on the cards. Every row now has the same *open* the projects
+  have.
+
+- **The board comes back in the layout you left it in.** What was fixed for the
+  projects was true of the board too — the *table* you switched to was gone on
+  the next reload and gone again on the way back from a ticket. It is in the
+  address now, and the links back to the board carry it.
+
+- **A pane stops printing where you are twice.** The bar above every pane says
+  the path; Live, Schedules, Context and Settings each said it again on the line
+  under it.
+
+- **A ticket's discussion opens at its first comment.** Three comments opened
+  with the first one cut in half and a screen of nothing under the last: what
+  you had written was pinned to the top of the scroller, which is what a live
+  conversation wants and not what a discussion read oldest-first is.
+
+- **A brief written by hand reads as prose.** A paragraph wrapped over three
+  lines — which is what a Markdown board holds, and what anybody typing into a
+  ticket writes — was drawn as three paragraphs with a gap between each. Lines
+  under one another are one paragraph again; a blank line is what ends one.
+
+- **An empty board says so, in the language the console is in.** It said "No
+  results yet — nothing matched your search", in English, on a page where nobody
+  had searched for anything.
+
+- **A date on the board is a date.** A ticket scheduled for a day showed
+  `2026-09-19T00:00+02:00` on its card, on its page and in the table, beside an
+  "il y a 7 h" written like a human. It now reads `19 sept. 2026`, and a
+  scheduled hour is kept where there is one.
+
 - **A link to a pane opened with the console's token lands on that pane.** The
   token is moved out of the address and into a cookie as soon as it arrives, so
   it does not sit in the history and in every screenshot — but everything beside

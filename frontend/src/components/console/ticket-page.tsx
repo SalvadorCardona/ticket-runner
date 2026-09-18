@@ -1,17 +1,27 @@
 import * as React from "react"
 import { ArrowLeft } from "lucide-react"
-import { ActionList } from "react-data-form"
-import { Link, generateLinkByResource, useCurrentViewResourceContext } from "react-resource-view"
+import { Link, useCurrentViewResourceContext } from "react-resource-view"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { useConsole } from "@/hooks/use-console"
 import { useT } from "@/lib/i18n"
 import type { TicketDetail } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { boardHref } from "@/resources/tickets"
 
 import { Eyebrow, Fact, Facts } from "./frame"
 import { Markdown } from "./markdown"
-import { LABEL, SEED, TONE, TicketActions, TicketLinks, TicketTags, ago } from "./ticket-bits"
+import {
+  LABEL,
+  SEED,
+  TONE,
+  TicketActions,
+  TicketLinks,
+  TicketTags,
+  ago,
+  lasted,
+  when,
+} from "./ticket-bits"
 import { TicketTalk } from "./ticket-talk"
 
 /* One ticket, as a page.
@@ -42,7 +52,9 @@ export function TicketPage() {
   // The stream keeps the open ticket fresher than the page read once: the
   // column and the progress line are read from it where it is the same ticket.
   const ticket = page ? (open && open.id === page.id ? { ...page, ...open } : page) : null
-  const back = generateLinkByResource({ resource: context.resource, resourceAction: ActionList.list })
+  // The board, in the layout it was left in: coming back onto the cards, when
+  // the table is what you were reading the board in, is losing your place.
+  const back = boardHref()
   const column = ticket
     ? board.columns.find((item) => item.key === ticket.column)?.name ||
       t(LABEL[ticket.column]) ||
@@ -116,9 +128,23 @@ export function TicketPage() {
                     ? `$${ticket.cost.toFixed(2)}`
                     : "—"}
                 </Fact>
+                {/* What the run cost in time, next to what it cost in money.
+                    The board carries it and nothing drew it, so a ticket back
+                    from a session said what it had spent and never how long. */}
+                <Fact label={t("took")}>
+                  {typeof ticket.duration === "number" && ticket.duration
+                    ? lasted(ticket.duration)
+                    : "—"}
+                </Fact>
                 <Fact label={t("created")}>{ago(ticket.created) || "—"}</Fact>
-                <Fact label={t("scheduled")}>
-                  {ticket.scheduled ? ticket.scheduled.replace("T", " ") : "—"}
+                <Fact label={t("scheduled")}>{when(ticket.scheduled) || "—"}</Fact>
+                {/* Which machine has it, for the days two of them share a board
+                    — and the other half of the answer to "why has nothing
+                    happened": nobody claimed it. */}
+                <Fact label={t("taken by")}>
+                  <span className="font-mono text-xs" title={ticket.runner || undefined}>
+                    {ticket.runner || "—"}
+                  </span>
                 </Fact>
               </Facts>
 

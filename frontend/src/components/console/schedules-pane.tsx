@@ -174,7 +174,6 @@ export function SchedulesPane() {
   return (
     <div className="p-3.5 sm:p-5">
       <PageHead
-        crumbs={[t("workspace"), t("schedules")]}
         title={t("What comes back on its own.")}
         blurb={t(
           "A row says what to make and how often; when the moment comes the runner writes the ticket into the ready column and steps back."

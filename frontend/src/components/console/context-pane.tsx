@@ -73,7 +73,6 @@ export function ContextPane() {
   return (
     <div className="flex min-h-0 flex-1 flex-col p-3.5 sm:p-5">
       <PageHead
-        crumbs={[t("workspace"), t("context")]}
         title={t("What every ticket is told first.")}
         blurb={t(
           "Before the project's brief and before the ticket itself. It is what makes an answer sound like you rather than like nobody — and you pay for it on every single ticket."

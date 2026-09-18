@@ -34,32 +34,21 @@ export function Eyebrow({
   )
 }
 
-/** Where you are, said the way a path is said. */
-export function Crumbs({ parts }: { parts: string[] }) {
-  return (
-    <Eyebrow>
-      {parts.map((part, index) => (
-        <React.Fragment key={part}>
-          {index ? <span className="text-border mx-1.5">/</span> : null}
-          {part}
-        </React.Fragment>
-      ))}
-    </Eyebrow>
-  )
-}
-
-/* How a pane opens: where you are, what this page is for in one line you can
- * read from across the room, what it is for in the line under that, and — at
- * the right edge — the one gesture the page exists to offer. */
+/* How a pane opens: what this page is for in one line you can read from across
+ * the room, what it is for in the line under that, and — at the right edge —
+ * the one gesture the page exists to offer.
+ *
+ * Where you are is not said here: the bar above every pane already says it, and
+ * a path printed twice, one line under the other, reads as a page that has lost
+ * count of itself. This is the same reason the board opens on the package's own
+ * header rather than on a `PageHead` of its own. */
 export function PageHead({
-  crumbs,
   title,
   blurb,
   action,
   children,
   className,
 }: {
-  crumbs: string[]
   title: string
   blurb?: string
   /** The page's own gesture, against the right edge on anything wider than a phone. */
@@ -70,8 +59,7 @@ export function PageHead({
 }) {
   return (
     <div className={cn("mb-6", className)}>
-      <Crumbs parts={crumbs} />
-      <div className="mt-2.5 flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
         <div className="min-w-0">
           <h2 className="text-2xl leading-tight font-bold tracking-[-0.03em] text-balance sm:text-[1.75rem]">
             {title}

@@ -12,11 +12,11 @@ import { Flow } from "./text"
  * ticket, or in an answer in the workspace's transcript. Left alone both arrive
  * as their own source, and a reader ends up reading the asterisks.
  *
- * It is not a markdown engine: it knows the shapes `notion.blocks_text` writes
- * and the few more a session reaches for — a nested list, a word behind a
- * link, an emphasis — and nothing else. Every line lands as text, never as
- * markup: React escapes what it is given, and an address is only ever an
- * anchor's child.
+ * It is not a markdown engine: it knows the shapes `notion.blocks_text` writes,
+ * the same shapes a Markdown board holds as files, and the few more a session
+ * reaches for — a nested list, a word behind a link, an emphasis — and nothing
+ * else. Every line lands as text, never as markup: React escapes what it is
+ * given, and an address is only ever an anchor's child.
  */
 
 // Notion names a language with spaces in it ("plain text"), so everything
@@ -41,6 +41,11 @@ function blocks(text: string): Block[] {
   const out: Block[] = []
   const lines = text.replace(/\r\n/g, "\n").split("\n")
   let index = 0
+  // Whether a blank line has been read since the last paragraph, which is the
+  // only thing that ends one. See the foot of the loop, where they are pushed;
+  // everything else pushes a block of another kind, and a paragraph never
+  // continues across one of those.
+  let ended = true
   while (index < lines.length) {
     const line = lines[index]
     const fence = FENCE.exec(line.trim())
@@ -55,7 +60,10 @@ function blocks(text: string): Block[] {
     const trimmed = line.trim()
     const level = depth(line)
     index += 1
-    if (!trimmed) continue
+    if (!trimmed) {
+      ended = true
+      continue
+    }
     const heading = /^(#{1,6})\s+(.*)$/.exec(trimmed)
     if (heading) {
       out.push({ kind: "heading", level: heading[1].length, text: heading[2] })
@@ -96,7 +104,22 @@ function blocks(text: string): Block[] {
       out.push({ kind: "quote", text: trimmed.replace(/^>\s?/, "") })
       continue
     }
-    out.push({ kind: "paragraph", text: line })
+    /* A line under a line is the same paragraph.
+     *
+     * Two shapes arrive here. `notion.blocks_text` writes one line per block,
+     * so two lines in a row are two paragraphs; a Markdown board holds files
+     * somebody typed, where a paragraph is wrapped at the width of the editor
+     * and a blank line is what ends it. Drawn as separate blocks, the second
+     * shape came out as a stack of one-line paragraphs with a gap between each
+     * — a brief nobody could read.
+     *
+     * So consecutive lines join, and the break between them is kept rather than
+     * collapsed: the paragraph is one block with its lines where they were
+     * written, which is what both shapes look like where they were written. */
+    const above = out[out.length - 1]
+    if (!ended && above?.kind === "paragraph") above.text += `\n${line}`
+    else out.push({ kind: "paragraph", text: line })
+    ended = false
   }
   return out
 }
@@ -109,9 +132,15 @@ const reachable = (address: string) => /^(https?:\/\/|\/|mailto:)/i.test(address
 /** How deep an item is pushed in. Written out, because Tailwind reads the source. */
 const INDENT = ["pl-1", "pl-6", "pl-11", "pl-16"]
 
-/** `code`, **bold**, *emphasis* and [a word](behind a link), inside a line. */
+/* `code`, **bold**, *emphasis* and [a word](behind a link), inside a line.
+ *
+ * Inside a line and not across two: a paragraph now holds the lines it was
+ * wrapped over, and a backtick opening a code span on one line has nothing to
+ * do with the one that closes something else two lines down. */
 function Inline({ text }: { text: string }) {
-  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*\s][^*]*\*|\[[^\]]*\]\([^)\s]+\))/g)
+  const parts = text.split(
+    /(`[^`\n]+`|\*\*[^*\n]+\*\*|\*[^*\s][^*\n]*\*|\[[^\]\n]*\]\([^)\s]+\))/g
+  )
   return (
     <>
       {parts.map((part, index) => {

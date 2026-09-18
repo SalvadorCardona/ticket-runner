@@ -9,7 +9,7 @@ import { settingsHref } from "@/resources/settings"
 
 import { Eyebrow, Fact, Facts } from "./frame"
 import { Markdown } from "./markdown"
-import { Away, Chip } from "./ticket-bits"
+import { Away, Chip, reachable } from "./ticket-bits"
 
 /* One project, as a page.
  *
@@ -35,11 +35,8 @@ export function ProjectPage() {
   // losing your place.
   const back = projectsHref()
   const page = project ? isAPage(project.id) : false
-  /* Where the project is really written, when that is somewhere a browser can
-   * go. A Markdown board's page is a file on this disk, and a `file://` link
-   * offered by a page served over HTTP is one Chrome declines to follow without
-   * saying anything — a link that does nothing reads as a broken console. */
-  const away = project?.url && /^https?:\/\//.test(project.url) ? project.url : ""
+  /** Where the project is really written, when that is somewhere a browser can go. */
+  const away = project && reachable(project.url) ? project.url : ""
 
   return (
     <div className="min-w-0">
