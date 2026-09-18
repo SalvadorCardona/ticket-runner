@@ -1452,6 +1452,13 @@ of them, from the Notion token down to what your board calls its *Blocked* colum
 still a file you can open in an editor: the console rereads it when it changes on disk, and
 what you save here keeps the comments that were around the line.
 
+Each section of the file is a page of its own, and the one you are on is in the address:
+`/?view=console/settings/read/config/notify` is a link to the notification settings that
+you can send to somebody. Only that section is drawn, and what you typed in one you left
+is given back when you come back to it. `[projects]` and `[github]` are the two sections
+you add rows to rather than fields you fill, so they are tables under that page, each with
+its own *add* dialog and a confirmation before a row goes.
+
 Three things it does that a form usually does not.
 
 - **A blank field says nothing**, and the runner's own default answers — shown greyed, in
