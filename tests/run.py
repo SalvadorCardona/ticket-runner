@@ -4699,8 +4699,132 @@ def the_sign_in_page_asks_the_way_the_console_does():
     assert web_server.GUARD_HEADER in web_server.SIGN_IN, "the login would be refused as CSRF"
     assert "/api/login" in web_server.SIGN_IN
     assert 'type="password"' in web_server.SIGN_IN
-    for page in (web_server.GATE, web_server.SIGN_IN):
+    assert web_server.GUARD_HEADER in web_server.SETUP, "the first connection would be CSRF"
+    assert "/api/setup" in web_server.SETUP
+    for page in (web_server.GATE, web_server.SIGN_IN, web_server.SETUP):
         assert "src=\"http" not in page and "href=\"http" not in page, "it reaches off the machine"
+
+
+@case
+def the_first_connection_is_offered_until_somebody_says_how_to_get_in():
+    """A token protects an installation; a fresh one has nothing to protect yet.
+
+    Two ways of deciding how the console is opened, and the page exists for the
+    state where neither was taken. The token drawn on first start is not one of
+    them: nobody chose it, and it is the very secret the first connection is
+    there to stop somebody having to go and find.
+    """
+    from ticket_runner.web import server as web_server
+
+    bare = _web_config()
+    assert web_server.claimable(bare, None), "a console nobody decided anything about"
+    assert not web_server.claimable(_web_config(token="chosen"), None), (
+        "a token in the file is a decision, and the gate is what it asks for"
+    )
+    entry = web_server.sign_in(_web_config(email="me@example.com", password="hunter22"), "tok")
+    assert not web_server.claimable(bare, entry), "a sign-in closes it for good"
+
+
+class _Fresh:
+    """An `Api`, reduced to the three things a first connection asks of it.
+
+    The real one rereads the file whenever its mtime moves, which is what makes
+    a run of `apply` see the token it wrote two lines above; this does the same
+    by hand, and nothing else.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.config = C.load(path)
+        self.context = ""
+
+    def save_settings(self, payload: dict) -> dict:
+        saved = web_settings.save(self.config, payload)
+        self.config = C.load(self.config.path)
+        return saved
+
+    def save_context(self, text: str) -> dict:
+        self.context = text.strip()
+        return {"ok": True, "text": self.context}
+
+    def forget(self) -> None:
+        pass
+
+
+@case
+def the_first_connection_writes_the_whole_installation_at_once():
+    """One form, and the file it leaves is one somebody could have typed.
+
+    Every value written is a key of `config.toml` — saved through the console's
+    own writer, floors and all — and the pair that matters most is the one that
+    closes the page behind it: once the email and the password are in, the
+    console is claimed and this is not a way in any more.
+    """
+    from ticket_runner.web import server as web_server
+    from ticket_runner.web import setup as web_setup
+
+    path, _ = _saved()
+    api = _Fresh(path)
+    report = web_setup.apply(
+        api,
+        {
+            "email": "me@example.com",
+            "password": "one I remember",
+            "confirm": "one I remember",
+            "rules": "  I am Salva. Answer in French.  ",
+            "telegram_token": "123:abc",
+            "telegram_chat": "4242",
+        },
+    )
+    assert report["problem"] == "", report
+    assert report["steps"] and report["steps"][0][1].endswith("me@example.com from now on")
+
+    written = path.read_text(encoding="utf-8")
+    assert 'email = "me@example.com"' in written and 'password = "one I remember"' in written
+    assert 'chat = "4242"' in written and 'token = "123:abc"' in written
+    assert 'token = "ntn_real"' in written, "the rest of the file is left where it was"
+    assert api.context == "I am Salva. Answer in French.", "the rules reach every ticket"
+
+    entry = web_server.sign_in(api.config, "tok")
+    assert entry is not None and entry.email == "me@example.com"
+    assert not web_server.claimable(api.config, entry), "the door it just built stays shut"
+
+
+@case
+def a_first_connection_that_cannot_be_signed_into_later_is_refused():
+    """What is refused here is refused before anything is written.
+
+    A password is guessable in a way a token is not, and behind this port sits a
+    runner that runs code on this machine — so the floor is said in the form
+    rather than discovered by whoever grinds against it.
+    """
+    from ticket_runner.web import setup as web_setup
+
+    path, _ = _saved()
+    before = path.read_text(encoding="utf-8")
+    for payload, expected in (
+        ({"email": "me", "password": "one I remember"}, "email address"),
+        ({"email": "me@example.com", "password": "short"}, "at the least"),
+        (
+            {"email": "me@example.com", "password": "one I remember", "confirm": "another"},
+            "not the same",
+        ),
+        (
+            {
+                "email": "me@example.com",
+                "password": "one I remember",
+                "notion_page": "my notion page",
+            },
+            "Notion page ID",
+        ),
+    ):
+        api = _Fresh(path)
+        try:
+            web_setup.apply(api, payload)
+        except ValueError as error:
+            assert expected in str(error), error
+            continue
+        raise AssertionError(f"{payload} should have been refused")
+    assert path.read_text(encoding="utf-8") == before, "a refusal writes nothing"
 
 
 @case

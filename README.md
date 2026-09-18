@@ -1356,7 +1356,10 @@ cannot answer, which is the half that matters least. A channel is four methods
 
 Notion is where tickets are written and read; it is a poor place to *steer* from. So there
 is a second window on the same workspace, served from your own machine — and it is running
-already: the installer starts it and prints the address, token included.
+already: the installer starts it and prints the address, token included. On an installation
+nobody has set up yet there is no token to paste either — the address alone opens
+[the first connection](#the-first-connection), which is where the rest of this page's
+configuration gets filled in.
 
 ```sh
 ticket-runner serve --print-token   # the token, if you lost the URL
@@ -1652,12 +1655,70 @@ but the tunnel is the answer that does not depend on the token never leaking.
 | `web.poll_seconds` | `15` | how often the board is reread — only while a browser is connected |
 | `web.chat_timeout_minutes` | `20` | past this, a chat turn is killed |
 
+### The first connection
+
+A token protects an installation that is already set up. A fresh one has nothing to
+protect yet — and asking somebody to go and find a secret on disk before they may type
+their own is the wrong way round. So a console **nobody has claimed** — no `web.token`
+chosen in the configuration, no email and password set — serves a form instead of a
+door, and `http://127.0.0.1:8787` is the whole of the address:
+
+```
+┌──────────────────────────────────────────────────┐
+│ ticket-runner                                    │
+│ Nobody has claimed this console yet.             │
+│                                                  │
+│ ┌─ You ──────────────────────────────────────┐   │
+│ │ email · password · the same password again │   │
+│ ├─ Notion — or leave it for later ───────────┤   │
+│ │ ntn_… · the link of the page you shared    │   │
+│ ├─ Your rules — read into every ticket ──────┤   │
+│ │ who you are, how you like things written   │   │
+│ ├─ Telegram — optional ──────────────────────┤   │
+│ │ the bot token · chat id, found on its own  │   │
+│ └────────────────────────────────────────────┘   │
+│               [ Set it up ]                      │
+└──────────────────────────────────────────────────┘
+```
+
+One press does the whole installation, in that order:
+
+- the **email and password** are written into `[web]`, and the browser is signed in with
+  them there and then — asking for a password typed one second ago would be the token all
+  over again. That pair is also what **closes this page for good**: from the next request
+  on, the console is claimed and asks for a sign-in;
+- the **Notion token and page** are the two halves of [step 1 and step 2](#1-create-a-notion-integration)
+  above, and what happens next is `ticket-runner init` — the same code, the same five
+  databases, the same columns — built under the page you shared, with `notion.workspace`
+  written back into the configuration;
+- the **rules** are [the context page](#the-context-page--who-the-work-is-for): the text
+  that reaches every session before the project's brief and before the ticket;
+- the **Telegram bot token** pairs itself. Leave the chat id empty, say anything to your
+  new bot, and the id is read back from it — the same gesture as `notify --pair`.
+
+Everything but the first pair may be left empty and filled in later from the Settings
+tab; a step that fails says so and leaves the ones before it standing, exactly as `init`
+does, since pages created in somebody's Notion are not a thing to roll back.
+
+> **Who may claim it.** An unclaimed console is necessarily on loopback — `serve` refuses
+> to start on any other host without a token or a sign-in — so "the first browser" means
+> "somebody sitting at this machine". On a machine you share with other people, set
+> `web.token`, or the sign-in, *before* starting the console: both are a decision, and
+> claiming is what happens when nobody took one. `ticket-runner serve` says which of the
+> two states it is in, in the line it prints.
+
+An installation that already works and has never been given a password is unclaimed too,
+and the same address serves the same form — with the Notion half already done, so all it
+asks for is the pair. A browser still carrying the token in a cookie goes straight to the
+console instead, and `http://127.0.0.1:8787/setup` is where the form is then.
+
 ### Signing in instead of pasting a token
 
 A token is right for a machine and tiring for a person: it has to be found again on every
 browser you open the console in, and the URL that carries it is a secret you paste into
 your address bar. So the console can also be opened the way everything else is — with an
-email and a password:
+email and a password, which is what the first connection above writes for you, and what
+these two lines say by hand:
 
 ```toml
 [web]
