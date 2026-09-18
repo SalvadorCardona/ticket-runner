@@ -247,6 +247,23 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Fixed
 
+- **An update puts the console on the code it just installed.** A run is a
+  process that ends, so the version that lands between two passes is the version
+  the next pass runs. The console is not: it is started once and answers for
+  weeks, with the Python it was given at boot — while serving the page off the
+  disk, which the update has just replaced. The two drifted apart, and the
+  browser is where it showed: a console up since the evening before drew the
+  project list, and opening a project answered `no such route:
+  /api/projects/<id>` — the page was the morning's, the server it asked was the
+  day before's, and all the page said was that the project could not be read. An
+  update now restarts the console onto the code it installed, and never starts
+  one somebody had stopped.
+
+- **A project that cannot be read says what the server answered.** The page had
+  one sentence for every failure, which made a route that had moved and a
+  project that is gone look the same. What the server said is under it now, in
+  its own words.
+
 - **A ticket's page says how long the run took, and which machine took it.** The
   runner has always written both back to the board, and the console drew
   neither: a ticket home from a session said what it had cost and never how long

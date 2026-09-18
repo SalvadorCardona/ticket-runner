@@ -4,7 +4,7 @@ import { Link, ResourceViewButton, useCurrentViewResourceContext } from "react-r
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { useT } from "@/lib/i18n"
-import { isAPage, projectsHref, type ProjectItem } from "@/resources/projects"
+import { isAPage, projectsHref, whyNotRead, type ProjectItem } from "@/resources/projects"
 import { settingsHref } from "@/resources/settings"
 
 import { Eyebrow, Fact, Facts } from "./frame"
@@ -54,7 +54,15 @@ export function ProjectPage() {
 
       {!project ? (
         context.error ? (
-          <p className="text-destructive text-sm">{t("This project could not be read.")}</p>
+          <div className="flex flex-col gap-1.5">
+            <p className="text-destructive text-sm">{t("This project could not be read.")}</p>
+            {/* And what the server answered, as it answered it: "no such route"
+                and "no project with id …" are two different afternoons, and the
+                sentence above alone tells neither. */}
+            {whyNotRead() ? (
+              <p className="text-muted-foreground font-mono text-xs">{whyNotRead()}</p>
+            ) : null}
+          </div>
         ) : (
           <div className="flex flex-col gap-2">
             <Skeleton className="h-8 w-2/3" />

@@ -2486,6 +2486,55 @@ def a_copy_is_told_apart_from_a_clone_before_anything_is_fetched():
     assert not status.stale and "copy" in status.reason
 
 
+@case
+def an_update_puts_the_console_on_the_code_it_just_installed():
+    """A run ends and the next one is the new code; the console never ends.
+
+    On 18 September 2026 the console had been up since the evening before,
+    serving `web/static/` off the disk — five commits newer than the Python
+    answering it. The project list drew, because that route was in both; opening
+    a project answered `no such route: /api/projects/<id>`, and the page said
+    only that the project could not be read.
+
+    `try-restart`, so that an update never starts a console somebody stopped.
+    """
+    from ticket_runner import git as git_module
+
+    ran: list[list[str]] = []
+    was_run, was_git = git_module.run, git_module.git
+    git_module.run = lambda args, *rest, **kept: (ran.append(args) or git_module.Result(0, "", ""))
+    git_module.git = lambda args, *rest, **kept: git_module.Result(0, "", "")
+    # A home and a PATH of their own: `apply` rewrites the launcher and the
+    # units of whoever is running it, and a test that reinstalls this machine
+    # is a test that has gone somewhere it was never asked to go. The PATH is
+    # also what `systemctl` is looked for on — an empty one would make this
+    # pass on a laptop and mean nothing on a runner without systemd.
+    elsewhere = Path(tempfile.mkdtemp())
+    (elsewhere / "systemctl").write_text("#!/bin/sh\nexit 0\n")
+    (elsewhere / "systemctl").chmod(0o755)
+    kept = {name: os.environ.get(name) for name in ("HOME", "PATH")}
+    os.environ["HOME"], os.environ["PATH"] = str(elsewhere), str(elsewhere)
+    try:
+        error = update.apply(update.Status(current="a" * 40, latest="b" * 40), 600, ROOT)
+    finally:
+        git_module.run, git_module.git = was_run, was_git
+        for name, value in kept.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+    assert error == "", error
+    restarts = [args for args in ran if "ticket-runner-web.service" in args]
+    assert restarts, "the console is left running the code the update replaced"
+    assert restarts[0] == ["systemctl", "--user", "try-restart", "ticket-runner-web.service"], (
+        "a plain restart would start a console somebody stopped on purpose"
+    )
+    assert ran.index(restarts[0]) > ran.index(["systemctl", "--user", "daemon-reload"]), (
+        "the console is restarted before its unit is reloaded"
+    )
+
+
 # -- staying alive -----------------------------------------------------------
 
 
@@ -6671,6 +6720,42 @@ def a_project_is_a_resource_with_two_layouts_and_a_form():
     assert (FRONTEND / "src/lib/router.tsx").read_text(encoding="utf-8").count(
         "?view=console/projects/list"
     ), "the address the pane had stopped leading to the projects"
+
+
+@case
+def a_project_that_cannot_be_read_says_what_the_server_answered():
+    """The one screen where a generic sentence cost an afternoon.
+
+    The page a project opens on is handed `error: true` and nothing else, so
+    "This project could not be read." was the whole of what a browser showed
+    while the server was answering `no such route: /api/projects/<id>`. What
+    the server said belongs on the page — shown, not swallowed and not replaced
+    by a blank.
+    """
+    declared = (FRONTEND / "src/resources/projects.tsx").read_text(encoding="utf-8")
+    assert "whyNotRead" in declared, "nothing keeps what a failed read said"
+    page = (FRONTEND / "src/components/console/project-page.tsx").read_text(encoding="utf-8")
+    assert "whyNotRead()" in page, "the page shows the failure without its reason again"
+    assert "This project could not be read." in page, "the failure is not said at all"
+
+
+@case
+def the_console_route_of_one_project_is_the_one_the_page_asks_for():
+    """The address the browser builds has to be an address the server answers.
+
+    They are written in two languages and checked by nobody at build time: the
+    page asks `/api/projects/<id>`, and the server matches that route with a
+    regular expression. A 404 there reads, in the browser, as a project that
+    could not be read.
+    """
+    routes = (ROOT / "src/ticket_runner/web/server.py").read_text(encoding="utf-8")
+    pattern = re.search(r'r"(/api/projects/[^"]+)"', routes)
+    assert pattern, "the server no longer routes one project"
+    asked = "/api/projects/" + "3eaf7e7b99c04adeae76ac6ecd52cdd0"
+    assert re.fullmatch(pattern.group(1), asked), f"{asked} is not a route this server answers"
+    assert "`/api/projects/${id}`" in (FRONTEND / "src/lib/api.ts").read_text(encoding="utf-8"), (
+        "the console asks for a project somewhere else now"
+    )
 
 
 @case

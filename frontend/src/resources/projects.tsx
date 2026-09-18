@@ -113,6 +113,33 @@ export function useProjects(): Projects | null {
   return React.useSyncExternalStore(subscribe, () => drawn)
 }
 
+/* Why the last project read failed, for the page to say rather than swallow.
+ *
+ * What a view component is handed is `error: true` and nothing else, so the
+ * page could only say that something went wrong. On 18 September 2026 that
+ * sentence was the whole of what a browser showed while the server was
+ * answering `no such route: /api/projects/<id>` — a console left running the
+ * code of the day before, serving the page built that morning. The server's own
+ * words are what tell those apart from a project that is simply gone.
+ */
+let refusal = ""
+
+/** What the server said the last time a project could not be read. */
+export const whyNotRead = (): string => refusal
+
+/** One project, from wherever it is held: its page, or the line that names it. */
+async function one(id: string): Promise<ProjectItem> {
+  if (isAPage(id)) return item(await api.project(id))
+  // No page to read: the row is a line in the file, and the list is where it
+  // was read from. Read again rather than taken from what is held, so a link
+  // opened cold — a tab that has never listed anything — answers too.
+  const read = await api.projects()
+  publish(read)
+  const found = read.projects.find((project) => idOf(project) === id)
+  if (!found) throw new Error(t("No project called “{{name}}”.", { name: id.slice(FILE.length) }))
+  return item(found)
+}
+
 /* -- the forms ------------------------------------------------------------ */
 
 /* What a project page holds, as a form.
@@ -322,16 +349,14 @@ export const projects = createViewResource<ProjectItem, ProjectItem, ProjectWrit
   },
   getItem: async ({ id }) => {
     const wanted = String(id)
-    if (isAPage(wanted)) return { data: item(await api.project(wanted)) }
-    // No page to read: the row is a line in the file, and the list is where it
-    // was read from. Read again rather than taken from what is held, so a link
-    // opened cold — a tab that has never listed anything — answers too.
-    const read = await api.projects()
-    publish(read)
-    const name = wanted.slice(FILE.length)
-    const found = read.projects.find((project) => idOf(project) === wanted)
-    if (!found) throw new Error(t("No project called “{{name}}”.", { name }))
-    return { data: item(found) }
+    try {
+      const data = await one(wanted)
+      refusal = ""
+      return { data }
+    } catch (error) {
+      refusal = error instanceof Error ? error.message : String(error)
+      throw error
+    }
   },
   updateItem: async (patch) => {
     const id = String(patch.id ?? "")
