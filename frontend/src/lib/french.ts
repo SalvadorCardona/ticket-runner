@@ -311,6 +311,8 @@ export const FRENCH: Record<string, string> = {
     "Utile seulement quand le dépôt ne se trouve pas tout seul. Les worktrees sont créés à côté, jamais dedans.",
   "The audience, the voice, the conventions, the things never to do. Every ticket of this project is told it before it is told the ticket.":
     "Le public, le ton, les conventions, ce qu'il ne faut jamais faire. Chaque ticket de ce projet le reçoit avant de recevoir le ticket.",
+  "Write it as you would brief somebody joining the project.":
+    "Écrivez-le comme à quelqu'un qui arrive sur le projet.",
 
   /* -- the standing context --------------------------------------------------- */
   Context: "Contexte",

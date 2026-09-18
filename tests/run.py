@@ -4687,6 +4687,33 @@ def an_email_and_a_password_are_a_way_into_the_console():
 
 
 @case
+def a_token_in_the_address_is_taken_out_and_the_destination_left_in():
+    """`?token=…&view=…` is one secret and one destination, and only one goes.
+
+    The token is moved into a cookie and out of the address, because it would
+    otherwise sit in the history and in every screenshot. What sits beside it is
+    not a secret: `serve` prints `/?token=…`, and a link to a pane is shared as
+    `/?token=…&view=console/projects/list`. Redirecting both to a bare `/` put
+    the second one on the board.
+    """
+    from urllib.parse import parse_qs
+
+    from ticket_runner.web import server as web_server
+
+    assert web_server.landing("token=abc") == "/", "nothing else to say: the console opens"
+    assert web_server.landing("") == "/"
+    kept = web_server.landing("token=abc&view=console/projects/list")
+    assert "token" not in kept, "the secret stays in the cookie"
+    assert parse_qs(kept.lstrip("/?"))["view"] == ["console/projects/list"], kept
+    # Whatever the address carried, in the order it carried it.
+    both = web_server.landing("view=console/projects/list&token=abc&variant=table")
+    assert parse_qs(both.lstrip("/?")) == {
+        "view": ["console/projects/list"],
+        "variant": ["table"],
+    }, both
+
+
+@case
 def the_sign_in_page_asks_the_way_the_console_does():
     """It posts rather than navigates, and carries the header every write does.
 
