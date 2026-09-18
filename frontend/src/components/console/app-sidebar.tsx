@@ -35,7 +35,8 @@ import { useT } from "@/lib/i18n"
 import { visible, type PaneMenuItem } from "@/lib/menu"
 import { pageHref, type Route } from "@/lib/router"
 import { cn } from "@/lib/utils"
-import { boardHref } from "@/resources/tickets"
+import { SETTINGS, settingsHref } from "@/resources/settings"
+import { TICKETS, boardHref } from "@/resources/tickets"
 
 /* The left menu.
  *
@@ -61,6 +62,7 @@ export function AppSidebar({ route }: { route: Route }) {
     {
       name: t("Board"),
       href: boardHref(),
+      resource: TICKETS,
       icon: LayoutGrid,
       priority: 50,
       badge: board.tickets.length || undefined,
@@ -120,8 +122,8 @@ export function AppSidebar({ route }: { route: Route }) {
     },
     {
       name: t("Settings"),
-      href: pageHref("settings"),
-      page: "settings",
+      href: settingsHref(),
+      resource: SETTINGS,
       icon: Settings2,
       priority: 10,
       detail:
@@ -133,9 +135,12 @@ export function AppSidebar({ route }: { route: Route }) {
     },
   ]
 
-  // Every address of the board — a ticket included — is the Board entry.
+  // Every address of a resource — a ticket, a section of the settings — is the
+  // entry that resource opens on. An address that names none is the board.
   const active = (item: PaneMenuItem) =>
-    item.page ? route.kind === "page" && route.page === item.page : route.kind === "resource"
+    item.page
+      ? route.kind === "page" && route.page === item.page
+      : route.kind === "resource" && (route.params.resourceId ?? TICKETS) === item.resource
 
   const collapsed = state === "collapsed" && !isMobile
 

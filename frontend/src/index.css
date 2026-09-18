@@ -231,6 +231,18 @@
     line-height: 1.5;
   }
 
+  /* The settings read their sections down a column, and a section is named by
+     a sentence — "The columns of the ticket database" is wider than the column
+     it sits in. The package writes `whitespace-nowrap` on a tab, which a bar
+     wants and a column does not: left alone, the longest names reach over the
+     section beside them. The `min-width` goes with it — a tab that may not be
+     narrower than one line of its own text does not wrap either. */
+  [data-slot="tabs-list"][data-orientation="vertical"] [data-slot="tabs-trigger"] {
+    white-space: normal;
+    text-align: left;
+    min-width: 0;
+  }
+
   /* Written twice, because it is two features. WebKit and Chrome take the
      pseudo-elements, which is where the rounded thumb and the gap around it
      come from; Firefox has none of those and takes the pair of standard

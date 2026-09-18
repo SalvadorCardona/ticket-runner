@@ -204,6 +204,21 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Changed
 
+- **The settings are a page per section, and a link you can send.** The Settings
+  tab was one column of collapsibles that drew all seventy fields at once, open
+  or folded, and redrew every one of them at every keystroke. `config.toml` is
+  now a resource with a single record, and each section of the file is a
+  sub-page of it: the tab you are on is in the address, so
+  `/?view=console/settings/read/config/notify` is a link to the notification
+  settings that opens where you left it. Only the section you are looking at is
+  drawn; what you typed in one you left is kept and given back when you come
+  back to it. The tabs are built from what the server says the file holds, so a
+  section the runner gains is a sub-page the day it is described. `[projects]`
+  and `[github]` — the two mappings you add rows to rather than fields you fill
+  — are tables of their own under that page, with the "add" dialog and the
+  confirmation before a row goes, which retires the one hand-rolled table of
+  inputs the console still had.
+
 - **What a session says in the console is read, not parsed.** Both transcripts —
   the workspace's and a ticket's — showed a message exactly as it was written,
   so an answer arrived as its own source: `##` in front of the headings,
