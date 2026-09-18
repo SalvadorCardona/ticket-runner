@@ -135,16 +135,25 @@ fi
 
 # The address the console answers on — read from the configuration rather than
 # assumed, so a machine that moved the port is told where its own console is.
-CONSOLE=$(python3 - "$CONFIG" <<'PY'
+# The second word says how it is opened: "claimed" when somebody chose a token
+# or a sign-in, "open" while its first connection is still waiting for one.
+CONSOLE_STATE=$(python3 - "$CONFIG" <<'PY'
 import pathlib, sys, tomllib
 try:
     with pathlib.Path(sys.argv[1]).open("rb") as handle:
         web = tomllib.load(handle).get("web", {})
 except (OSError, ValueError):
     web = {}
-print("http://%s:%d" % (web.get("host") or "127.0.0.1", int(web.get("port") or 8787)))
+chosen = web.get("token") or (web.get("email") and web.get("password"))
+print("http://%s:%d %s" % (
+    web.get("host") or "127.0.0.1",
+    int(web.get("port") or 8787),
+    "claimed" if chosen else "open",
+))
 PY
 )
+CONSOLE=${CONSOLE_STATE% *}
+CONSOLE_CLAIMED=${CONSOLE_STATE##* }
 
 # --- 5. clickable session links ---------------------------------------------
 # Registers ticket-runner:// with the desktop, so the Session cell of a ticket
@@ -228,14 +237,20 @@ printf '  %sconfiguration%s  %s\n' "$DIM" "$RESET" "$CONFIG"
 printf '  %sready tickets%s  ticket-runner list\n' "$DIM" "$RESET"
 printf '  %sone run%s        ticket-runner run\n' "$DIM" "$RESET"
 printf '  %sfollow along%s   ticket-runner logs -f\n' "$DIM" "$RESET"
-# The console is up, so what is worth printing is the address that opens it —
-# token included, because the one it draws on first start is otherwise only
-# readable from a state file nobody would think to look in.
+# The console is up, so what is worth printing is the address that opens it.
+# Which address depends on what it is waiting for: a console nobody has claimed
+# opens on its first connection, and the token would only skip the page that
+# asks for the password. Otherwise the token is printed with it, since the one
+# drawn on first start is otherwise readable only from a state file nobody would
+# think to look in.
 TOKEN=""
-if [ "${CONSOLE_UP:-0}" = "1" ]; then
+if [ "${CONSOLE_UP:-0}" = "1" ] && [ "$CONSOLE_CLAIMED" = "claimed" ]; then
     TOKEN=$("$BIN" serve --print-token 2>/dev/null || true)
 fi
-if [ -n "$TOKEN" ]; then
+if [ "${CONSOLE_UP:-0}" = "1" ] && [ "$CONSOLE_CLAIMED" = "open" ]; then
+    printf '  %sweb console%s    %s   %s(set your password there — nothing to paste)%s\n' \
+        "$DIM" "$RESET" "$CONSOLE" "$DIM" "$RESET"
+elif [ -n "$TOKEN" ]; then
     printf '  %sweb console%s    %s/?token=%s\n' "$DIM" "$RESET" "$CONSOLE" "$TOKEN"
 else
     printf '  %sweb console%s    ticket-runner serve   %s(board, CLI and chat, on %s)%s\n' "$DIM" "$RESET" "$DIM" "$CONSOLE" "$RESET"

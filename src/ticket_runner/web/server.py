@@ -14,6 +14,9 @@ is why:
   token — or a configured sign-in — is refused rather than served;
 - every request carries a token — as a header, as the cookie the first `?token=`
   sets, or as the cookie signing in with an email and a password sets;
+- until somebody has said how this console is opened, there is nothing to carry:
+  a console nobody claimed serves the first connection instead (see `setup`),
+  and the password typed there is what closes that door;
 - a request from a browser page that is not the console is rejected: writes
   demand a header a cross-origin form cannot set, and the `Host` header must
   name the address the console was reached on, which is what stops a hostile
@@ -42,6 +45,7 @@ from urllib.parse import parse_qs, urlparse
 from .. import config as config_module
 from .. import store
 from ..config import Config, state_dir
+from . import setup
 from .api import Api
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -117,6 +121,18 @@ def sign_in(config: Config, secret: str) -> SignIn | None:
         secret.encode(), f"{email.lower()}\n{password}".encode(), hashlib.sha256
     ).hexdigest()
     return SignIn(email=email, password=password, cookie=proof)
+
+
+def claimable(config: Config, entry: SignIn | None) -> bool:
+    """Has anybody decided how this console is opened? — see `setup`.
+
+    Two ways of deciding it, and neither has been taken: a sign-in, which is
+    `None` until an email *and* a password are set, in the file or in the
+    environment; or a token written in the configuration on purpose. The token
+    drawn on first start is not a decision — it is what the console does when
+    nobody has said anything, and it is the state the first connection is for.
+    """
+    return entry is None and not config.web.token
 
 
 class Console(ThreadingHTTPServer):
@@ -267,6 +283,12 @@ class Handler(BaseHTTPRequestHandler):
                 },
             )
 
+        # The way in, for somebody who already has one: a console still
+        # unclaimed has a password waiting to be set, and whoever opened it with
+        # its token would otherwise never be shown where.
+        if route == "/setup" and claimable(self.api.config, self.entry):
+            return self._send(200, SETUP.encode(), "text/html; charset=utf-8")
+
         if route == "/":
             return self._static("index.html")
         if route.startswith("/static/"):
@@ -316,11 +338,14 @@ class Handler(BaseHTTPRequestHandler):
 
         if not self._host_is_ours():
             return self._fail(421, "this console is not served under that name")
-        # Signing in is the one write that cannot be authorised beforehand: it
-        # is what produces the authorisation. Everything else about it holds —
-        # the name it is reached under, and the header below.
+        # Two writes cannot be authorised beforehand, because they are what
+        # produces the authorisation: signing in, and — on a console nobody has
+        # claimed — the first connection that gives it a password to sign in
+        # with. Everything else about them holds: the name they are reached
+        # under, and the header below.
         signing_in = route == "/api/login"
-        if not signing_in and not self._authorised(parse_qs(parsed.query)):
+        opening = signing_in or route == "/api/setup"
+        if not opening and not self._authorised(parse_qs(parsed.query)):
             return self._fail(401, "token missing or wrong")
         # A cookie alone is not consent: a page you have open elsewhere can post
         # a form to this port with your cookie attached, but it cannot set a
@@ -332,6 +357,8 @@ class Handler(BaseHTTPRequestHandler):
         if signing_in:
             return self._sign_in(payload)
         try:
+            if route == "/api/setup":
+                return self._setup(payload)
             if route == "/api/tickets":
                 return self._json(
                     self.api.create_ticket(
@@ -424,10 +451,40 @@ class Handler(BaseHTTPRequestHandler):
             },
         )
 
+    def _setup(self, payload: dict) -> None:
+        """The first connection: everything at once, and a way in at the end.
+
+        Signing the browser in rather than sending it back to the door it has
+        just built: the password was typed one second ago, and asking for it
+        again would be the token all over again. The console keeps its new
+        sign-in on the server object, because that is where the way in is read
+        from — a restart would find the same one in the file.
+        """
+        if not claimable(self.api.config, self.entry):
+            return self._fail(404, "this console has already been set up")
+        result = setup.apply(self.api, payload)
+        entry = sign_in(self.api.config, self.server.secret)  # type: ignore[attr-defined]
+        if entry is None:  # the write went through and said nothing: refuse to guess
+            return self._fail(500, "the credentials were not written")
+        self.server.entry = entry  # type: ignore[attr-defined]
+        self._send(
+            200,
+            json.dumps(result, ensure_ascii=False).encode(),
+            "application/json",
+            {
+                "Set-Cookie": (
+                    f"{COOKIE}={entry.cookie}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000"
+                )
+            },
+        )
+
     def _unauthorised(self, route: str) -> None:
         if route.startswith("/api/"):
             return self._fail(401, "token missing or wrong")
-        page = SIGN_IN if self.entry else GATE
+        if claimable(self.api.config, self.entry):
+            page = SETUP
+        else:
+            page = SIGN_IN if self.entry else GATE
         self._send(401, page.encode(), "text/html; charset=utf-8")
 
     def _stream(self) -> None:
@@ -489,17 +546,17 @@ _STYLE = """<style>
 """
 
 
-def _page(title: str, body: str) -> str:
+def _page(title: str, body: str, style: str = "") -> str:
     """The way in, drawn by this server rather than by the bundle.
 
-    A browser that has not got in cannot load the console, so these two pages
+    A browser that has not got in cannot load the console, so these three pages
     are the only HTML written in Python — and, like everything else served
     here, they reach for nothing that is not on this machine.
     """
     return (
         '<!doctype html>\n<meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">\n'
-        f"<title>ticket-runner — {title}</title>\n" + _STYLE + body
+        f"<title>ticket-runner — {title}</title>\n" + _STYLE + style + body
     )
 
 
@@ -551,6 +608,138 @@ async function enter(form){
 )
 
 
+# The first connection. One page, in the order somebody would say it: who opens
+# this console, then the board, then the words every ticket is written against,
+# then the phone. Everything but the first pair may be left empty and set later
+# in the Settings tab — the password is the only thing that cannot wait, since
+# it is what shuts this door.
+_SETUP_STYLE = """<style>
+ body{place-items:start center;padding:3rem 0}
+ form{width:min(36rem,92vw)}
+ fieldset{border:1px solid #262b36;border-radius:11px;padding:.9rem 1rem 1.1rem;margin:0 0 1rem}
+ legend{color:#e7e9ee;font-weight:600;padding:0 .4rem}
+ legend span{color:#6b7484;font-weight:400}
+ fieldset p{margin:0 0 .8rem}
+ textarea{width:100%;box-sizing:border-box;background:#0f1115;border:1px solid #2c3240;color:inherit;
+          border-radius:9px;padding:.7rem .8rem;font:inherit;min-height:7rem;resize:vertical}
+ input+input,textarea+input,input+textarea{margin-top:.6rem}
+ button[disabled]{background:#2c3240;cursor:progress}
+ ul{margin:1rem 0 0;padding-left:1.1rem;color:#98a2b3;font-size:.9rem}
+ li b{color:#7dd3a8;font-weight:600}
+ a{color:#3b82f6}
+</style>
+"""
+
+SETUP = _page(
+    "first connection",
+    """<form onsubmit="start(this);return false">
+  <h1>ticket-runner</h1>
+  <p>Nobody has claimed this console yet. What you fill in here is written into
+     your <code>config.toml</code>, and the first two lines are how you open it
+     from now on — this page does not come back.</p>
+
+  <fieldset>
+    <legend>You</legend>
+    <p>The email and the password the console will ask for instead of its token.</p>
+    <input name="email" type="email" autofocus placeholder="email" autocomplete="username"
+           spellcheck="false">
+    <input name="password" type="password" placeholder="password"
+           autocomplete="new-password">
+    <input name="confirm" type="password" placeholder="the same password again"
+           autocomplete="new-password">
+  </fieldset>
+
+  <fieldset>
+    <legend>Notion <span>— or leave it for later</span></legend>
+    <p>Create an internal integration on <code>notion.so/my-integrations</code>, share one
+       page with it — the <code>···</code> menu → <em>Connections</em> — and paste the two
+       here. The board, its five databases and their columns are built under that page.</p>
+    <input name="notion_token" placeholder="ntn_… — the integration token"
+           autocomplete="off" spellcheck="false">
+    <input name="notion_page" placeholder="the link of the page you shared"
+           autocomplete="off" spellcheck="false">
+  </fieldset>
+
+  <fieldset>
+    <legend>Your rules <span>— read into every ticket</span></legend>
+    <p>Who you are, what the stack is, how you like things written. It reaches every
+       session before the project's brief and before the ticket itself, which is what
+       makes an answer sound like you. One screen: you pay for it on every ticket.
+       What you write here <em>replaces</em> the Context page; left empty, it is left
+       alone.</p>
+    <textarea name="rules" placeholder="I am …, I work on …, never …"></textarea>
+  </fieldset>
+
+  <fieldset>
+    <legend>Telegram <span>— optional</span></legend>
+    <p>Where a blocked ticket asks its question, and what you answer lands on the ticket.
+       @BotFather → <code>/newbot</code>, then say anything to your new bot: the chat id is
+       read back from it, so leave it empty unless you know it.</p>
+    <input name="telegram_token" placeholder="the bot token" autocomplete="off"
+           spellcheck="false">
+    <input name="telegram_chat" placeholder="chat id — found on its own" autocomplete="off"
+           spellcheck="false">
+  </fieldset>
+
+  <button type="submit">Set it up</button>
+  <p class="said" id="said"></p>
+  <ul id="steps"></ul>
+  <p id="after" hidden><a href="/">Open the console →</a></p>
+</form>
+<script>
+async function start(form){
+  const said = document.getElementById('said');
+  const steps = document.getElementById('steps');
+  const after = document.getElementById('after');
+  const button = form.querySelector('button');
+  said.textContent = '';
+  steps.textContent = '';
+  const body = {};
+  for (const field of form.elements) if (field.name) body[field.name] = field.value;
+  button.disabled = true;
+  button.textContent = 'Setting it up…';
+  try {
+    const answer = await fetch('/api/setup', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-Ticket-Runner': '1'},
+      body: JSON.stringify(body),
+    });
+    const payload = await answer.json().catch(() => ({}));
+    if (!answer.ok) {
+      said.textContent = payload.error || 'that did not work';
+      button.disabled = false;
+      button.textContent = 'Set it up';
+      return;
+    }
+    for (const step of payload.steps || []) {
+      const line = document.createElement('li');
+      const verb = document.createElement('b');
+      verb.textContent = step[0] + ' ';
+      line.appendChild(verb);
+      line.appendChild(document.createTextNode(step[1]));
+      steps.appendChild(line);
+    }
+    /* A step that failed is said, and the console is opened all the same: the
+       sign-in is already yours, and the rest is the Settings tab's to finish. */
+    if (payload.problem) {
+      said.textContent = payload.problem;
+      button.textContent = 'Set up — one thing did not work';
+      after.hidden = false;
+      return;
+    }
+    location = '/';
+  } catch (error) {
+    said.textContent = String(error);
+    button.disabled = false;
+    button.textContent = 'Set it up';
+  }
+}
+</script>
+""",
+    _SETUP_STYLE,
+)
+
+
 def serve(
     config: Config,
     *,
@@ -576,9 +765,16 @@ def serve(
 
     # What to print as the way in. A console with a sign-in is opened by typing
     # an address, which is the whole point of having one — putting the token
-    # back in that line would be telling you to paste a secret anyway.
+    # back in that line would be telling you to paste a secret anyway. And one
+    # nobody has claimed is opened by the address alone: the first connection is
+    # what it serves, and asking for a token to reach it would be the circle
+    # that page exists to break.
     def opening(address: str) -> str:
-        return f"{address}  —  sign in as {entry.email}" if entry else f"{address}/?token={secret}"
+        if entry:
+            return f"{address}  —  sign in as {entry.email}"
+        if claimable(config, entry):
+            return f"{address}  —  not set up yet: the first browser to open it sets its password"
+        return f"{address}/?token={secret}"
 
     api = Api(config)
     try:

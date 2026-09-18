@@ -18,6 +18,31 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Added
 
+- **The console sets itself up on the first connection, and nobody has to find a
+  token again.** A token protects an installation that is already set up; a
+  fresh one has nothing to protect yet, and being sent to look for a secret on
+  disk before you may type your own was the wrong way round. So a console
+  **nobody has claimed** — no `web.token` chosen, no email and password set —
+  now serves a form rather than a door, and `http://127.0.0.1:8787` is the whole
+  of the address. One press does the installation in the order somebody would
+  say it: the email and password that open the console from then on, and which
+  sign the browser in there and then rather than asking for what was typed a
+  second ago; the Notion token and the link of the page you shared, under which
+  the five databases are built by the very code `ticket-runner init` runs; the
+  rules that reach every session before the project's brief and before the
+  ticket; and a Telegram bot token, whose chat id is read back from the bot so
+  there is nothing to look up. Everything but the first pair may be left for the
+  Settings tab, and a step that fails is said in the report rather than undone —
+  pages created in somebody's Notion are not a thing to roll back. That first
+  pair is also what closes the page for good: the next request is asked to sign
+  in. An unclaimed console is necessarily on loopback — `serve` refuses any
+  other host without a token or a sign-in — so the first browser to arrive is
+  somebody sitting at that machine; on a machine you share, set `web.token` or
+  the sign-in before starting the console, and `serve` says which of the two
+  states it is in. An installation that already works and has never had a
+  password is unclaimed too: the same form, with the Notion half already done,
+  at `/setup`.
+
 - **A project is a page you open and change, in the layout that suits the
   question.** The console's Projects screen only ever read: a list of what this
   installation knows of, and a link out to Notion for anything you wanted to

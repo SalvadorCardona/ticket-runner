@@ -551,6 +551,12 @@ token = ""
 # Both set, the page asks for them instead of for the token, and a bookmark on
 # http://127.0.0.1:8787 is enough — no secret to paste, nothing in the history.
 #
+# Neither has to be typed here either. A console nobody has claimed — no `token`
+# above, no pair here — serves its *first connection* instead of a door: the
+# address alone opens a form that writes these two, and the Notion token, the
+# workspace page, the rules and the Telegram bot with them. Filling it in is
+# what closes it, and there is no second first connection.
+#
 #   email = "you@example.com"
 #   password = "the one you would actually remember"
 #
