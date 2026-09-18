@@ -53,7 +53,7 @@ import { TICKETS, boardHref } from "@/resources/tickets"
  * every entry keeps its name in a tooltip.
  */
 export function AppSidebar({ route }: { route: Route }) {
-  const { board, runner, sessions, connection, refresh } = useConsole()
+  const { board, sessions, connection, refresh } = useConsole()
   const { theme, toggle } = useTheme()
   const { state, isMobile, setOpenMobile } = useSidebar()
   const t = useT()
@@ -125,33 +125,17 @@ export function AppSidebar({ route }: { route: Route }) {
 
   return (
     <Sidebar collapsible="icon">
+      {/* A mark and a name, and nothing else. The version used to sit under the
+          name in small type, which made the corner a block to read rather than
+          a sign to recognise — and the header already says it, louder, on the
+          only day it matters: the one where an update is waiting. */}
       <SidebarHeader>
-        <div
-          className={cn(
-            "flex items-center gap-2.5 px-2 py-1.5",
-            collapsed && "justify-center px-0"
-          )}
-        >
-          {/* The one place the accent is spent on something that is not a
-              button: the mark, so the eye has somewhere to start. */}
-          <span
-            aria-hidden
-            className="bg-primary flex size-7 shrink-0 items-center justify-center rounded-lg text-sm leading-none"
-          >
+        <div className={cn("flex h-8 items-center gap-2 px-2", collapsed && "justify-center px-0")}>
+          <span aria-hidden className="shrink-0 text-base leading-none">
             🎫
           </span>
           {!collapsed ? (
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold tracking-[-0.01em]">
-                ticket<span className="text-muted-foreground">-runner</span>
-              </div>
-              {runner?.version ? (
-                <div className="text-muted-foreground truncate font-mono text-[0.65rem]">
-                  v{runner.version}
-                  {runner.update ? ` · ${t("{{version}} waiting", { version: runner.update })}` : ""}
-                </div>
-              ) : null}
-            </div>
+            <span className="truncate text-sm font-semibold">ticket-runner</span>
           ) : null}
         </div>
       </SidebarHeader>
