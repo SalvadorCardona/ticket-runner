@@ -13,6 +13,9 @@ the run lock and before a single ticket is claimed, so no session is ever
 swapped out from under itself; the code that just landed takes over on the next
 pass, which is at most one interval away.
 
+The console is the exception, and `restart_console` is why: it is one process
+that answers for weeks, so nothing about it takes over on its own.
+
 An installation made from a local copy (`TR_SRC=.`) has no remote to compare
 itself against. That is not an error and never fails a run — it is said once,
 and the runner carries on.
@@ -199,12 +202,38 @@ def write_units(interval_seconds: int, app: Path | None = None) -> Path:
     return units
 
 
+def restart_console() -> None:
+    """Put the console on the code that just landed, if it is running.
+
+    A run is a process that ends, so the next pass is already the new version.
+    The console is not: it is started once and answers for weeks, with the
+    Python it was given at boot — while serving `web/static/` from the disk,
+    which an update has just replaced. The two then disagree, and the browser is
+    where it shows: on 18 September 2026 the project list drew and opening a
+    project answered `no such route: /api/projects/<id>`, because the page was
+    this morning's and the server it asked was the day before's.
+
+    `try-restart` rather than `restart`, for the reason the unit is written with:
+    an update never turns on what somebody turned off. And nothing here is worth
+    failing an update over — a console left on the old code is a console to
+    restart by hand, not a version to roll back.
+
+    Typed *in* the console (`update` is a verb it offers), this cuts the very
+    command that asked for it: the page loses its stream and reconnects onto the
+    new version, which is what was asked for. The unit says the same about a
+    chat turn — a restart costs the connection and nothing else.
+    """
+    git.run(["systemctl", "--user", "try-restart", "ticket-runner-web.service"], timeout=30)
+
+
 def apply(status: Status, interval_seconds: int, app: Path | None = None) -> str:
     """Move the installation to `status.latest`. Returns "" or what went wrong.
 
     What `install.sh` writes outside the app directory is written again from the
     sources that just landed — otherwise a version changing the launcher or the
-    systemd units would be installed everywhere except where it counts.
+    systemd units would be installed everywhere except where it counts. And the
+    console is restarted onto it, because it is the one part of the installation
+    that would otherwise keep running the old code.
     """
     app = app or app_dir()
     try:
@@ -218,6 +247,7 @@ def apply(status: Status, interval_seconds: int, app: Path | None = None) -> str
         if shutil.which("systemctl"):
             write_units(interval_seconds, app)
             git.run(["systemctl", "--user", "daemon-reload"])
+            restart_console()
     except (OSError, subprocess.SubprocessError) as error:
         return f"code updated, but the installed files could not be regenerated: {error}"
     return ""
