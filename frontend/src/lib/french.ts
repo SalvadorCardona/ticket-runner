@@ -265,10 +265,19 @@ export const FRENCH: Record<string, string> = {
   "Saving…": "Enregistrement…",
 
   /* -- the projects ----------------------------------------------------------- */
+  /* `Projects`, `Project`, `Repository`, `Where it is` and `The brief` are
+     already said above, where the board and the configuration say them. */
   "what the tickets are about": "ce dont parlent les tickets",
   "What the tickets are about.": "Ce dont parlent les tickets.",
+  "What the tickets are about: where the work happens, and what conventions hold there. One with no repository is not a mistake — its tickets come back as a document.":
+    "Ce dont parlent les tickets : où se fait le travail, et quelles conventions y règnent. Un projet sans dépôt n'est pas une erreur — ses tickets reviennent sous forme de document.",
   "A project says where the work happens and what conventions hold there. One with no repository is not a mistake: its tickets come back as a document.":
     "Un projet dit où se fait le travail et quelles conventions y règnent. Un projet sans dépôt n'est pas une erreur : ses tickets reviennent sous forme de document.",
+  cards: "cartes",
+  Kind: "Nature",
+  Repository: "Dépôt",
+  "On this machine": "Sur cette machine",
+  Tickets: "Tickets",
   "code work": "travail de code",
   "document work": "travail de rédaction",
   "{{count}} ticket(s)": "{{count}} ticket(s)",
@@ -285,6 +294,23 @@ export const FRENCH: Record<string, string> = {
     "Aucun projet pour l'instant — un ticket sans projet revient sous forme de document.",
   "is where a repository is looked for, and cloned into when it is nowhere.":
     "est l'endroit où un dépôt est cherché, et cloné quand il n'est nulle part.",
+  "This project could not be read.": "Ce projet n'a pas pu être lu.",
+  "No project called “{{name}}”.": "Aucun projet ne s'appelle « {{name}} ».",
+  "Nothing is written on this page, so its tickets are told about the workspace and nothing about the project.":
+    "Rien n'est écrit sur cette page : ses tickets reçoivent le contexte de l'espace de travail et rien sur le projet.",
+  "This project is a line in config.toml and has no page: the board has never heard of it, so there is nothing here to write a brief on.":
+    "Ce projet est une ligne de config.toml et n'a pas de page : le tableau n'en a jamais entendu parler, il n'y a donc rien ici sur quoi écrire un brief.",
+  "Change its path in the settings.": "Changez son chemin dans les réglages.",
+  "This project is a line in config.toml; it is changed in the settings.":
+    "Ce projet est une ligne de config.toml ; il se modifie dans les réglages.",
+  "What the board calls it. A ticket points at this page, not at this name.":
+    "Le nom que lui donne le tableau. Un ticket pointe vers cette page, pas vers ce nom.",
+  "owner/repo, or the clone URL. Empty, and its tickets come back as a document.":
+    "propriétaire/dépôt, ou l'URL du clone. Vide, ses tickets reviennent sous forme de document.",
+  "Only needed where the repository cannot be found on its own. Worktrees are made beside it, never in it.":
+    "Utile seulement quand le dépôt ne se trouve pas tout seul. Les worktrees sont créés à côté, jamais dedans.",
+  "The audience, the voice, the conventions, the things never to do. Every ticket of this project is told it before it is told the ticket.":
+    "Le public, le ton, les conventions, ce qu'il ne faut jamais faire. Chaque ticket de ce projet le reçoit avant de recevoir le ticket.",
 
   /* -- the standing context --------------------------------------------------- */
   Context: "Contexte",

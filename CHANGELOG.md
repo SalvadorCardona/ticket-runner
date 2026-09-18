@@ -18,6 +18,24 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Added
 
+- **A project is a page you open and change, in the layout that suits the
+  question.** The console's Projects screen only ever read: a list of what this
+  installation knows of, and a link out to Notion for anything you wanted to
+  change. But a project is where every ticket of that project starts from — its
+  repository, and the brief that gives an answer your voice rather than
+  nobody's — so it is now a resource like the board. Click a project and you get
+  its page: what it declares, how many tickets point at it, and the brief
+  itself, drawn rather than shown. *Edit* opens the four fields the page holds —
+  the name, the repository, the path on this machine, and the brief — and what
+  is written goes to the column your page already carries, `Repository`,
+  `github` or `repo`, rather than to a second one beside it. The list comes in
+  **two layouts**, and the one you are on is in the address: *cards*, to
+  recognise a project by its name and its shape, and *table*, to compare them —
+  which of these eleven has no repository is a question a grid of cards will not
+  answer. A project only `[projects]` names has no page to write to: it says so
+  and points at the settings, where that line lives. The old `/?page=projects`
+  still lands on the list, so a link you kept goes on working.
+
 - **The runner stops before the subscription is spent, and leaves you a share of
   it.** A runner left to itself would chew through every window it is given, so
   the terminal you open yourself at five o'clock finds nothing left.

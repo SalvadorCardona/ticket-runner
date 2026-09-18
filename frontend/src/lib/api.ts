@@ -4,6 +4,7 @@ import type {
   Context,
   Message,
   Pair,
+  ProjectDetail,
   Projects,
   RunnerState,
   Saved,
@@ -72,6 +73,7 @@ export const api = {
   schedules: () => request<Schedules>("/api/schedules"),
   chat: () => request<{ messages: Message[] } & ChatState & { busy?: boolean }>("/api/chat"),
   settings: () => request<Settings>("/api/settings"),
+  project: (id: string) => request<ProjectDetail>(`/api/projects/${id}`),
   ticket: (id: string) => request<TicketDetail>(`/api/tickets/${id}`),
   talk: (id: string) => request<Talk>(`/api/tickets/${id}/talk`),
 
@@ -94,6 +96,8 @@ export const api = {
     github?: Pair[]
   }) => request<Saved>("/api/settings", payload),
   saveContext: (text: string) => request<{ text: string }>("/api/context", { text }),
+  saveProject: (id: string, values: Record<string, unknown>) =>
+    request<ProjectDetail>(`/api/projects/${id}`, values),
   saveSchedule: (id: string, values: Record<string, unknown>) =>
     request<{ id: string }>(`/api/schedules/${id}`, values),
   createSchedule: (values: Record<string, unknown>) =>

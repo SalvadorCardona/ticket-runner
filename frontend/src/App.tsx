@@ -6,7 +6,6 @@ import { ConsolePane } from "@/components/console/console-pane"
 import { ContextPane } from "@/components/console/context-pane"
 import { Header } from "@/components/console/header"
 import { LivePane } from "@/components/console/live-pane"
-import { ProjectsPane } from "@/components/console/projects-pane"
 import { ResourcePane } from "@/components/console/resource-pane"
 import { SchedulesPane } from "@/components/console/schedules-pane"
 import { TicketTalk } from "@/components/console/ticket-talk"
@@ -18,6 +17,7 @@ import { useBoard } from "@/lib/board-store"
 import { useT } from "@/lib/i18n"
 import { useRoute, type Page } from "@/lib/router"
 import { cn } from "@/lib/utils"
+import { PROJECTS } from "@/resources/projects"
 import { SETTINGS } from "@/resources/settings"
 import { TICKETS } from "@/resources/tickets"
 
@@ -35,7 +35,6 @@ import { TICKETS } from "@/resources/tickets"
 const CRUMB: Record<Page, string> = {
   console: "console",
   live: "live",
-  projects: "projects",
   context: "context",
   schedules: "schedules",
 }
@@ -95,9 +94,11 @@ function Console() {
       ? [t("workspace"), t(CRUMB[route.page])]
       : resourceId === SETTINGS
         ? [t("workspace"), t("settings")]
-        : ticketId
-          ? [t("workspace"), t("board"), `#${ticket?.short ?? String(ticketId).slice(-8)}`]
-          : [t("workspace"), t("board")]
+        : resourceId === PROJECTS
+          ? [t("workspace"), t("projects")]
+          : ticketId
+            ? [t("workspace"), t("board"), `#${ticket?.short ?? String(ticketId).slice(-8)}`]
+            : [t("workspace"), t("board")]
 
   // Each pane keeps its place while another is shown, so a transcript
   // half-read and a text half-typed survive a trip through the menu.
@@ -154,11 +155,6 @@ function Console() {
             {route.kind === "page" && route.page === "schedules" ? (
               <div className="scroll-thin col-start-1 row-start-1 min-h-0 overflow-y-auto">
                 <SchedulesPane />
-              </div>
-            ) : null}
-            {route.kind === "page" && route.page === "projects" ? (
-              <div className="scroll-thin col-start-1 row-start-1 min-h-0 overflow-y-auto">
-                <ProjectsPane />
               </div>
             ) : null}
 

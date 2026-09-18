@@ -281,6 +281,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(self.api.board())
             if route == "/api/projects":
                 return self._json(self.api.all_projects())
+            if match := re.fullmatch(r"/api/projects/([0-9a-fA-F-]{32,36})", route):
+                return self._json(self.api.project(match.group(1)))
             if route == "/api/context":
                 return self._json(self.api.context())
             if route == "/api/schedules":
@@ -351,6 +353,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(self.api.chat.send(str(payload.get("text", ""))))
             if route == "/api/chat/reset":
                 return self._json(self.api.chat.reset())
+            if match := re.fullmatch(r"/api/projects/([0-9a-fA-F-]{32,36})", route):
+                return self._json(self.api.save_project(match.group(1), payload))
             if route == "/api/settings":
                 return self._json(self.api.save_settings(payload))
             if route == "/api/context":

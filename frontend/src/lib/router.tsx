@@ -11,7 +11,7 @@ import { parseLink } from "react-resource-view"
  * `/?view=console/tickets/read/<id>`, one section of the settings is
  * `/?view=console/settings/read/config/notify` — the shape react-resource-view
  * writes in its `query` routing mode — and the panes that are not resources
- * are `/?page=live`, `/?page=projects`, `/?page=context`, `/?page=schedules`.
+ * are `/?page=live`, `/?page=context`, `/?page=schedules`.
  *
  * The four primitives below are what that package asks of a router. Written
  * here rather than taken from TanStack: a console with a handful of pages has
@@ -82,20 +82,31 @@ export const navigation: NavigationPortInterface = {
 
 /* -- what an address means ------------------------------------------------ */
 
-export type Page = "live" | "projects" | "context" | "schedules" | "console"
+export type Page = "live" | "context" | "schedules" | "console"
 
 export type Route =
   | { kind: "page"; page: Page }
   | { kind: "resource"; params: ViewResourceContextParams }
 
-const PAGES: Page[] = ["live", "projects", "context", "schedules", "console"]
+const PAGES: Page[] = ["live", "context", "schedules", "console"]
+
+/* A pane that has since become a resource, and the address it is now at.
+ *
+ * `/?page=projects` was a page of its own before the projects were a list you
+ * open a record from; a link somebody bookmarked or pasted into a chat has to
+ * keep landing on the projects rather than on the board. Written out rather
+ * than generated: this module is what the resources address themselves
+ * through, and importing one from here would be a circle.
+ */
+const MOVED: Record<string, string> = { projects: "/?view=console/projects/list" }
 
 export const pageHref = (page: Page) => `/?page=${page}`
 
 export function routeOf(href: string): Route {
   const url = new URL(href, window.location.origin)
-  const page = url.searchParams.get("page") as Page | null
-  if (page && PAGES.includes(page)) return { kind: "page", page }
+  const page = url.searchParams.get("page") ?? ""
+  if (MOVED[page]) return { kind: "resource", params: parseLink(MOVED[page]) }
+  if (PAGES.includes(page as Page)) return { kind: "page", page: page as Page }
   return { kind: "resource", params: parseLink(url.pathname + url.search) }
 }
 

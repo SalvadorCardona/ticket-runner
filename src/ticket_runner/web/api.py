@@ -275,6 +275,65 @@ class Api:
             "storage": self.config.storage.mode,
         }
 
+    def project(self, page_id: str) -> dict:
+        """One project, as the list says it, plus what is written on its page.
+
+        The row is `all_projects`' own, so a project opened reads like the
+        project listed — and what a card cannot carry is added here: the brief.
+        Which is the reason a project is worth opening at all. It is not
+        decoration on the page, it is standing instructions: the audience, the
+        voice, the conventions, the things never to do. `projects.brief` reads
+        the same text into every ticket of that project.
+        """
+        wanted = page_id.replace("-", "")
+        row = next(
+            (item for item in self.all_projects()["projects"] if item["id"] == wanted), None
+        )
+        if row is None:
+            raise LookupError(f"no project with id {wanted}")
+        return {**row, "content": self.runner.client.blocks_text(page_id)}
+
+    def save_project(self, page_id: str, values: dict) -> dict:
+        """Change one project page from the console.
+
+        Four things, which are the whole of what a project is: its name, the
+        repository its tickets are worked in, the path this machine finds that
+        repository at, and the brief. Never its tickets — those point at the
+        page, and are moved on the board.
+
+        The columns are written under the name the page already carries:
+        a project database is written by hand, so "Repository" is sometimes
+        "github" and sometimes "repo", and a save that invented a second column
+        beside the one somebody filled in would be a save that changes nothing
+        anybody can see. `projects.py` reads them the same way.
+        """
+        database = self.runner.workspace.projects
+        if not database:
+            raise ValueError("this workspace has no projects database")
+        page = self.runner.client.page(page_id)
+        written: dict[str, Any] = {}
+        if "repository" in values:
+            column = _column(page, "Repository", "repository", "github", "repo")
+            written[column] = str(values["repository"] or "")
+        if "path" in values:
+            written[_column(page, "Path", "path")] = str(values["path"] or "")
+        if str(values.get("name", "")).strip():
+            written[self.runner.client.title_property(database)] = str(values["name"]).strip()
+        if not written and "content" not in values:
+            raise ValueError("nothing to change")
+        if written:
+            self.runner.client.update(database, page_id, written)
+        # Replacing, not appending: the brief is a value. See `save_context`,
+        # which is the same gesture on the one page above all projects.
+        if "content" in values:
+            self.runner.client.replace_markdown(page_id, str(values["content"]))
+        # The index is kept for ten minutes, and a rename that took that long to
+        # show would be a rename somebody made twice.
+        self._projects = {}
+        self._projects_at = 0.0
+        self.hub.publish("projects", saved=page_id)
+        return self.project(page_id)
+
     # -- the standing context -------------------------------------------------
 
     def context(self) -> dict:
@@ -660,6 +719,22 @@ def _first(page: store.Page, *names: str) -> str:
         if value not in (None, "", []):
             return str(value)
     return ""
+
+
+def _column(page: store.Page, *names: str) -> str:
+    """The first of those columns the page actually carries, by name.
+
+    What `_first` reads, written back: a value goes to the column somebody
+    filled in rather than to a second one beside it. A page carrying none of
+    them is written under the first name, which is the one this project would
+    have been given had it been created here.
+    """
+    lookup = {key.lower(): key for key in page.properties}
+    for name in names:
+        found = lookup.get(name.lower())
+        if found is not None:
+            return found
+    return names[0]
 
 
 def _voice(comment: store.Comment, me: str) -> str:
