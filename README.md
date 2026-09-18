@@ -494,8 +494,9 @@ board's interface, and the directory can live in a repository of its own.
 The console works against it exactly as against Notion — the board, a ticket's page, its
 discussion, the live steps. And it gained three screens that make a Markdown-only
 installation self-sufficient: **Projects** (every project this installation knows of, the
-board's and the ones only `[projects]` names), **Context** (the standing text every ticket
-is told first, editable rather than read-only) and an editable **Schedules** — a row opens
+board's and the ones only `[projects]` names — each of them a page you open and change),
+**Context** (the standing text every ticket is told first, editable rather than read-only)
+and an editable **Schedules** — a row opens
 into a form, and a new schedule is created unticked, whatever the form said.
 
 ### Both, and what happens when they disagree
@@ -1436,6 +1437,26 @@ terminal opens the very same one, and it survives the browser, the server and th
 An address written anywhere the console shows text — an answer, the output of a command, a
 step of a session, a comment on a ticket — is a link you can click. A pull request the
 runner just opened is one click away, not a URL to read out loud into another tab.
+
+**Projects** is every project this installation knows of, from wherever it knows it: the
+[projects database](#the-projects-database) of your board, the `[projects]` table of your
+configuration, and where the repository turned out to be on this disk. One name on a card
+that says which of the three it came from, how many tickets point at it, and what it
+declares — so "no repository could be found" has somewhere to be answered.
+
+It is drawn in **two layouts**, and the tab you are on is in the address. *Cards* is for a
+workspace you half remember: a project is recognised by its name and its shape rather than
+read. *Table* is for comparing them — which of these eleven has no repository, which has
+no path on this machine — because that is a question a grid of cards will not answer.
+
+**And a project is a page you can change.** Open one and it says what it declares and, under
+that, its *brief* — the audience, the voice, the conventions, the things never to do, which
+every ticket of that project is told before it is told the ticket. *Edit* opens the same
+four fields the page holds: the name, the repository, the path, and the brief itself. What
+is written goes to the column your page already carries — `Repository`, `github` or `repo`,
+whichever you named it — rather than to a second one beside it. A project only `[projects]`
+names has no page to write to, so it says so and points at the settings, where that line
+lives.
 
 **Schedules** is the calendar of [what comes back on its own](#what-comes-back-on-its-own),
 read the way `ticket-runner schedules` reads it: what repeats, at what rhythm, when the next

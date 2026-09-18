@@ -35,6 +35,7 @@ import { useT } from "@/lib/i18n"
 import { visible, type PaneMenuItem } from "@/lib/menu"
 import { pageHref, type Route } from "@/lib/router"
 import { cn } from "@/lib/utils"
+import { PROJECTS, projectsHref } from "@/resources/projects"
 import { SETTINGS, settingsHref } from "@/resources/settings"
 import { TICKETS, boardHref } from "@/resources/tickets"
 
@@ -94,8 +95,8 @@ export function AppSidebar({ route }: { route: Route }) {
     },
     {
       name: t("Projects"),
-      href: pageHref("projects"),
-      page: "projects",
+      href: projectsHref(),
+      resource: PROJECTS,
       icon: FolderGit2,
       priority: 18,
       // No count and no badge, here as under Schedules: the only way to know is

@@ -13,6 +13,7 @@ import { TICKETS, tickets } from "@/resources/tickets"
 
 // Imported for the side effect of declaring themselves: the address is all the
 // package needs to find a resource, and it finds it in the registry.
+import "@/resources/projects"
 import "@/resources/settings"
 
 /* Where react-resource-view draws.

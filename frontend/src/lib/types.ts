@@ -68,6 +68,11 @@ export interface Project {
   tickets?: number
 }
 
+/** One project, opened: the row, and what is written on its page. */
+export interface ProjectDetail extends Project {
+  content: string
+}
+
 export interface Projects {
   projects: Project[]
   workspace_root: string

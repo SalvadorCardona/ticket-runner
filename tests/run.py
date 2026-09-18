@@ -6460,6 +6460,28 @@ def the_console_header_shows_the_version_it_is_given():
 
 
 @case
+def a_project_is_a_resource_with_two_layouts_and_a_form():
+    """Clickable, editable, and drawn two ways — which is what the screen is for.
+
+    Read from the React source rather than from the bundle: the bundle is
+    minified, and what is being checked here is a decision, not a symbol. A
+    project drawn by hand again — a pane with rows in it — would take the page
+    back to a list you can only look at.
+    """
+    declared = (FRONTEND / "src/resources/projects.tsx").read_text(encoding="utf-8")
+    assert "createViewResource" in declared, "the projects are a hand-rolled pane again"
+    assert "cardViewOptionFactory" in declared, "the card layout is gone"
+    assert "tableViewOptionFactory" in declared, "the second layout is gone"
+    assert "canUpdate: true" in declared, "a project is read-only again"
+    assert "api.saveProject" in declared, "nothing writes the project back"
+    page = (FRONTEND / "src/components/console/project-page.tsx").read_text(encoding="utf-8")
+    assert "ResourceViewButton" in page, "the page offers no way into the form"
+    assert (FRONTEND / "src/lib/router.tsx").read_text(encoding="utf-8").count(
+        "?view=console/projects/list"
+    ), "the address the pane had stopped leading to the projects"
+
+
+@case
 def a_turn_is_drawn_as_markdown_on_a_shadcn_bubble():
     """Both sides write markdown, so neither side is shown its source.
 
@@ -7163,6 +7185,62 @@ def the_console_lists_every_project_it_knows_of():
     assert rows["Jeu d'usine"]["source"] == "config"
     assert rows["Jeu d'usine"]["path"] == "/home/salva/workspace/usine"
     assert drawn["storage"] == "markdown"
+
+
+@case
+def the_console_opens_a_project_and_writes_it_back():
+    """A project is a page you can change, and the brief is why it is worth opening.
+
+    What is written goes to the column the page already carries — a project
+    database is written by hand, so "Repository" is sometimes "github" — and a
+    save that invented a second column beside the one somebody filled in would
+    be a save that changes nothing anybody can see.
+    """
+    with _board() as board:
+        page = board.create_row("projects", "ticket-runner", {"github": "user/repo"})
+        board.replace_markdown(page, "Écris en français.")
+
+        api = _markdown_api(board)
+        opened = api.project(page)
+        assert opened["name"] == "ticket-runner"
+        assert opened["repository"] == "user/repo"
+        assert opened["content"] == "Écris en français."
+
+        written = api.save_project(
+            page,
+            {
+                "name": "ticket-runner",
+                "repository": "user/autre-repo",
+                "path": "~/workspace/ticket-runner",
+                "content": "Écris en français, et jamais de pyproject.",
+            },
+        )
+        assert written["repository"] == "user/autre-repo"
+        assert written["path"] == "~/workspace/ticket-runner"
+        assert written["content"] == "Écris en français, et jamais de pyproject."
+        # The column somebody filled in, not a second one beside it.
+        assert store.read(board.page(page), "github") == "user/autre-repo"
+        assert "Repository" not in board.page(page).properties
+
+        # Replacing, not appending: the brief is a value, like the context.
+        api.save_project(page, {"content": "Écris en français, et jamais de pyproject."})
+        assert board.blocks_text(page) == "Écris en français, et jamais de pyproject."
+
+        # A payload with nothing in it says so rather than quietly doing nothing.
+        try:
+            api.save_project(page, {})
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("a change with nothing to change must say so")
+
+        # And a project the console has never heard of is a 404, not an empty page.
+        try:
+            api.project("f" * 32)
+        except LookupError:
+            pass
+        else:
+            raise AssertionError("an unknown project must not read as a blank one")
 
 
 @case
