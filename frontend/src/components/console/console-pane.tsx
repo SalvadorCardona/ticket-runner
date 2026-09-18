@@ -33,8 +33,11 @@ export function ConsolePane() {
     : t("a sentence talks to your workspace · > runs a ticket-runner command")
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="border-b px-3.5 py-2.5">
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* Room at the right for the drawer's own close, which floats over this
+          corner: a heading that ran under it would be a heading with a cross
+          in the middle of it. */}
+      <div className="border-b py-2.5 pr-10 pl-3.5">
         <Eyebrow>{t("the workspace")}</Eyebrow>
         <h3 className="mt-1 text-base leading-tight font-semibold tracking-[-0.01em]">
           {t("Talking to your machine")}

@@ -22,15 +22,14 @@ import {
   lasted,
   when,
 } from "./ticket-bits"
-import { TicketTalk } from "./ticket-talk"
 
 /* One ticket, as a page.
  *
  * The `read` view of the tickets resource: react-resource-view has fetched
  * `/api/tickets/<id>` by the time this draws, and what it holds is the card
  * plus the page under it — the brief, the report a run appended, the notes
- * between. Beside it (or under it, on a phone) is the ticket's discussion,
- * which is how you talk to it.
+ * between. The ticket's discussion is a bubble away, in the drawer: opening
+ * this page is what loads it.
  *
  * It opens the way the board's cards do and then says more: the column as a
  * banner, the title big enough to be the page's title, and the metadata as a
@@ -172,10 +171,6 @@ export function TicketPage() {
             </div>
           )}
         </div>
-
-        {/* On one column there is no pane beside this one: the discussion sits
-            under the page, where a phone expects it. */}
-        <TicketTalk className="border-t min-[861px]:hidden" bounded />
       </div>
     </div>
   )

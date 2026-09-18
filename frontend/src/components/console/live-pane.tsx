@@ -1,19 +1,22 @@
 import { Activity, Gauge, Timer } from "lucide-react"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useConsole } from "@/hooks/use-console"
 import { useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
 import { Eyebrow, PageHead, Panel } from "./frame"
 import { Steps } from "./steps"
+import { Rich } from "./text"
 
 /* What the running tickets are doing, straight from their session logs —
  * without asking the board. The newest session to say something is at the top.
  *
  * Above them, the three numbers somebody opens this page for: how many
  * sessions are writing, how often the timer comes round, what the runner has
- * cost so far. They are read off the state the header already has — this page
- * asks the server for nothing of its own.
+ * cost so far — and, above those, whatever is stopping the whole thing. They
+ * are read off the state every pane already has: this page asks the server for
+ * nothing of its own.
  */
 
 /** An interval, as somebody would say it out loud. */
@@ -85,6 +88,28 @@ export function LivePane() {
           </span>
         }
       />
+
+      {/* The two states that explain a board which is not moving, said on the
+          page about what the runner is doing rather than in a pill over every
+          other one: a timer that is on above a board that stands still has
+          only one other honest reading, and it is "this thing is broken". */}
+      {runner?.credits ? (
+        <Alert variant="destructive" className="mb-5">
+          <AlertDescription>
+            {t(
+              "Out of credit until {{at}}. The subscription's window is spent: tickets stay where they are, and the first run after that takes them again.",
+              { at: runner.credits_at }
+            )}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {runner && !runner.claude ? (
+        <Alert variant="destructive" className="mb-5">
+          <AlertDescription>
+            <Rich text={t("`claude` was not found on this machine: no session can start.")} />
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       <div className="mb-5 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))]">
         <Tile

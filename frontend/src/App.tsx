@@ -2,12 +2,11 @@ import * as React from "react"
 import { ActionList } from "react-data-form"
 
 import { AppSidebar } from "@/components/console/app-sidebar"
-import { ConsolePane } from "@/components/console/console-pane"
 import { ContextPane } from "@/components/console/context-pane"
 import { Header } from "@/components/console/header"
 import { LivePane } from "@/components/console/live-pane"
 import { ResourcePane } from "@/components/console/resource-pane"
-import { TicketTalk } from "@/components/console/ticket-talk"
+import { TalkDrawer } from "@/components/console/talk-drawer"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -23,22 +22,20 @@ import { TICKETS } from "@/resources/tickets"
 
 /* The shape of the page.
  *
- * A menu down the left, and to the right of it two columns. The first is what
- * the address names: the board, a ticket, the live sessions, the settings. The
- * second is the thing you talk to while looking at the first — the workspace
- * console, or, on a ticket's page, that ticket. Below 861px there is only room
- * for one column: the console becomes an entry in the menu like the rest, and
- * a ticket's discussion sits under its page. Below 768px the menu is a drawer.
+ * A menu down the left, and one column beside it: what the address names — the
+ * board, a ticket, the live sessions, the settings. There used to be a second
+ * one, holding whatever you talk to while looking at the first, with an entry
+ * in the menu to reach it on a phone and a switch in the bar to fold it away.
+ * It is a drawer now, opened by the bubble in the bottom corner, at every
+ * width: the page keeps its width until you ask for the conversation, and
+ * there is one way in rather than three. Below 768px the menu is a drawer too.
  */
 
 /** What each pane is called in the bar's path. Lower case: it is a segment, not a title. */
 const CRUMB: Record<Page, string> = {
-  console: "console",
   live: "live",
   context: "context",
 }
-
-const ASIDE = "ticket-runner-aside"
 
 function Console() {
   const route = useRoute()
@@ -66,24 +63,6 @@ function Console() {
     const known = board.tickets.find((item) => item.id === ticketId)
     if (known) openTicket(known)
   }, [ticketId, board, openTicket, closeTicket])
-
-  const [aside, setAside] = React.useState(() => {
-    try {
-      return localStorage.getItem(ASIDE) !== "hidden"
-    } catch {
-      return true
-    }
-  })
-  const toggleAside = () => {
-    setAside((shown) => {
-      try {
-        localStorage.setItem(ASIDE, shown ? "hidden" : "shown")
-      } catch {
-        // Remembered for as long as the tab is open, then.
-      }
-      return !shown
-    })
-  }
 
   // The bar says the path, not the title: `workspace / board / #3f2a1c`. The
   // page under it opens with the heading, so a ticket is named here by its id
@@ -119,21 +98,14 @@ function Console() {
     )
   }
 
-  const twoColumns = aside ? "min-[861px]:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]" : ""
-
   return (
     <>
       <AppSidebar route={route} />
       <SidebarInset className="min-h-0 overflow-hidden">
         <div className="flex h-full min-h-0 flex-col">
-          <Header
-            crumbs={crumbs}
-            aside={aside}
-            asideLabel={ticketId ? t("the discussion") : t("the console")}
-            onToggleAside={toggleAside}
-          />
+          <Header crumbs={crumbs} />
 
-          <div className={cn("grid min-h-0 flex-1 grid-cols-1", twoColumns)}>
+          <div className="grid min-h-0 flex-1 grid-cols-1">
             {route.kind === "resource" ? (
               <div
                 className={cn(
@@ -149,29 +121,13 @@ function Console() {
                 text somebody is half-way through rewriting, and a trip through
                 the menu must not cost it. */}
             {cell("context", <ContextPane />)}
-
-            {/* The second column, or the whole page below 861px when the
-                address is the console's. */}
-            <div
-              className={cn(
-                "col-start-1 row-start-1 min-h-0 flex-col",
-                aside && "min-[861px]:col-start-2 min-[861px]:flex min-[861px]:border-l",
-                route.kind === "page" && route.page === "console" ? "flex" : "hidden"
-              )}
-            >
-              {ticketId ? <TicketTalk className="max-[860px]:hidden" /> : null}
-              <div
-                className={cn(
-                  "min-h-0 flex-1 flex-col",
-                  ticketId ? "flex min-[861px]:hidden" : "flex"
-                )}
-              >
-                <ConsolePane />
-              </div>
-            </div>
           </div>
         </div>
       </SidebarInset>
+
+      {/* Over everything, at every width: the conversation is never a page you
+          navigate to and lose your place for. */}
+      <TalkDrawer />
     </>
   )
 }

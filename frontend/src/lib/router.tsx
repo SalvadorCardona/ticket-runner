@@ -82,13 +82,13 @@ export const navigation: NavigationPortInterface = {
 
 /* -- what an address means ------------------------------------------------ */
 
-export type Page = "live" | "context" | "console"
+export type Page = "live" | "context"
 
 export type Route =
   | { kind: "page"; page: Page }
   | { kind: "resource"; params: ViewResourceContextParams }
 
-const PAGES: Page[] = ["live", "context", "console"]
+const PAGES: Page[] = ["live", "context"]
 
 /* A pane that has since become a resource, and the address it is now at.
  *

@@ -28,6 +28,7 @@ import {
 } from "react-resource-view"
 
 import { PageHead } from "@/components/console/frame"
+import { LanguagePicker } from "@/components/console/language-picker"
 import { SectionForm, type SaveNote } from "@/components/console/settings-bits"
 import { Rich } from "@/components/console/text"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -125,6 +126,11 @@ function SectionPage({ sectionKey }: { sectionKey: string }) {
   return (
     <div className="min-w-0">
       <Blurb text={section.blurb} />
+      {/* The console's own language, at the top of the section that is about
+          this console. It is the browser's rather than the file's, so it is
+          not a field of the form under it — but it is a setting, and this is
+          where somebody looking for a setting looks. */}
+      {sectionKey === "web" ? <LanguagePicker /> : null}
       {note ? (
         <Alert variant={note.bad ? "destructive" : "success"} className="mb-4">
           <AlertDescription>

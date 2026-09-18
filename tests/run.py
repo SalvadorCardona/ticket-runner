@@ -6689,15 +6689,52 @@ def the_console_ships_its_built_bundle():
 
 
 @case
-def the_console_header_shows_the_version_it_is_given():
-    """The number reaches the header, rather than staying in the payload.
+def the_console_says_the_version_it_is_running_at_the_foot_of_its_menu():
+    """The number reaches the page, rather than staying in the payload.
+
+    It used to be a pill in the bar, beside four others — the timer, a run in
+    flight, what had been spent — and a row of states you cannot act on, drawn
+    over every page, is noise with a border around it. The bar says where you
+    are now; the version, and the day a newer one is waiting, sit at the foot
+    of the menu where the stream's own dot already sits.
 
     Read from the React source rather than the bundle: the bundle is minified,
     and asserting on minified identifiers is asserting on the minifier.
     """
     header = (FRONTEND / "src/components/console/header.tsx").read_text(encoding="utf-8")
-    assert "runner.version" in header, "the header has nowhere to print the version"
-    assert "runner.update" in header, "an update waiting has to be said too"
+    assert "Pill" not in header, "the bar carries a row of pills again"
+    sidebar = (FRONTEND / "src/components/console/app-sidebar.tsx").read_text(encoding="utf-8")
+    assert "runner.version" in sidebar, "the console has nowhere to print the version"
+    assert "runner.update" in sidebar, "an update waiting has to be said too"
+
+
+@case
+def the_discussion_opens_from_a_bubble_rather_than_from_a_column():
+    """One way in, in the corner every reader already looks in for a chat.
+
+    Half the screen used to be given to a conversation whether or not there was
+    one, with an entry in the menu to reach it where there was no room for the
+    column and a switch in the bar to fold it away — three things to learn for
+    one thing to open. It is a drawer now, over the page rather than beside it,
+    and the page keeps its full width until the bubble is pressed.
+
+    Read from the React source rather than from the bundle: the bundle is
+    minified, and what is being checked here is a decision, not a symbol.
+    """
+    drawer = (FRONTEND / "src/components/console/talk-drawer.tsx").read_text(encoding="utf-8")
+    # shadcn's own sheet, which is the drawer: nothing here draws a panel of its
+    # own, and the one the sidebar already opens on a phone is this one.
+    assert "SheetContent" in drawer, "the drawer is hand-rolled again"
+    assert 'side="right"' in drawer, "the drawer no longer comes in from the right"
+    assert "ConsolePane" in drawer and "TicketTalk" in drawer, (
+        "the drawer holds neither discussion"
+    )
+    app = (FRONTEND / "src/App.tsx").read_text(encoding="utf-8")
+    assert "TalkDrawer" in app, "nothing opens the discussion"
+    assert "ConsolePane" not in app, "the console has a column of its own again"
+    assert "asideLabel" not in app, "the bar carries the switch that folds it away again"
+    sidebar = (FRONTEND / "src/components/console/app-sidebar.tsx").read_text(encoding="utf-8")
+    assert 'page: "console"' not in sidebar, "the menu has an entry for the drawer again"
 
 
 @case
@@ -6891,7 +6928,12 @@ def the_console_says_the_configuration_in_french_too():
 
 @case
 def the_console_offers_the_two_languages_it_has():
-    """The header carries the switch, and the browser is asked before you are.
+    """The settings carry the switch, and the browser is asked before you are.
+
+    It sat at the right edge of the bar, on every page, which is a lot of room
+    for a thing somebody changes once. A language is a setting: it is drawn on
+    the settings page, in the section that is about this console — even though
+    it is the browser's own and never reaches `config.toml`.
 
     Read from the React source rather than from the bundle: the bundle is
     minified, and what is being checked here is a decision, not a symbol.
@@ -6900,8 +6942,8 @@ def the_console_offers_the_two_languages_it_has():
     assert '"en"' in i18n and '"fr"' in i18n, "the console no longer offers both"
     assert "navigator.languages" in i18n, "the browser's own languages are not read"
     assert "resolvedOptions().timeZone" in i18n, "the time zone no longer answers for it"
-    header = (FRONTEND / "src/components/console/header.tsx").read_text(encoding="utf-8")
-    assert "LanguagePicker" in header, "the bar has nowhere to change the language"
+    settings = (FRONTEND / "src/resources/settings.tsx").read_text(encoding="utf-8")
+    assert "LanguagePicker" in settings, "the settings have nowhere to change the language"
 
 
 @case
