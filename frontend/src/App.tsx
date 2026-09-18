@@ -7,7 +7,6 @@ import { ContextPane } from "@/components/console/context-pane"
 import { Header } from "@/components/console/header"
 import { LivePane } from "@/components/console/live-pane"
 import { ResourcePane } from "@/components/console/resource-pane"
-import { SchedulesPane } from "@/components/console/schedules-pane"
 import { TicketTalk } from "@/components/console/ticket-talk"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
@@ -18,6 +17,7 @@ import { useT } from "@/lib/i18n"
 import { useRoute, type Page } from "@/lib/router"
 import { cn } from "@/lib/utils"
 import { PROJECTS } from "@/resources/projects"
+import { SCHEDULES } from "@/resources/schedules"
 import { SETTINGS } from "@/resources/settings"
 import { TICKETS } from "@/resources/tickets"
 
@@ -36,7 +36,6 @@ const CRUMB: Record<Page, string> = {
   console: "console",
   live: "live",
   context: "context",
-  schedules: "schedules",
 }
 
 const ASIDE = "ticket-runner-aside"
@@ -96,9 +95,11 @@ function Console() {
         ? [t("workspace"), t("settings")]
         : resourceId === PROJECTS
           ? [t("workspace"), t("projects")]
-          : ticketId
-            ? [t("workspace"), t("board"), `#${ticket?.short ?? String(ticketId).slice(-8)}`]
-            : [t("workspace"), t("board")]
+          : resourceId === SCHEDULES
+            ? [t("workspace"), t("schedules")]
+            : ticketId
+              ? [t("workspace"), t("board"), `#${ticket?.short ?? String(ticketId).slice(-8)}`]
+              : [t("workspace"), t("board")]
 
   // Each pane keeps its place while another is shown, so a transcript
   // half-read and a text half-typed survive a trip through the menu.
@@ -148,15 +149,6 @@ function Console() {
                 text somebody is half-way through rewriting, and a trip through
                 the menu must not cost it. */}
             {cell("context", <ContextPane />)}
-
-            {/* Not `cell`s: these two have nothing half-typed to keep, and the
-                only way to draw either is to ask the board — which a tab left
-                open on the tickets has no business making it do. */}
-            {route.kind === "page" && route.page === "schedules" ? (
-              <div className="scroll-thin col-start-1 row-start-1 min-h-0 overflow-y-auto">
-                <SchedulesPane />
-              </div>
-            ) : null}
 
             {/* The second column, or the whole page below 861px when the
                 address is the console's. */}

@@ -496,8 +496,9 @@ discussion, the live steps. And it gained three screens that make a Markdown-onl
 installation self-sufficient: **Projects** (every project this installation knows of, the
 board's and the ones only `[projects]` names — each of them a page you open and change),
 **Context** (the standing text every ticket is told first, editable rather than read-only)
-and an editable **Schedules** — a row opens
-into a form, and a new schedule is created unticked, whatever the form said.
+and an editable **Schedules** — a row is turned off
+from the list itself, a pencil opens the six columns it is written in, and a new schedule
+is created unticked whatever the form said.
 
 ### Both, and what happens when they disagree
 
@@ -1229,8 +1230,10 @@ ticket-runner schedules --run "Revue des dépendances"   # now, without waiting 
 ticket-runner list                               # the whole calendar: tickets and births
 ```
 
-The same calendar is a page of the web console — *Schedules* in the menu, `/?page=schedules`
-— which is where you look at it from a phone. See [The web console](#the-web-console).
+The same calendar is a page of the web console — *Schedules* in the menu,
+`/?view=console/schedules/list` — which is where you look at it from a phone, and where a
+row is written and turned off without opening Notion. See
+[The web console](#the-web-console).
 
 Everything here is optional. A workspace with no schedules page has nothing that repeats,
 `doctor` is green on it, and nothing about it runs differently — `ticket-runner init`
@@ -1384,9 +1387,10 @@ Open `http://127.0.0.1:8787` and you get one page, four things:
      the menu           the board, live                the console
 ```
 
-**The menu** down the left is where the pages live, and it says more than a row of
-tabs could: how many tickets are on the board and how many are ready, how many sessions
-are writing right now, whether the timer is on. `⌘B` — `Ctrl-B` — folds it to a rail of
+**The menu** down the left is where the pages live: a name each, and a count beside it
+where something is waiting there — how many tickets are on the board, how many sessions
+are writing right now. Nothing more; a sentence under every name is the page saying, in
+the smaller type, what the page itself says. `⌘B` — `Ctrl-B` — folds it to a rail of
 icons, each keeping its name in a tooltip; on a phone it is a drawer, and choosing
 something closes it. The fold is remembered in a cookie, so it opens the way you left it.
 Every page has an address — `/?view=console/tickets/list`, `/?page=live` — so a reload,
@@ -1461,15 +1465,25 @@ whichever you named it — rather than to a second one beside it. A project only
 names has no page to write to, so it says so and points at the settings, where that line
 lives.
 
-**Schedules** is the calendar of [what comes back on its own](#what-comes-back-on-its-own),
-read the way `ticket-runner schedules` reads it: what repeats, at what rhythm, when the next
-ticket is due and when the last one was made — with a way through to the ticket that
-occurrence produced. A row nobody can read says what is wrong with it instead of a date it
-does not have, and `runner.schedule = false` is said at the foot of the page, because a
-browser is the one place that switch would otherwise be invisible. Nothing is written from
-here: a schedule is a Notion page, and its name is the link to it. The page asks Notion
-when you open it rather than living on the event stream — a schedule moves four times a day
-at the very most, and a tab left open on the board has no business polling that database.
+**Schedules** is [what comes back on its own](#what-comes-back-on-its-own), read the way
+`ticket-runner schedules` reads it: what repeats, at what rhythm, when the next ticket is
+due and when the last one was made. Like the board and the projects, it is drawn in the
+layouts the view package brings rather than in a design of its own — and the pair is the
+point. *Table* is for comparing them, and for the one gesture this whole feature is built
+around: `Active` is the only cell you can type in, so **unticking a row in the list stops
+it**, without deleting anything and without opening a form. *Calendar* is for the only
+question a schedule really answers — when the next one lands: the occurrences are laid out
+by day, week or month, and clicking one opens what it will make.
+
+*New schedule* and the pencil on a row write the six columns a schedule is written in —
+the cadence, the hour, the day, the tick, and the model and priority the ticket inherits.
+Never `Next`, `Last` or the ticket the last occurrence made: those are what a *pass* writes
+back, and a console that let you edit them would let you make an occurrence happen twice.
+A row nobody can read says what is wrong with it instead of a date it does not have, and
+`runner.schedule = false` is said at the foot of the page, because a browser is the one
+place that switch would otherwise be invisible. The page asks the board when you open it
+rather than living on the event stream — a schedule moves four times a day at the very
+most, and a tab left open on the board has no business polling that database.
 
 **Settings** is `config.toml` drawn as a page — the same file, the same keys, and every one
 of them, from the Notion token down to what your board calls its *Blocked* column. It is

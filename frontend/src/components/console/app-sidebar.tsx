@@ -36,15 +36,18 @@ import { visible, type PaneMenuItem } from "@/lib/menu"
 import { pageHref, type Route } from "@/lib/router"
 import { cn } from "@/lib/utils"
 import { PROJECTS, projectsHref } from "@/resources/projects"
+import { SCHEDULES, schedulesHref } from "@/resources/schedules"
 import { SETTINGS, settingsHref } from "@/resources/settings"
 import { TICKETS, boardHref } from "@/resources/tickets"
 
 /* The left menu.
  *
- * Seven addresses, and it says more than the addresses could: how many tickets
- * are on the board and how many are ready, how many sessions are writing right
- * now, whether the timer is on. A menu that only navigates is a menu you read
- * once.
+ * Seven addresses, a name each, and a number where something is waiting there:
+ * how many tickets are on the board, how many sessions are writing right now.
+ * It used to say a sentence under every name as well — how many were ready,
+ * whether the timer was on — and seven entries of two lines is a page to read
+ * rather than a menu to use. What is worth knowing at a glance is a count, and
+ * a count fits beside a name.
  *
  * Collapsed it is a rail of icons — ⌘B, or the strip down its right edge — and
  * every entry keeps its name in a tooltip.
@@ -55,10 +58,6 @@ export function AppSidebar({ route }: { route: Route }) {
   const { state, isMobile, setOpenMobile } = useSidebar()
   const t = useT()
 
-  const ready = board.tickets.filter((item) => item.column === "ready").length
-  const running = board.tickets.filter((item) => item.column === "running").length
-  const review = board.tickets.filter((item) => item.column === "review").length
-
   const items: PaneMenuItem[] = [
     {
       name: t("Board"),
@@ -67,12 +66,6 @@ export function AppSidebar({ route }: { route: Route }) {
       icon: LayoutGrid,
       priority: 50,
       badge: board.tickets.length || undefined,
-      detail: [
-        ready && t("{{count}} ready", { count: String(ready) }),
-        review && t("{{count}} in review", { count: String(review) }),
-      ]
-        .filter(Boolean)
-        .join(" · "),
     },
     {
       name: t("Console"),
@@ -80,9 +73,6 @@ export function AppSidebar({ route }: { route: Route }) {
       page: "console",
       icon: Terminal,
       priority: 30,
-      detail: runner?.chat.session_id
-        ? t("{{count}} turn(s)", { count: String(runner.chat.turns) })
-        : t("no conversation yet"),
     },
     {
       name: t("Live"),
@@ -91,7 +81,6 @@ export function AppSidebar({ route }: { route: Route }) {
       icon: Activity,
       priority: 20,
       badge: sessions.length || undefined,
-      detail: running ? t("{{count}} running", { count: String(running) }) : "",
     },
     {
       name: t("Projects"),
@@ -99,19 +88,15 @@ export function AppSidebar({ route }: { route: Route }) {
       resource: PROJECTS,
       icon: FolderGit2,
       priority: 18,
-      // No count and no badge, here as under Schedules: the only way to know is
-      // to ask the board, and this menu is redrawn every time it moves.
-      detail: t("what the tickets are about"),
     },
     {
+      // No count, here as under Projects: the only way to know is to ask the
+      // board, and this menu is redrawn every time the board moves.
       name: t("Schedules"),
-      href: pageHref("schedules"),
-      page: "schedules",
+      href: schedulesHref(),
+      resource: SCHEDULES,
       icon: CalendarClock,
       priority: 15,
-      // No count and no badge: the only way to know is to ask the board, and
-      // this menu is redrawn every time it moves.
-      detail: t("what comes back on its own"),
     },
     {
       name: t("Context"),
@@ -119,7 +104,6 @@ export function AppSidebar({ route }: { route: Route }) {
       page: "context",
       icon: BookOpen,
       priority: 12,
-      detail: t("what every ticket is told first"),
     },
     {
       name: t("Settings"),
@@ -127,12 +111,6 @@ export function AppSidebar({ route }: { route: Route }) {
       resource: SETTINGS,
       icon: Settings2,
       priority: 10,
-      detail:
-        runner?.timer === "enabled"
-          ? t("timer on")
-          : runner?.timer
-            ? t("timer {{state}}", { state: runner.timer })
-            : "",
     },
   ]
 
@@ -199,8 +177,7 @@ export function AppSidebar({ route }: { route: Route }) {
                     <SidebarMenuButton
                       asChild
                       isActive={active(item)}
-                      tooltip={item.detail ? `${item.name} — ${item.detail}` : item.name}
-                      size="lg"
+                      tooltip={item.name}
                       className="group-data-[collapsible=icon]:justify-center"
                     >
                       <Link
@@ -211,16 +188,12 @@ export function AppSidebar({ route }: { route: Route }) {
                         }}
                       >
                         {Icon ? <Icon /> : null}
-                        {/* Two lines, so not the single span the collapsed rule
-                            truncates — left to it, the rail shows the first letter
-                            of each label instead of nothing. */}
-                        <span className="flex min-w-0 flex-col group-data-[collapsible=icon]:hidden">
-                          <span className="truncate">{item.name}</span>
-                          {item.detail ? (
-                            <span className="text-muted-foreground truncate font-mono text-[0.65rem] font-normal">
-                              {item.detail}
-                            </span>
-                          ) : null}
+                        {/* Hidden rather than left to the button's own rule,
+                            which truncates the last span — and a rail eight
+                            units wide would show the first letter of the name
+                            instead of nothing. */}
+                        <span className="truncate group-data-[collapsible=icon]:hidden">
+                          {item.name}
                         </span>
                       </Link>
                     </SidebarMenuButton>

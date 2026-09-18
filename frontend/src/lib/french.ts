@@ -47,6 +47,22 @@ export const FRENCH: Record<string, string> = {
   "The item has been removed": "L'élément a été supprimé",
   "The item could not be removed": "L'élément n'a pas pu être supprimé",
   "Deletion is not possible": "La suppression est impossible",
+  // A value the package prints as it holds it, in the one layout that shows a
+  // checkbox without a form around it: the calendar's preview of a schedule.
+  true: "oui",
+  false: "non",
+  /* The calendar, which the schedules are laid out in: the days of its week,
+     and the button that walks back through them. `Today`, `Jour`, `Semaine` and
+     `Mois` are the package's own French; only what it says in English needs an
+     entry here. */
+  monday: "lundi",
+  tuesday: "mardi",
+  wednesday: "mercredi",
+  thursday: "jeudi",
+  friday: "vendredi",
+  saturday: "samedi",
+  sunday: "dimanche",
+  Previous: "Précédent",
   Today: "Aujourd'hui",
   // The two lines a form ends on, set from `i18n.ts` rather than read from a
   // declaration: they are handed to a toast as they stand.
@@ -87,12 +103,10 @@ export const FRENCH: Record<string, string> = {
   "event stream": "flux d'événements",
   "connecting…": "connexion…",
   "reconnecting…": "reconnexion…",
-  "{{count}} ready": "{{count}} prêt(s)",
-  "{{count}} in review": "{{count}} en revue",
-  "{{count}} running": "{{count}} en cours",
+  // The menu is a name and a count; the sentences that used to sit under each
+  // name are gone, and the words they were made of with them.
   "{{count}} turn(s)": "{{count}} tour(s)",
   "no conversation yet": "aucune conversation",
-  "what comes back on its own": "ce qui revient tout seul",
   "{{version}} waiting": "{{version}} en attente",
 
   /* -- the bar ------------------------------------------------------------- */
@@ -236,53 +250,50 @@ export const FRENCH: Record<string, string> = {
     "Rien ne tourne. Une session qui démarre écrit ici au fil de son travail.",
 
   /* -- what comes back on its own -------------------------------------------- */
-  "What comes back on its own.": "Ce qui revient tout seul.",
+  /* `Cadence`, `Model` and `Priority` are already said above, where the
+     configuration says them; `table` is said where the board says it. */
+  Schedule: "Récurrence",
+  calendar: "calendrier",
   "A row says what to make and how often; when the moment comes the runner writes the ticket into the ready column and steps back.":
     "Une ligne dit quoi faire et à quelle fréquence ; le moment venu, le runner écrit le ticket dans la colonne prête et se retire.",
-  Reread: "Relire",
   "{{count}} of {{total}} on": "{{count}} sur {{total}} active(s)",
   "nothing yet": "rien pour l'instant",
-  "Reading the schedules…": "Lecture des récurrences…",
-  "Nothing repeats here — this workspace has no “{{page}}” page.":
-    "Rien ne se répète ici — cet espace de travail n'a pas de page « {{page}} ».",
+  "Nothing repeats here": "Rien ne se répète ici",
+  "This workspace has no “{{page}}” page.":
+    "Cet espace de travail n'a pas de page « {{page}} ».",
   "builds it.": "la construit.",
-  "Nothing repeats here yet — the “{{page}}” database is empty. A row in it is a ticket that comes back.":
-    "Rien ne se répète encore ici — la base « {{page}} » est vide. Une ligne dedans, c'est un ticket qui revient.",
+  "Nothing repeats here yet": "Rien ne se répète encore ici",
+  "A row in the “{{page}}” database is a ticket that comes back.":
+    "Une ligne de la base « {{page}} », c'est un ticket qui revient.",
   "none of this runs.": "rien de tout cela ne tourne.",
-  "no cadence": "aucune cadence",
-  on: "active",
-  unticked: "décochée",
-  next: "prochaine",
-  last: "dernière",
-  never: "jamais",
-  overdue: "en retard",
-  "in {{count}} h": "dans {{count}} h",
-  "in {{count}} days": "dans {{count}} jours",
-  "nothing is born": "rien ne naît",
-  "at the next pass": "à la prochaine passe",
-  "its last ticket": "son dernier ticket",
-  // Writing one, rather than opening Notion to write it.
+  "This schedule is no longer on the board.": "Cette récurrence n'est plus sur le tableau.",
+  // The columns of the list, and the fields of the form that writes a row.
+  At: "À",
+  Day: "Jour",
+  On: "Active",
+  Next: "Prochaine",
+  Last: "Dernière",
+  Problem: "Problème",
   "New schedule": "Nouvelle récurrence",
   "A ticket that comes back": "Un ticket qui revient",
-  new: "nouvelle",
-  Change: "Modifier",
-  name: "nom",
   "nothing said": "rien de précisé",
+  "What the ticket it makes will be called. Every occurrence carries this name.":
+    "Le nom du ticket qu'elle produit. Chaque occurrence porte ce nom.",
   "Weekly dependency review": "Revue hebdomadaire des dépendances",
+  "The hour, written 09:00. Empty, and the hour the pass runs at answers.":
+    "L'heure, écrite 09:00. Vide, c'est l'heure de la passe qui répond.",
+  "Which day a weekly or monthly one lands on.":
+    "Le jour où tombe une récurrence hebdomadaire ou mensuelle.",
   "Monday, or 1 to 31": "Lundi, ou 1 à 31",
-  "on — a ticket is born at the hour above": "active — un ticket naît à l'heure ci-dessus",
+  "Off, and nothing is born — the row is kept, and the hours with it.":
+    "Décochée, rien ne naît — la ligne est gardée, et ses horaires avec.",
   "Created unticked: nothing is born until you turn it on.":
     "Créée décochée : rien ne naît tant que vous ne l'activez pas.",
   "A schedule needs a name": "Une récurrence a besoin d'un nom",
-  "Schedule saved": "Récurrence enregistrée",
-  "Schedule created, left unticked": "Récurrence créée, laissée décochée",
-  "The schedule was not saved": "La récurrence n'a pas été enregistrée",
-  "Saving…": "Enregistrement…",
 
   /* -- the projects ----------------------------------------------------------- */
   /* `Projects`, `Project`, `Repository`, `Where it is` and `The brief` are
      already said above, where the board and the configuration say them. */
-  "what the tickets are about": "ce dont parlent les tickets",
   "What the tickets are about.": "Ce dont parlent les tickets.",
   "What the tickets are about: where the work happens, and what conventions hold there. One with no repository is not a mistake — its tickets come back as a document.":
     "Ce dont parlent les tickets : où se fait le travail, et quelles conventions y règnent. Un projet sans dépôt n'est pas une erreur — ses tickets reviennent sous forme de document.",
@@ -331,11 +342,12 @@ export const FRENCH: Record<string, string> = {
 
   /* -- the standing context --------------------------------------------------- */
   Context: "Contexte",
-  "what every ticket is told first": "ce qu'on dit d'abord à chaque ticket",
   "What every ticket is told first.": "Ce qu'on dit d'abord à chaque ticket.",
   "Before the project's brief and before the ticket itself. It is what makes an answer sound like you rather than like nobody — and you pay for it on every single ticket.":
     "Avant le brief du projet et avant le ticket lui-même. C'est ce qui fait qu'une réponse vous ressemble plutôt que de ne ressembler à personne — et vous le payez sur chaque ticket.",
   "{{count}} characters in every prompt": "{{count}} caractères dans chaque prompt",
+  Reread: "Relire",
+  "Saving…": "Enregistrement…",
   "Reading the context…": "Lecture du contexte…",
   "This workspace has no “{{page}}” page, so there is nowhere to write.":
     "Cet espace de travail n'a pas de page « {{page}} » : il n'y a nulle part où écrire.",
