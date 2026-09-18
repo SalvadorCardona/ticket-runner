@@ -128,9 +128,20 @@ export function AppSidebar({ route }: { route: Route }) {
           only day it matters: the one where an update is waiting. */}
       <SidebarHeader>
         <div className={cn("flex h-8 items-center gap-2 px-2", collapsed && "justify-center px-0")}>
-          <span aria-hidden className="shrink-0 text-base leading-none">
-            🎫
-          </span>
+          <svg
+            aria-hidden
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="size-4 shrink-0 text-primary"
+          >
+            <rect x="3" y="6" width="18" height="12" rx="2.5" />
+            <path d="M10 6v2M10 11v2M10 16v2" />
+            <path d="M13 9l3 3-3 3" />
+          </svg>
           {!collapsed ? (
             <span className="truncate text-sm font-semibold">ticket-runner</span>
           ) : null}
