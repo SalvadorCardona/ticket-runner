@@ -6723,6 +6723,61 @@ def a_project_is_a_resource_with_two_layouts_and_a_form():
 
 
 @case
+def a_schedule_is_a_resource_drawn_in_the_package_s_own_layouts():
+    """The one page whose rows are dates, laid out as dates.
+
+    It was a pane: cards drawn by hand, a form written by hand, and a date
+    formatted into "in 6 days" by hand. All three exist in the package the board
+    and the projects are already drawn with, so the schedules are a resource
+    like them — a table to compare them in and a calendar to read the next
+    occurrence off, and no second design language on the one screen that had
+    one.
+
+    Read from the React source rather than from the bundle: the bundle is
+    minified, and what is being checked here is a decision, not a symbol.
+    """
+    declared = (FRONTEND / "src/resources/schedules.tsx").read_text(encoding="utf-8")
+    assert "createViewResource" in declared, "the schedules are a hand-rolled pane again"
+    assert "tableViewOptionFactory" in declared, "the table layout is gone"
+    assert "calendarViewOptionFactory" in declared, "the calendar layout is gone"
+    assert 'dateKey: "next"' in declared, "the calendar no longer lays them out by their next run"
+    assert "api.saveSchedule" in declared, "nothing writes a schedule back"
+    assert "api.createSchedule" in declared, "nothing writes a new schedule"
+    # The columns a pass writes back are how the runner knows an occurrence has
+    # been taken; a form that offered them would let you make one happen twice,
+    # or never. The list shows them; the fields the forms are built from do not.
+    fields = declared.split("const fields")[1].split("const createForm")[0]
+    for written_back in ("next", "last"):
+        assert f"{written_back}: {{" not in fields, (
+            f"the form offers `{written_back}`, which a pass writes back"
+        )
+    for gone in ("schedules-pane.tsx", "schedule-form.tsx"):
+        assert not (FRONTEND / "src/components/console" / gone).exists(), (
+            f"{gone} is back, beside the resource that replaced it"
+        )
+    assert "?view=console/schedules/list" in (FRONTEND / "src/lib/router.tsx").read_text(
+        encoding="utf-8"
+    ), "the address the pane had stopped leading to the schedules"
+
+
+@case
+def the_console_menu_is_a_name_and_a_count():
+    """Seven entries of two lines each is a page to read, not a menu to use.
+
+    Every entry used to carry a sentence under its name — how many tickets were
+    ready, whether the timer was on — which is what the pages themselves say,
+    said again in the smaller type. What is worth knowing at a glance is a
+    count, and a count fits beside a name.
+    """
+    menu = (FRONTEND / "src/lib/menu.ts").read_text(encoding="utf-8")
+    assert "badge?" in menu, "an entry can no longer carry a count"
+    assert "detail" not in menu, "an entry carries a sentence again"
+    sidebar = (FRONTEND / "src/components/console/app-sidebar.tsx").read_text(encoding="utf-8")
+    assert "item.detail" not in sidebar, "the menu draws a sentence under a name again"
+    assert "SidebarMenuBadge" in sidebar, "the count beside a name is gone too"
+
+
+@case
 def a_project_that_cannot_be_read_says_what_the_server_answered():
     """The one screen where a generic sentence cost an afternoon.
 

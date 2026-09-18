@@ -10,7 +10,14 @@ import type { Page } from "./router"
  */
 export type { MenuItemInterface }
 
-/** What the console adds: what the entry counts, and what it says under its name. */
+/* What the console adds: which pane the entry is, and what it counts.
+ *
+ * A name and a number, and nothing else. Every entry used to carry a sentence
+ * under it as well — how many tickets were ready, whether the timer was on —
+ * which made the menu a page of its own to read: seven entries, fourteen lines,
+ * and the one you were looking for said in the smaller type. What a menu owes
+ * its reader is where to go and whether something is waiting there.
+ */
 export interface PaneMenuItem extends MenuItemInterface {
   href: string
   /** Which pane the entry is, for the ones that are not a resource's address. */
@@ -19,8 +26,6 @@ export interface PaneMenuItem extends MenuItemInterface {
   resource?: string
   /** A number worth showing beside the name — tickets on the board, sessions live. */
   badge?: string | number
-  /** Said under the name, and only where it says something. */
-  detail?: string
 }
 
 /** The declared order, with `hidden` honoured and `priority` respected. */

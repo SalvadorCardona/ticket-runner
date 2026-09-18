@@ -352,6 +352,29 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Changed
 
+- **Schedules is a list and a calendar, and a row is turned off from the list
+  itself.** The page was drawn by hand — its own cards, its own form, its own
+  way of writing "in 6 days" — on a console whose board, projects and settings
+  are all drawn by the view package. It is now a resource like them, in the two
+  layouts that page actually wants. *Table* compares them, and `Active` is the
+  one cell you can type in: **unticking a row in the list stops it**, with no
+  form to open and nothing deleted, which is the gesture this whole feature was
+  built around. *Calendar* answers the only question a schedule really has —
+  when the next one lands — by laying the occurrences out over a day, a week or
+  a month, in your language and starting the week where your language does;
+  clicking one says what it will make. *New schedule* and the pencil on a row
+  write the six columns a schedule is written in, and still never `Next`,
+  `Last` or the ticket the last occurrence made: those are what a pass writes
+  back. `/?page=schedules` keeps working and lands on the list.
+
+- **The menu is a name and a count.** Each of the seven entries carried a
+  sentence under its name — how many tickets were ready, how many turns the
+  conversation had, whether the timer was on — so a menu of seven addresses was
+  fourteen lines to read, saying in the smaller type what each page says at the
+  top of itself. An entry is now its name, and a number beside it where
+  something is waiting there: the tickets on the board, the sessions writing
+  right now. The timer is still in the bar, where it always was.
+
 - **The settings are a page per section, and a link you can send.** The Settings
   tab was one column of collapsibles that drew all seventy fields at once, open
   or folded, and redrew every one of them at every keystroke. `config.toml` is

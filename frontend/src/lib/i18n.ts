@@ -1,6 +1,8 @@
 import * as React from "react"
-import { setFormConfig } from "react-data-form"
+import { enGB, fr } from "date-fns/locale"
+import { configurePorts as configureForms, setFormConfig } from "react-data-form"
 import { setTranslation, translate } from "react-mini-i18n"
+import { configurePorts as configureViews } from "react-resource-view"
 
 import { FRENCH } from "./french"
 
@@ -48,6 +50,16 @@ const ENGLISH: Record<string, string> = {
   "Une erreur est survenue": "Something went wrong",
   Continuer: "Continue",
   Fermer: "Close",
+  // The calendar the schedules are laid out in says three of its own words in
+  // French, and the button that walks forward through them a fourth.
+  Jour: "Day",
+  Semaine: "Week",
+  Mois: "Month",
+  Suivant: "Next",
+  // A checkbox drawn outside a form — the calendar's preview of a schedule —
+  // prints the value as it holds it, and `true` is not a word anybody reads.
+  true: "yes",
+  false: "no",
 }
 
 const DICTIONARIES: Record<Language, Record<string, string>> = {
@@ -111,6 +123,20 @@ const listeners = new Set<() => void>()
 function apply(next: Language) {
   setTranslation(DICTIONARIES[next])
   document.documentElement.lang = next
+  /* A date is not a sentence, so no dictionary can hold it: the month over the
+   * schedules' calendar and the moment in a cell are formatted by the packages
+   * themselves, and both ask for the locale rather than guessing. Told here, so
+   * the language the console was set to is the language its dates are in —
+   * `Accept-Language` is often not the one, on a machine bought abroad.
+   *
+   * British English rather than American: this console says 14/09 everywhere
+   * else, and a date that changed shape between two panes would be a date
+   * nobody could read twice. */
+  configureViews({ dateLocale: next === "fr" ? fr : enGB })
+  configureForms({
+    dateLocale: next === "fr" ? fr : enGB,
+    intlLocale: next === "fr" ? "fr-FR" : "en-GB",
+  })
   // These two are handed to a toast as they stand rather than translated on
   // the way, so they are written again whenever the dictionary changes.
   //
