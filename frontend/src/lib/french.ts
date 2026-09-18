@@ -75,7 +75,6 @@ export const FRENCH: Record<string, string> = {
   workspace: "espace de travail",
   board: "tableau",
   table: "liste",
-  console: "console",
   live: "en direct",
   schedules: "récurrences",
   settings: "réglages",
@@ -84,13 +83,17 @@ export const FRENCH: Record<string, string> = {
   "the workspace": "l'espace de travail",
   "the ticket": "le ticket",
   "the console's language": "la langue de la console",
-  "hide {{pane}}": "masquer {{pane}}",
-  "show {{pane}}": "afficher {{pane}}",
+  "This browser's, and this browser's only: it is not written to the file. Left alone, the console reads the one your browser asks for.":
+    "Celle de ce navigateur, et de lui seul : elle ne s'écrit pas dans le fichier. Sans réponse, la console lit celle que votre navigateur demande.",
+  // The bubble in the bottom corner, and what it opens: the ticket's
+  // discussion where there is one, the workspace's own everywhere else.
+  "open {{pane}}": "ouvrir {{pane}}",
+  "A sentence talks to your workspace; a line that starts with > runs a command.":
+    "Une phrase parle à votre espace de travail ; une ligne qui commence par > lance une commande.",
   "No such page.": "Cette page n'existe pas.",
 
   /* -- the menu ------------------------------------------------------------ */
   Board: "Tableau",
-  Console: "Console",
   Live: "En direct",
   Schedules: "Récurrences",
   Settings: "Réglages",
@@ -107,17 +110,10 @@ export const FRENCH: Record<string, string> = {
   // name are gone, and the words they were made of with them.
   "{{count}} turn(s)": "{{count}} tour(s)",
   "no conversation yet": "aucune conversation",
-
-  /* -- the bar ------------------------------------------------------------- */
-  "timer on": "minuterie active",
-  "timer {{state}}": "minuterie {{state}}",
-  "a run is in progress": "une passe est en cours",
-  "out of credit · back at {{at}}": "crédits épuisés · retour à {{at}}",
-  "The subscription's window is spent. Tickets stay where they are and the first run after {{at}} takes them again.":
-    "La fenêtre de l'abonnement est consommée. Les tickets restent où ils sont et la première passe après {{at}} les reprend.",
-  "claude not found": "claude introuvable",
-  handled: "traités",
-  "{{version}} available · run update": "{{version}} disponible · lancez update",
+  // At the foot of the menu, where the stream's own dot is: the version, and
+  // the one day it matters, that a newer one is waiting. The row of pills it
+  // used to be said this beside four other things nobody was reading.
+  "the version this console runs": "la version que fait tourner cette console",
   "v{{version}} — {{waiting}} is waiting, run: ticket-runner update":
     "v{{version}} — {{waiting}} attend, lancez : ticket-runner update",
 
@@ -241,10 +237,16 @@ export const FRENCH: Record<string, string> = {
   "{{count}} ticket(s) in progress": "{{count}} ticket(s) en cours",
   "nothing in progress": "rien en cours",
   timer: "minuterie",
+  "timer {{state}}": "minuterie {{state}}",
   off: "arrêtée",
   "between two runs": "entre deux passes",
+  handled: "traités",
   "${{amount}} spent so far": "{{amount}} $ dépensés jusqu'ici",
   "{{count}} step(s)": "{{count}} étape(s)",
+  "Out of credit until {{at}}. The subscription's window is spent: tickets stay where they are, and the first run after that takes them again.":
+    "Crédits épuisés jusqu'à {{at}}. La fenêtre de l'abonnement est consommée : les tickets restent où ils sont, et la première passe après ce moment les reprend.",
+  "`claude` was not found on this machine: no session can start.":
+    "`claude` est introuvable sur cette machine : aucune session ne peut démarrer.",
   "Nothing is running. A session that starts writes here as it works.":
     "Rien ne tourne. Une session qui démarre écrit ici au fil de son travail.",
 

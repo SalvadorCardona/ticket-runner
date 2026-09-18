@@ -352,6 +352,23 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Changed
 
+- **The bar says where you are, and the discussion opens from a bubble.** The
+  top of every page carried a row of pills — the timer and its interval, a run
+  in flight, how many tickets had been handled and for how many dollars, a
+  version waiting — and the language the console reads in. All of it was true
+  and none of it was worth the room: a state you cannot act on, repeated over
+  every page, is noise with a border around it. The bar is now the path and
+  nothing else. What a run is doing is what *Live* is for; the version, and the
+  day a newer one is waiting, sit at the foot of the menu beside the stream's
+  own dot; and the language moved to *Settings → This console*, which is where
+  somebody looking for a setting looks — it is still this browser's alone and
+  never reaches `config.toml`. The conversation moved with it: instead of a
+  second column taking half the screen whether or not there was anything in it,
+  an entry in the menu to reach it on a phone and a switch in the bar to fold
+  it away, there is **a bubble in the bottom corner** that opens a drawer over
+  the page — the ticket's discussion when a ticket is open, the workspace's own
+  everywhere else. The page keeps its full width until you ask for it.
+
 - **Schedules is a list and a calendar, and a row is turned off from the list
   itself.** The page was drawn by hand — its own cards, its own form, its own
   way of writing "in 6 days" — on a console whose board, projects and settings
@@ -373,7 +390,8 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
   fourteen lines to read, saying in the smaller type what each page says at the
   top of itself. An entry is now its name, and a number beside it where
   something is waiting there: the tickets on the board, the sessions writing
-  right now. The timer is still in the bar, where it always was.
+  right now. The timer is on the *Live* page, which is the page about what the
+  runner is doing.
 
 - **The settings are a page per section, and a link you can send.** The Settings
   tab was one column of collapsibles that drew all seventy fields at once, open

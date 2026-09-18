@@ -15,7 +15,6 @@ import { Input } from "@/components/ui/input"
 import { useConsole } from "@/hooks/use-console"
 import { api, why } from "@/lib/api"
 import { t as translate, useT } from "@/lib/i18n"
-import { go, pageHref } from "@/lib/router"
 import {
   draftOf,
   forgetDraft,
@@ -25,6 +24,7 @@ import {
 } from "@/lib/settings-store"
 import type { SettingField, SettingSection, SettingValue } from "@/lib/types"
 
+import { openTalk } from "./talk-drawer"
 import { Rich } from "./text"
 
 /* One section of `config.toml`, as a form.
@@ -324,9 +324,9 @@ function SaveBar({ sectionKey }: { sectionKey: string }) {
           className="font-mono"
           title={t(check[1])}
           onClick={() => {
-            // On one column the console is a page of its own; on two it is
-            // already beside you.
-            if (window.matchMedia("(max-width: 860px)").matches) go(pageHref("console"))
+            // The answer lands in the console's transcript, which is behind the
+            // bubble: a check you cannot read is a check nobody ran.
+            openTalk()
             void runCommand(check[0])
           }}
         >

@@ -1373,7 +1373,7 @@ Open `http://127.0.0.1:8787` and you get one page, four things:
 ```
 ┌───────────────┬──────────────────────────────┬─────────────────────────────┐
 │ ticket-runner │ + New ticket   board · table │  you                        │
-│  v0.9.2       │                              │  Where is the SQLite ticket │
+│               │                              │  Where is the SQLite ticket │
 │               │  Ready     1   In progress 1 │                             │
 │ ▸ Board    4  │  ┌──────────┐  ┌──────────┐  │  workspace                  │
 │   1 ready     │  │ Retirer  │  │ Migrer   │  │  Six minutes in, on Trader  │
@@ -1382,9 +1382,10 @@ Open `http://127.0.0.1:8787` and you get one page, four things:
 │   Settings    │  │ High     │  │ pytest   │  │  pytest. Nothing committed. │
 │               │  └──────────┘  └──────────┘  │                             │
 │               │                              │  > status                   │
-│ ● live        │                    ───▶      │  timer on · 30 min          │
+│ ● live        │                 ───▶      (●)│  timer on · 30 min          │
+│ v0.9.2        │                              │                             │
 └───────────────┴──────────────────────────────┴─────────────────────────────┘
-     the menu           the board, live                the console
+     the menu           the board, live            the drawer the bubble opens
 ```
 
 **The menu** down the left is where the pages live: a name each, and a count beside it
@@ -1393,8 +1394,10 @@ are writing right now. Nothing more; a sentence under every name is the page say
 the smaller type, what the page itself says. `⌘B` — `Ctrl-B` — folds it to a rail of
 icons, each keeping its name in a tooltip; on a phone it is a drawer, and choosing
 something closes it. The fold is remembered in a cookie, so it opens the way you left it.
-Every page has an address — `/?view=console/tickets/list`, `/?page=live` — so a reload,
-a bookmark or a link pasted into a chat lands where you were.
+At its foot sit the two things about the console itself: whether the event stream is up,
+and the version this one runs — in amber, with what to type, on the day a newer one is
+waiting. Every page has an address — `/?view=console/tickets/list`, `/?page=live` — so a
+reload, a bookmark or a link pasted into a chat lands where you were.
 
 **The board** is the Notion board, read from Notion and written back to it, drawn as
 the columns the board has — *Ready*, *In progress*, *In review*, *Validated* where the
@@ -1410,22 +1413,25 @@ one click and the next pass merges its pull request, or publishes what it holds.
 **A card is a way in.** Click one and the ticket becomes a page: the brief you wrote, the
 report a run appended, the notes in between — the page under the card, as the runner
 reads it — with its links out (Notion, the pull request, the session) and the gestures it
-offers where it stands. Beside it, in place of the workspace console, is the ticket's own
-terminal: everything said on it, oldest first — the runner's reports, your answers, the
-answers you gave from Telegram — and a field to say the next thing. What you type is a
+offers where it stands. The bubble in the bottom corner then opens *that ticket's* own
+terminal rather than the workspace's: everything said on it, oldest first — the runner's
+reports, your answers, the answers you gave from Telegram — and a field to say the next
+thing. What you type is a
 *comment on the ticket*, written into the thread the runner last spoke in, which is the
 gesture the runner already knows: an answer under the question a run asked puts the ticket
 back in the queue, and one that names it — `@claude`, or whatever `notion.mention` says —
 asks it for words instead. Nothing is kept on the side; the same sentence typed into Notion
 does the same thing. While the ticket is running, its session's steps scroll underneath,
-so reading a ticket and watching it work are one place rather than two. On a phone the
-terminal sits under the page.
+so reading a ticket and watching it work are one place rather than two. The drawer is the
+same at every width, phone included.
 
 The comment is written with the runner's own Notion token, because that is the only token
 the console has — and it opens the same way an answer relayed from Telegram does, so the
 next run reads it as yours rather than as its own voice.
 
-**The console** is one field and two gestures, and they are not made to look alike.
+**The console** is behind the bubble in the bottom corner — one press opens it as a drawer
+over the page, another closes it, and no page is given up for it. It is one field and two
+gestures, and they are not made to look alike.
 
 - A line starting with `>` is a **`ticket-runner` subcommand** — `>status`, `>list`,
   `>run`, `>doctor`, `>logs 1a2b3c4d`. The CLI is already the considered surface of this
@@ -1522,8 +1528,8 @@ second opinion. A setting that needs more than saving says so, once, and only wh
 **In English, or in French.** The console reads the browser before it says anything —
 `Accept-Language` is a setting somebody actually made — and where the browser says nothing
 useful, the time zone answers for it: a machine set to Europe/Paris is a machine whose owner
-reads French. So there is nothing to choose, and the select at the right of the bar, under
-the flag of the two, is how you disagree with the guess. The choice is one line in
+reads French. So there is nothing to choose, and the select at the top of *Settings → This
+console* is how you disagree with the guess. The choice is one line in
 `localStorage`, like the theme, and it holds for every page of the console: the menu, the
 board's own words, a ticket's page, and the settings tab down to the sentence under each
 field. What is *not* translated is what belongs to somebody else — a ticket's title and the
@@ -1612,7 +1618,7 @@ Two rules the console keeps, and they predate React:
   somebody else when you opened it. A test asserts it against the shipped files.
 
 The page opens dark, because it sits beside a terminal and the thing it shows most of the
-time is a log. The switch in the header changes that, and the choice is one line in the
+time is a log. The switch at the foot of the menu changes that, and the choice is one line in the
 browser's `localStorage` — read before the first paint, so the page never flashes white on
 the way to dark.
 
@@ -1904,9 +1910,9 @@ the CLI naming the moment; when it names none, the wait is a quarter of an hour 
 that finds the limit still standing simply writes a new one. Guessing a full window would
 be the expensive mistake — what was hit is the *end* of one, and it may be a minute away.
 
-`ticket-runner status` says how much of it is left, and the console's header carries the
-same line, because a timer that is on above a board that does not move has only one honest
-reading otherwise: it is broken.
+`ticket-runner status` says how much of it is left, and the console says the same thing at
+the top of *Live*, because a timer that is on above a board that does not move has only one
+honest reading otherwise: it is broken.
 
 The `Waiting for credit` checkbox is optional, like every property past the first few.
 Being a property is what lets it reach a board that predates it at all: `ticket-runner
@@ -2107,7 +2113,7 @@ once more, at the tagged commit, when a version is published.
 ## Releases and versions
 
 `ticket-runner` typed alone presents the product and the version it is running — as do
-`ticket-runner --version` and the console's header, beside the name. The number is a real
+`ticket-runner --version` and the console, at the foot of its menu. The number is a real
 one, and [`CHANGELOG.md`](CHANGELOG.md) says what each one changed, in the words a user
 would use rather than in commit subjects. The numbers are [semantic](https://semver.org/),
 read from an installed runner's point of view: **major** when your installation needs a

@@ -5,7 +5,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { useConsole } from "@/hooks/use-console"
 import { why } from "@/lib/api"
 import { currentLanguage, t as translate, useT } from "@/lib/i18n"
-import { cn } from "@/lib/utils"
 
 import { Eyebrow } from "./frame"
 import { Steps } from "./steps"
@@ -30,14 +29,7 @@ function moment(at?: string): string {
  * learn here, and nothing kept on the side: the discussion is Notion's, and
  * the same words typed into Notion do the same.
  */
-export function TicketTalk({
-  className,
-  bounded = false,
-}: {
-  className?: string
-  /** Given a height of its own rather than the pane's, for when it sits under the page. */
-  bounded?: boolean
-}) {
+export function TicketTalk() {
   const { ticket, talk, mention, ticketSteps, tell, rereadTalk, talkLoading } = useConsole()
   const t = useT()
   const [text, setText] = React.useState("")
@@ -59,8 +51,11 @@ export function TicketTalk({
   }
 
   return (
-    <div className={cn("flex min-h-0 flex-col", bounded ? "h-[70svh]" : "h-full", className)}>
-      <div className="border-b px-3.5 py-2.5">
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* Room at the right for the drawer's own close, which floats over this
+          corner: a heading that ran under it would be a heading with a cross
+          in the middle of it. */}
+      <div className="border-b py-2.5 pr-10 pl-3.5">
         <Eyebrow>{t("the ticket")}</Eyebrow>
         <h3 className="mt-1 text-base leading-tight font-semibold tracking-[-0.01em]">
           {ticket ? (

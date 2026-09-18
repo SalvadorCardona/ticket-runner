@@ -1,5 +1,6 @@
 import {
   Activity,
+  ArrowUp,
   BookOpen,
   CalendarClock,
   FolderGit2,
@@ -8,7 +9,6 @@ import {
   RefreshCw,
   Settings2,
   Sun,
-  Terminal,
 } from "lucide-react"
 import { Link } from "react-resource-view"
 
@@ -42,18 +42,22 @@ import { TICKETS, boardHref } from "@/resources/tickets"
 
 /* The left menu.
  *
- * Seven addresses, a name each, and a number where something is waiting there:
+ * Six addresses, a name each, and a number where something is waiting there:
  * how many tickets are on the board, how many sessions are writing right now.
  * It used to say a sentence under every name as well — how many were ready,
  * whether the timer was on — and seven entries of two lines is a page to read
  * rather than a menu to use. What is worth knowing at a glance is a count, and
  * a count fits beside a name.
  *
+ * The seventh was the console's own, for the widths where it had no column of
+ * its own; it is a drawer now, opened by the bubble in the bottom corner, and a
+ * menu has no entry for a thing that is already on the screen.
+ *
  * Collapsed it is a rail of icons — ⌘B, or the strip down its right edge — and
  * every entry keeps its name in a tooltip.
  */
 export function AppSidebar({ route }: { route: Route }) {
-  const { board, sessions, connection, refresh } = useConsole()
+  const { board, sessions, connection, refresh, runner } = useConsole()
   const { theme, toggle } = useTheme()
   const { state, isMobile, setOpenMobile } = useSidebar()
   const t = useT()
@@ -66,13 +70,6 @@ export function AppSidebar({ route }: { route: Route }) {
       icon: LayoutGrid,
       priority: 50,
       badge: board.tickets.length || undefined,
-    },
-    {
-      name: t("Console"),
-      href: pageHref("console"),
-      page: "console",
-      icon: Terminal,
-      priority: 30,
     },
     {
       name: t("Live"),
@@ -152,12 +149,7 @@ export function AppSidebar({ route }: { route: Route }) {
               {visible(items).map((item) => {
                 const Icon = item.icon
                 return (
-                  <SidebarMenuItem
-                    key={item.name}
-                    // Above 861px the console has a column of its own, and an
-                    // entry for it would be an entry for what is already there.
-                    className={item.page === "console" ? "min-[861px]:hidden" : undefined}
-                  >
+                  <SidebarMenuItem key={item.name}>
                     <SidebarMenuButton
                       asChild
                       isActive={active(item)}
@@ -246,6 +238,36 @@ export function AppSidebar({ route }: { route: Route }) {
           </TooltipTrigger>
           <TooltipContent side="right">{t("event stream")}</TooltipContent>
         </Tooltip>
+
+        {/* The number this console is running, and — the one day it matters —
+            that a newer one is waiting. It used to be a pill in the bar, on
+            every page, beside four others nobody was reading; here it is where
+            the rest of the machine's own state already sits, and a rail too
+            narrow for a version still shows the arrow that says update. */}
+        {runner && (!collapsed || runner.update) ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div
+                className={cn(
+                  "flex items-center gap-2 px-2 py-1 font-mono text-[0.7rem]",
+                  collapsed && "justify-center px-0",
+                  runner.update ? "text-tr-amber" : "text-muted-foreground"
+                )}
+              >
+                {runner.update ? <ArrowUp className="size-3 shrink-0" /> : null}
+                {!collapsed ? <span className="truncate">v{runner.version}</span> : null}
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              {runner.update
+                ? t("v{{version}} — {{waiting}} is waiting, run: ticket-runner update", {
+                    version: runner.version,
+                    waiting: runner.update,
+                  })
+                : t("the version this console runs")}
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
       </SidebarFooter>
 
       <SidebarRail />
