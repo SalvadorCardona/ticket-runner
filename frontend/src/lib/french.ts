@@ -20,6 +20,11 @@ export const FRENCH: Record<string, string> = {
   // in French is absent from this list: an untranslated key is drawn as it
   // stands, which is the French they were written in.
   "No data yet": "Rien sur le tableau.",
+  // What a list with a `noResult` of its own never says — and what the tables
+  // in the settings fall back on.
+  "No results yet": "Rien pour l'instant",
+  "Nothing matched your search. Try different criteria, or come back later.":
+    "Rien ne correspond. Changez de critères, ou revenez plus tard.",
   "Nothing here": "rien",
   Saved: "Déplacé",
   create: "Nouveau ticket",
@@ -45,7 +50,9 @@ export const FRENCH: Record<string, string> = {
   Today: "Aujourd'hui",
   // The two lines a form ends on, set from `i18n.ts` rather than read from a
   // declaration: they are handed to a toast as they stand.
-  "Written to Notion": "Écrit dans Notion",
+  // Not `Saved`, which the package already says — and says on a card dropped in
+  // another column, where it means "moved".
+  Written: "Écrit",
   "Some fields need another look": "Quelques champs demandent une relecture",
 
   /* -- where you are ------------------------------------------------------- */
@@ -112,8 +119,10 @@ export const FRENCH: Record<string, string> = {
   Failed: "Échoué",
   Done: "Terminé",
   Elsewhere: "Ailleurs",
-  "Notion holds the board; this is it, live. Drop a card in another column and the runner is told.":
-    "Le tableau est dans Notion ; le voici, en direct. Déposez une carte dans une autre colonne et le runner en est averti.",
+  "Your board, live. Drop a card in another column and the runner is told.":
+    "Votre tableau, en direct. Déposez une carte dans une autre colonne et le runner en est averti.",
+  "Nothing on the board yet — a ticket moved to the ready column is a session that starts.":
+    "Rien sur le tableau — un ticket déposé dans la colonne prête, c'est une session qui démarre.",
   "New ticket": "Nouveau ticket",
   Ticket: "Ticket",
   Title: "Titre",
@@ -123,6 +132,7 @@ export const FRENCH: Record<string, string> = {
   Priority: "Priorité",
   Model: "Modèle",
   Cost: "Coût",
+  Took: "Durée",
   Scheduled: "Prévu",
   "Ready to run": "Prêt à tourner",
   Create: "Créer",
@@ -146,6 +156,9 @@ export const FRENCH: Record<string, string> = {
   "{{count}}h ago": "il y a {{count}} h",
   "{{count}}d ago": "il y a {{count}} j",
   "{{count}}mo ago": "il y a {{count}} mois",
+  "Scroll to the last message": "Aller au dernier message",
+  "{{count}} min": "{{count}} min",
+  "{{count}} h": "{{count}} h",
   "run again": "relancer",
   "make ready": "rendre prêt",
   validate: "valider",
@@ -155,6 +168,8 @@ export const FRENCH: Record<string, string> = {
   priority: "priorité",
   model: "modèle",
   spent: "dépensé",
+  took: "durée",
+  "taken by": "pris par",
   created: "créé",
   scheduled: "prévu",
   "the brief": "le brief",
@@ -205,8 +220,8 @@ export const FRENCH: Record<string, string> = {
 
   /* -- live ------------------------------------------------------------------ */
   "See the work happen.": "Voyez le travail se faire.",
-  "What the running tickets are doing, straight from their session logs — no Notion in the way.":
-    "Ce que font les tickets en cours, directement depuis leurs journaux de session — sans passer par Notion.",
+  "What the running tickets are doing, straight from their session logs — without asking the board.":
+    "Ce que font les tickets en cours, directement depuis leurs journaux de session — sans rien demander au tableau.",
   "writing now": "en train d'écrire",
   quiet: "calme",
   sessions: "sessions",

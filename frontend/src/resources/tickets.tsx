@@ -28,12 +28,14 @@ import {
   TicketFoot,
   TicketTags,
   ago,
+  lasted,
+  when,
 } from "@/components/console/ticket-bits"
 import { TicketPage } from "@/components/console/ticket-page"
 import { api } from "@/lib/api"
 import { addTicket, boardOnce, currentBoard, patchTicket, subscribeBoard, useBoard } from "@/lib/board-store"
 import { t } from "@/lib/i18n"
-import { SCOPE } from "@/lib/resource-view"
+import { SCOPE, layoutOf, useLayoutInTheAddress } from "@/lib/resource-view"
 import type { ColumnKey, Ticket, TicketDetail } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -56,6 +58,10 @@ export type TicketItem = Ticket & {
   content?: string
   /** The cost as a table cell reads it — the number is for the badges. */
   spent: string
+  /** How long the run took, in words. */
+  took: string
+  /** When it is due, written the way the console writes a date. */
+  due: string
 }
 
 /** What the console writes about a ticket: a new one, or the column an old one moves to. */
@@ -73,6 +79,8 @@ const item = (ticket: Ticket | TicketDetail): TicketItem => ({
   "@id": `/api/tickets/${ticket.id}`,
   "@type": TICKETS,
   spent: typeof ticket.cost === "number" && ticket.cost ? `$${ticket.cost.toFixed(2)}` : "",
+  took: typeof ticket.duration === "number" && ticket.duration ? lasted(ticket.duration) : "",
+  due: when(ticket.scheduled),
 })
 
 /** The column's name, as the board spells it. */
@@ -126,9 +134,11 @@ const createForm: FormInterface = {
         const { projects } = await api.projects().catch(() => ({ projects: [] }))
         return [
           { value: "", label: "no project — a document" },
+          // The kind said the way the rest of the console says it: the list of
+          // projects says "code work", and this said "code".
           ...projects.map((project) => ({
             value: project.id,
-            label: `${project.name} — ${project.kind}`,
+            label: `${project.name} — ${project.kind === "code" ? t("code work") : t("document work")}`,
           })),
         ]
       },
@@ -144,8 +154,10 @@ const createForm: FormInterface = {
   },
 }
 
-/* The columns of the table layout. Read only: the board is Notion's. The
- * headings go through the dictionary on their way to the page. */
+/* The columns of the table layout. Read only: a ticket is moved on the board,
+ * not typed into here. The headings go through the dictionary on their way to
+ * the page, and the two cells that are a number on the card — what it cost and
+ * how long it took — are read from the words `item` writes them in. */
 const rowForm: FormInterface = {
   inputs: {
     title: { label: "Ticket", readonly: true },
@@ -154,7 +166,8 @@ const rowForm: FormInterface = {
     priority: { label: "Priority", readonly: true },
     model: { label: "Model", readonly: true },
     spent: { label: "Cost", readonly: true },
-    scheduled: { label: "Scheduled", readonly: true },
+    took: { label: "Took", readonly: true },
+    due: { label: "Scheduled", readonly: true },
   },
 }
 
@@ -220,10 +233,26 @@ function TicketCard({ row }: RowComponentPropsInterface) {
  */
 function BoardTop() {
   const { fetchData } = useCurrentViewResourceContext()
+  useLayoutInTheAddress(TICKETS)
   const latest = React.useRef(fetchData)
   latest.current = fetchData
   React.useEffect(() => subscribeBoard(() => latest.current()), [])
   return null
+}
+
+/* The board's own empty line.
+ *
+ * Left to the package, a board with nothing on it said "No results yet —
+ * nothing matched your search", in English, on a console set to French and on a
+ * page where nobody has searched for anything. An empty board is not a failed
+ * search: it is a board waiting for its first ticket, and the button that makes
+ * one is already at the top of the page. */
+function NoTicket() {
+  return (
+    <p className="text-muted-foreground rounded-lg border border-dashed px-3 py-6 text-center text-sm">
+      {t("Nothing on the board yet — a ticket moved to the ready column is a session that starts.")}
+    </p>
+  )
 }
 
 /** A column's name as a heading: the board's own word, with a capital, under its colour. */
@@ -374,8 +403,15 @@ export const tickets = createViewResource<TicketItem, TicketItem, TicketWrite>(T
     // to the resource's icon: the board opens on its own words.
     [ActionList.list]: {
       name: "Board",
+      // What the board is, without naming where it is kept: the same console
+      // draws a Notion workspace and a directory of Markdown files, and a
+      // sentence that names one of them is wrong half the time.
       description:
-        "Notion holds the board; this is it, live. Drop a card in another column and the runner is told.",
+        "Your board, live. Drop a card in another column and the runner is told.",
+      // A row of the table opens the ticket, as a card does. Without it the
+      // table is a list you cannot get out of.
+      behavior: { rowActions: [ActionList.read] },
+      components: { noResult: NoTicket },
     },
     [ActionList.create]: {
       name: "New ticket",
@@ -388,9 +424,13 @@ export const tickets = createViewResource<TicketItem, TicketItem, TicketWrite>(T
   },
 })
 
-/** Where the board is. */
+/** Where the board is, in the layout it was last worked in. */
 export const boardHref = () =>
-  generateLinkByResource({ resource: tickets, resourceAction: ActionList.list })
+  generateLinkByResource({
+    resource: tickets,
+    resourceAction: ActionList.list,
+    viewVariantId: layoutOf(TICKETS),
+  })
 
 /** Where a ticket is. */
 export const ticketHref = (id: string) =>

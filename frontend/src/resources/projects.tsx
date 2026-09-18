@@ -17,8 +17,7 @@ import { ProjectPage } from "@/components/console/project-page"
 import { Chip } from "@/components/console/ticket-bits"
 import { api } from "@/lib/api"
 import { t } from "@/lib/i18n"
-import { SCOPE } from "@/lib/resource-view"
-import { go } from "@/lib/router"
+import { SCOPE, layoutOf, useLayoutInTheAddress } from "@/lib/resource-view"
 import type { Project, Projects } from "@/lib/types"
 
 /* The projects, declared once for react-resource-view.
@@ -255,47 +254,10 @@ function ProjectCard({ row }: RowComponentPropsInterface) {
 
 /* -- what sits around the list -------------------------------------------- */
 
-let layout = ""
-
-/* The layout you picked, written into the address.
- *
- * The package's tabs move the layout on the context and nowhere else, so the
- * table you switched to was gone on the next reload — and gone again on the way
- * back from a project, since that link is built from the list and knew nothing
- * of it. The address already knows how to carry a layout: `variant=` is what
- * `generateLinkByResource` writes and what the package reads on the way in.
- * What was missing is somebody writing it there.
- *
- * Replaced rather than pushed: picking a layout is not a step you go back
- * through. And left alone until you pick something other than the first one, so
- * a link shared as `/?view=console/projects/list` stays what somebody typed.
- */
-function useLayoutInTheAddress() {
-  const { view, viewVariant, resource } = useCurrentViewResourceContext()
-  const first = view?.viewVariants?.[0]?.id
-  React.useEffect(() => {
-    if (!viewVariant) return
-    // Kept here as well as in the address, because the pages that link back to
-    // the list — a project, the sidebar — have an address of their own to read
-    // and would otherwise send everybody back to the cards.
-    layout = viewVariant === first ? "" : viewVariant
-    const carried = new URLSearchParams(window.location.search).get("variant")
-    if (carried === viewVariant || (!carried && viewVariant === first)) return
-    go(
-      generateLinkByResource({
-        resource,
-        resourceAction: ActionList.list,
-        viewVariantId: viewVariant,
-      }),
-      true
-    )
-  }, [viewVariant, first, resource])
-}
-
 /** How many of them are worked on in git, said where the list opens. */
 function ProjectsTop() {
   const read = useProjects()
-  useLayoutInTheAddress()
+  useLayoutInTheAddress(PROJECTS)
   if (!read) return null
   const code = read.projects.filter((project) => project.kind === "code").length
   return (
@@ -442,7 +404,7 @@ export const projectsHref = () =>
   generateLinkByResource({
     resource: projects,
     resourceAction: ActionList.list,
-    viewVariantId: layout || undefined,
+    viewVariantId: layoutOf(PROJECTS),
   })
 
 /** Where one project is. */

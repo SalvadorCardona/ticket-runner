@@ -113,10 +113,15 @@ function apply(next: Language) {
   document.documentElement.lang = next
   // These two are handed to a toast as they stand rather than translated on
   // the way, so they are written again whenever the dictionary changes.
+  //
+  // The confirmation does not say where it landed: the same toast answers a
+  // project written to Notion, a project written to a Markdown file, and a
+  // setting written to `config.toml` — and it used to claim Notion for all
+  // three.
   setFormConfig({
     defaultForm: {
       label: {
-        success: translate("Written to Notion"),
+        success: translate("Written"),
         error: translate("Some fields need another look"),
       },
     },
