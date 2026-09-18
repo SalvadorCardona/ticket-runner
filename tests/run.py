@@ -5997,7 +5997,7 @@ def _worktree_for(
 
     commands: list[list[str]] = []
 
-    def fake(args, cwd, timeout=300):
+    def fake(args, cwd, timeout=300, **_):
         commands.append(list(args))
         head = args[:1]
         if args[:3] == ["rev-parse", "--verify", "--quiet"]:
@@ -6141,6 +6141,47 @@ def a_rebase_that_conflicts_is_undone_and_the_session_runs_anyway():
     assert made.reused
     assert "reused as it stands" in made.note and "src/app.py" in made.note
     assert commands[-1] == ["rebase", "--abort"], "nothing is left half-applied"
+
+
+@case
+def a_replay_still_happens_where_git_has_no_identity_of_its_own():
+    """The CI runner, the container, the server nobody configured.
+
+    A rebase writes commits, and git refuses to write one where it cannot tell
+    who is writing. The replay failed there for that, the failure read as the
+    branch refusing to move, and the ticket landed in Blocked saying the pull
+    request would not merge — true, and not the reason. The identity is a
+    fallback: a machine that has one of its own keeps committing under it.
+    """
+    from ticket_runner import git as git_module
+
+    with tempfile.TemporaryDirectory() as home:
+        repo = Path(home) / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "--quiet"], cwd=repo, check=True)
+
+        bare = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
+        with _patched_environ(bare):
+            lent = git_module.identity(repo)
+            assert lent["GIT_COMMITTER_EMAIL"], "a machine with no identity is lent one"
+            assert lent["GIT_AUTHOR_NAME"] == lent["GIT_COMMITTER_NAME"]
+
+            subprocess.run(
+                ["git", "config", "user.email", "someone@example.invalid"], cwd=repo, check=True
+            )
+            assert git_module.identity(repo) == {}, "an identity of its own is left alone"
+
+
+@contextmanager
+def _patched_environ(values):
+    previous = dict(os.environ)
+    os.environ.clear()
+    os.environ.update(values)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(previous)
 
 
 @case

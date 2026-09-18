@@ -47,7 +47,11 @@ class Result:
 
 
 def run(
-    args: list[str], cwd: Path | str | None = None, timeout: int = 300, token: str = ""
+    args: list[str],
+    cwd: Path | str | None = None,
+    timeout: int = 300,
+    token: str = "",
+    environment: dict[str, str] | None = None,
 ) -> Result:
     """One command, and the GitHub account it runs as when there is a choice.
 
@@ -57,12 +61,13 @@ def run(
     pull request that follows it. Empty leaves the environment alone, and the
     command answers as whoever `gh` is signed in as.
     """
-    environment = None
+    extra = dict(environment or {})
+    environment = {**os.environ, **extra} if extra else None
     if token:
         # Both names: `gh` prefers GH_TOKEN, and setting only that one would
         # leave a GITHUB_TOKEN inherited from elsewhere to answer for the tools
         # that read it instead.
-        environment = {**os.environ, "GH_TOKEN": token, "GITHUB_TOKEN": token}
+        environment = {**(environment or os.environ), "GH_TOKEN": token, "GITHUB_TOKEN": token}
     process = subprocess.run(
         args,
         cwd=str(cwd) if cwd else None,
@@ -74,8 +79,14 @@ def run(
     return Result(process.returncode, process.stdout.strip(), process.stderr.strip())
 
 
-def git(args: list[str], cwd: Path | str, timeout: int = 300, token: str = "") -> Result:
-    return run(["git", *args], cwd=cwd, timeout=timeout, token=token)
+def git(
+    args: list[str],
+    cwd: Path | str,
+    timeout: int = 300,
+    token: str = "",
+    environment: dict[str, str] | None = None,
+) -> Result:
+    return run(["git", *args], cwd=cwd, timeout=timeout, token=token, environment=environment)
 
 
 # Which GitHub account a repository is worked under, by the owner it belongs to:
@@ -223,6 +234,31 @@ def _same(one: str, other: Path) -> bool:
         return False
 
 
+def identity(worktree: Path | str) -> dict[str, str]:
+    """An identity for git on a machine that has none, nothing on one that has.
+
+    A rebase writes commits, and git refuses to write one where it cannot tell
+    who is writing — a CI runner, a container, a server nobody ever configured.
+    The replay then fails on an identity, that failure reads as the branch
+    refusing to move, and the ticket lands in Blocked saying the pull request
+    would not merge. Which is true, and not the reason.
+
+    Carried in the environment rather than as `-c` so the command stays the
+    command, and a fallback rather than a rule: a machine with an identity of
+    its own keeps committing under it, so the replay of your branch stays yours.
+    The author of a replayed commit is git's to restore either way.
+    """
+    resolved = git(["config", "--get", "user.email"], worktree)
+    if resolved.ok and resolved.out:
+        return {}
+    return {
+        "GIT_AUTHOR_NAME": "ticket-runner",
+        "GIT_AUTHOR_EMAIL": "ticket-runner@localhost",
+        "GIT_COMMITTER_NAME": "ticket-runner",
+        "GIT_COMMITTER_EMAIL": "ticket-runner@localhost",
+    }
+
+
 def rebase(worktree: Path, onto: str) -> str:
     """Replay the branch on top of `onto`. Says why it could not, or nothing.
 
@@ -237,7 +273,7 @@ def rebase(worktree: Path, onto: str) -> str:
     back to what it was, the session runs on it, and the conflict is a line in
     the ticket's comment.
     """
-    result = git(["rebase", "--autostash", onto], worktree)
+    result = git(["rebase", "--autostash", onto], worktree, environment=identity(worktree))
     if result.ok:
         return ""
     git(["rebase", "--abort"], worktree)
