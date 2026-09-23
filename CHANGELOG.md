@@ -245,6 +245,19 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
   "nobody decided": each session goes on answering in the language of the ticket
   it was given, exactly as before.
 
+- **A schedule's context is written from the console, and every Markdown field
+  is an editor.** The page body of a schedule — the brief copied into every
+  ticket it makes — was the one part of a row the console could not touch: the
+  form wrote its columns, and the text meant opening Notion. It is the last
+  field of that form now, read from a new `GET /api/schedules/<id>`. And the
+  four places the console writes Markdown — that context, the standing
+  context, a project's brief, a new ticket — are no longer a text area but
+  [Milkdown](https://milkdown.dev)'s Crepe: `/` for a block, a handle to drag
+  one, a bar over a selection, `#` and `-` turned into what they mean as they
+  are typed. Markdown is its model rather than an export of it, so what reaches
+  Notion or a Markdown board is the text that was typed. It is fetched the first
+  time such a field opens, not with the console.
+
 ### Fixed
 
 - **An update puts the console on the code it just installed.** A run is a

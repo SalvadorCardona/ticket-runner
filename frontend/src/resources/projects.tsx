@@ -1,6 +1,6 @@
 import * as React from "react"
 import { FolderGit2 } from "lucide-react"
-import { ActionList, TextAreaInputController, type FormInterface } from "react-data-form"
+import { ActionList, type FormInterface } from "react-data-form"
 import {
   Link,
   cardViewOptionFactory,
@@ -13,6 +13,7 @@ import {
 } from "react-resource-view"
 
 import { Eyebrow, Fact, Facts } from "@/components/console/frame"
+import { MarkdownInputController } from "@/components/console/markdown-editor"
 import { ProjectPage } from "@/components/console/project-page"
 import { Chip } from "@/components/console/ticket-bits"
 import { api } from "@/lib/api"
@@ -183,13 +184,12 @@ const editForm: FormInterface = {
           "The audience, the voice, the conventions, the things never to do. Every ticket of this project is told it before it is told the ticket."
         )
       },
-      // Said here, because the package's own default for a text area is
-      // “Votre message…” — the placeholder of a chat box, on the one field of
-      // this console that is a page of standing instructions.
+      // Shown in the empty editor: a page of standing instructions, which is
+      // not the same thing as a message.
       get placeholder() {
         return t("Write it as you would brief somebody joining the project.")
       },
-      controller: TextAreaInputController,
+      controller: MarkdownInputController,
     },
   },
 }

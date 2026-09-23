@@ -3,12 +3,12 @@ import { toast } from "sonner"
 import { BookOpen, RefreshCw, Save } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 import { api, why } from "@/lib/api"
 import { useT } from "@/lib/i18n"
 import type { Context } from "@/lib/types"
 
 import { Eyebrow, PageHead } from "./frame"
+import { MarkdownEditor } from "./markdown-editor"
 
 /* The standing context, as something you can change.
  *
@@ -24,9 +24,10 @@ import { Eyebrow, PageHead } from "./frame"
  * history — saving it twice has to leave one text, not two copies of it under
  * each other.
  *
- * And it shows what the *agent* reads, not what Notion draws: the page
- * flattened the way the prompt carries it. A heading that looks different here
- * from the way it looks in Notion is the heading as an agent gets it.
+ * And it edits what the *agent* reads, not what Notion draws: the page
+ * flattened into the Markdown the prompt carries, drawn as it is typed. A
+ * heading that looks different here from the way it looks in Notion is the
+ * heading as an agent gets it.
  */
 
 export function ContextPane() {
@@ -117,14 +118,13 @@ export function ContextPane() {
         </p>
       ) : (
         <>
-          <Textarea
+          <MarkdownEditor
             value={text}
-            onChange={(event) => setText(event.target.value)}
-            spellCheck={false}
+            onChange={setText}
             placeholder={t(
               "Who you are, what the team does, the stack, the conventions, the things never to do. Keep it to one screen."
             )}
-            className="min-h-[24rem] flex-1 font-mono text-xs leading-relaxed"
+            className="min-h-[24rem] flex-1"
           />
           <p className="text-muted-foreground mt-3 text-xs">
             <Eyebrow>{drawn.storage}</Eyebrow> —{" "}

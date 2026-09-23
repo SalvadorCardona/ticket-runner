@@ -7687,6 +7687,37 @@ def the_console_writes_a_schedule_without_touching_what_a_pass_writes_back():
 
 
 @case
+def the_console_reads_and_rewrites_the_brief_a_schedule_is_born_with():
+    """A schedule's page body is copied under every ticket it makes.
+
+    The list leaves it out — twenty rows would be twenty pages read — so one
+    schedule opened is the row plus its body, and saving the body alone is a
+    change, not a payload with nothing in it.
+    """
+    with _board() as board:
+        api = _markdown_api(board)
+        created = api.create_schedule(
+            "Revue des dépendances", {"cadence": "Weekly", "body": "Première version."}
+        )
+        opened = api.schedule(created["id"])
+        assert opened["name"] == "Revue des dépendances"
+        assert opened["body"] == "Première version."
+
+        api.save_schedule(created["id"], {"body": "## Deuxième\n\n- une liste"})
+        assert api.schedule(created["id"])["body"] == "## Deuxième\n\n- une liste"
+        api.save_schedule(created["id"], {"body": "## Deuxième\n\n- une liste"})
+        assert board.blocks_text(created["id"]) == "## Deuxième\n\n- une liste", (
+            "a second save must not stack"
+        )
+        try:
+            api.schedule("f" * 32)
+        except LookupError:
+            pass
+        else:
+            raise AssertionError("a schedule that is not there must say so")
+
+
+@case
 def the_console_says_which_board_it_is_looking_at():
     """The panes read it: a Notion link is worth drawing on one and not the other."""
     with _board() as board:

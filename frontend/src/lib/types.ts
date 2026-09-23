@@ -113,6 +113,11 @@ export interface Schedule {
   problem: string
 }
 
+/** One schedule opened: the row, and its page body — the brief of every ticket it makes. */
+export interface ScheduleDetail extends Schedule {
+  body: string
+}
+
 export interface Schedules {
   /** `runner.schedule`: off, and nothing is born however the rows are ticked. */
   enabled: boolean

@@ -1,6 +1,19 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Milkdown's Crepe, the Markdown editor (see `markdown-editor.tsx`), sheet by
+   sheet: only the features it is built with, and none of its themes — the
+   colours are the console's, mapped at the foot of this file. */
+@import "@milkdown/crepe/theme/common/prosemirror.css";
+@import "@milkdown/crepe/theme/common/reset.css";
+@import "@milkdown/crepe/theme/common/block-edit.css";
+@import "@milkdown/crepe/theme/common/cursor.css";
+@import "@milkdown/crepe/theme/common/link-tooltip.css";
+@import "@milkdown/crepe/theme/common/list-item.css";
+@import "@milkdown/crepe/theme/common/placeholder.css";
+@import "@milkdown/crepe/theme/common/toolbar.css";
+@import "@milkdown/crepe/theme/common/table.css";
+
 /* The views and the forms are written in Tailwind classes against the shadcn
    variables below, so Tailwind has to read their compiled files to emit the
    classes they use. Their own `styles.css` is not imported: the palette is
@@ -266,3 +279,69 @@
     }
   }
 }
+
+/* The Markdown editor, in the console's palette and at the size of a form.
+
+   Outside any layer, because Crepe's own sheets are: a rule in a layer loses to
+   an unlayered one whatever its specificity. The variables are Crepe's names
+   for shadcn's colours, so the dark mode needs nothing of its own. The sizes
+   are Notion's rather than Crepe's: Crepe draws a document, sixty pixels of
+   margin and a title in 42px serif, and these are fields in a form. The left
+   gutter is the room the block handle is drawn in. */
+.milkdown {
+  --crepe-color-background: transparent;
+  --crepe-color-on-background: var(--foreground);
+  --crepe-color-surface: var(--popover);
+  --crepe-color-surface-low: var(--muted);
+  --crepe-color-on-surface: var(--popover-foreground);
+  --crepe-color-on-surface-variant: var(--muted-foreground);
+  --crepe-color-outline: var(--muted-foreground);
+  --crepe-color-primary: var(--primary);
+  --crepe-color-secondary: var(--accent);
+  --crepe-color-on-secondary: var(--accent-foreground);
+  --crepe-color-inverse: var(--foreground);
+  --crepe-color-on-inverse: var(--background);
+  --crepe-color-inline-code: var(--tr-pink);
+  --crepe-color-error: var(--destructive);
+  --crepe-color-hover: var(--accent);
+  --crepe-color-selected: color-mix(in srgb, var(--primary), transparent 75%);
+  --crepe-color-inline-area: var(--muted);
+  --crepe-base-font-size: 14px;
+  --crepe-font-title: var(--font-sans);
+  --crepe-font-default: var(--font-sans);
+  --crepe-font-code: var(--font-mono);
+  --crepe-shadow-1: 0 1px 3px rgb(0 0 0 / 0.12), 0 1px 2px rgb(0 0 0 / 0.2);
+  --crepe-shadow-2: 0 4px 12px rgb(0 0 0 / 0.16), 0 1px 3px rgb(0 0 0 / 0.2);
+}
+[data-slot="markdown-editor"] {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background-color: var(--field);
+}
+[data-slot="markdown-editor"]:focus-within {
+  background-color: var(--background);
+  border-color: var(--ring);
+}
+[data-slot="markdown-editor"] > div,
+[data-slot="markdown-editor"] .milkdown,
+[data-slot="markdown-editor"] .milkdown .editor {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+.milkdown .ProseMirror {
+  flex: 1;
+  padding: 0.75rem 1rem 0.75rem 3.25rem;
+}
+.milkdown .ProseMirror h1,
+.milkdown .ProseMirror h2,
+.milkdown .ProseMirror h3 {
+  font-weight: 600;
+  line-height: 1.3;
+}
+.milkdown .ProseMirror h1 { font-size: 1.75em; margin-top: 1rem; }
+.milkdown .ProseMirror h2 { font-size: 1.4em; margin-top: 0.875rem; }
+.milkdown .ProseMirror h3 { font-size: 1.15em; margin-top: 0.75rem; }
+.milkdown .ProseMirror > :first-child { margin-top: 0; }

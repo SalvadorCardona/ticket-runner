@@ -324,6 +324,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(self.api.context())
             if route == "/api/schedules":
                 return self._json(self.api.schedules())
+            if match := re.fullmatch(r"/api/schedules/([0-9a-fA-F-]{32,36})", route):
+                return self._json(self.api.schedule(match.group(1)))
             if route == "/api/history":
                 return self._json(self.api.history())
             if route == "/api/chat":

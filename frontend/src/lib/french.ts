@@ -291,6 +291,31 @@ export const FRENCH: Record<string, string> = {
   "Created unticked: nothing is born until you turn it on.":
     "Créée décochée : rien ne naît tant que vous ne l'activez pas.",
   "A schedule needs a name": "Une récurrence a besoin d'un nom",
+  "Copied into every ticket it makes: what to do, where, and how you will know it is done.":
+    "Recopié dans chaque ticket qu'elle produit : quoi faire, où, et comment savoir que c'est fait.",
+  "What each occurrence has to do.": "Ce que chaque occurrence doit faire.",
+
+  /* -- the Markdown editor ---------------------------------------------------- */
+  /* The menu `/` opens and the bar over a selection. `Context` and `Link` are
+     already said above. */
+  "Paste a link…": "Collez un lien…",
+  Bold: "Gras",
+  Italic: "Italique",
+  Strikethrough: "Barré",
+  "Inline code": "Code en ligne",
+  Text: "Texte",
+  "Heading 1": "Titre 1",
+  "Heading 2": "Titre 2",
+  "Heading 3": "Titre 3",
+  Quote: "Citation",
+  Divider: "Séparateur",
+  List: "Liste",
+  "Bullet list": "Liste à puces",
+  "Numbered list": "Liste numérotée",
+  "To-do list": "Liste de tâches",
+  Advanced: "Avancé",
+  Code: "Code",
+  Table: "Tableau",
 
   /* -- the projects ----------------------------------------------------------- */
   /* `Projects`, `Project`, `Repository`, `Where it is` and `The brief` are
