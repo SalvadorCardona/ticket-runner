@@ -497,8 +497,10 @@ installation self-sufficient: **Projects** (every project this installation know
 board's and the ones only `[projects]` names — each of them a page you open and change),
 **Context** (the standing text every ticket is told first, editable rather than read-only)
 and an editable **Schedules** — a row is turned off
-from the list itself, a pencil opens the six columns it is written in, and a new schedule
-is created unticked whatever the form said.
+from the list itself, a pencil opens the six columns it is written in and the context its
+tickets are born with, and a new schedule is created unticked whatever the form said. Every
+field of the console that holds Markdown — that context, the standing one, a project's
+brief, a new ticket — is a Notion-like editor rather than a text area.
 
 ### Both, and what happens when they disagree
 

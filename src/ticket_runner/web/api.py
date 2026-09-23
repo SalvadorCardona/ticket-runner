@@ -405,9 +405,12 @@ class Api:
             written[settings.prop("project")] = [values["project"]] if values["project"] else []
         if "name" in values and str(values["name"]).strip():
             written[self.runner.client.title_property(database)] = str(values["name"]).strip()
-        if not written:
+        if not written and "body" not in values:
             raise ValueError("nothing to change")
-        self.runner.client.update(database, page_id, written)
+        if written:
+            self.runner.client.update(database, page_id, written)
+        # Replacing, not appending: the body is the brief every occurrence is
+        # born with, a value like a project's. See `save_project`.
         if "body" in values:
             self.runner.client.replace_markdown(page_id, str(values["body"]))
         self.hub.publish("schedules", saved=page_id)
@@ -458,6 +461,22 @@ class Api:
             "page": self.config.notion.page("schedules"),
             "schedules": [self._schedule(row, projects) for row in rows],
         }
+
+    def schedule(self, page_id: str) -> dict:
+        """One schedule, as the list says it, plus what is written on its page.
+
+        The body is what the list leaves out, and it is the part that matters:
+        it is copied under every ticket the schedule makes. Read here, once,
+        rather than with every row — a list of twenty schedules would otherwise
+        be twenty pages read to draw a table that shows none of them.
+        """
+        wanted = page_id.replace("-", "")
+        row = next(
+            (item for item in self.schedules()["schedules"] if item["id"] == wanted), None
+        )
+        if row is None:
+            raise LookupError(f"no schedule with id {wanted}")
+        return {**row, "body": self.runner.client.blocks_text(page_id)}
 
     def _schedule(self, schedule: schedules_module.Schedule, projects: dict) -> dict:
         """One row of the Schedules database, as the pane reads it.

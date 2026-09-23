@@ -4,7 +4,6 @@ import {
   ActionList,
   BooleanInputController,
   SelectInputController,
-  TextAreaInputController,
   type FormInterface,
 } from "react-data-form"
 import {
@@ -20,6 +19,7 @@ import {
   type RowComponentPropsInterface,
 } from "react-resource-view"
 
+import { MarkdownInputController } from "@/components/console/markdown-editor"
 import {
   EDGE,
   LABEL,
@@ -122,7 +122,7 @@ const createForm: FormInterface = {
       get placeholder() {
         return t("What must change, where, and how you will know it is done.")
       },
-      controller: TextAreaInputController,
+      controller: MarkdownInputController,
     },
     project: {
       label: "Project",

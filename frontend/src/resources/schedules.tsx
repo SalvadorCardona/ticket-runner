@@ -19,8 +19,9 @@ import {
   type RowInterface,
 } from "react-resource-view"
 
+import { MarkdownInputController } from "@/components/console/markdown-editor"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { api, why } from "@/lib/api"
+import { ApiError, api, why } from "@/lib/api"
 import { t } from "@/lib/i18n"
 import { SCOPE, layoutOf, useLayoutInTheAddress } from "@/lib/resource-view"
 import type { Schedule, Schedules } from "@/lib/types"
@@ -54,13 +55,14 @@ import type { Schedule, Schedules } from "@/lib/types"
 
 export const SCHEDULES = "schedules"
 
-/** A schedule as the views hold it: the row, and an IRI to address it by. */
+/** A schedule as the views hold it: the row, its body once it is opened, and an IRI to address it by. */
 export type ScheduleItem = Schedule & {
+  body?: string
   "@id": string
   "@type": string
 }
 
-/** What the console writes about a schedule: the seven columns a row is written in. */
+/** What the console writes about a schedule: the seven columns a row is written in, and its body. */
 export interface ScheduleWrite {
   id?: string
   name?: string
@@ -70,9 +72,10 @@ export interface ScheduleWrite {
   active?: boolean
   model?: string
   priority?: string
+  body?: string
 }
 
-const item = (schedule: Schedule): ScheduleItem => ({
+const item = (schedule: Schedule & { body?: string }): ScheduleItem => ({
   ...schedule,
   "@id": `/api/schedules/${schedule.id}`,
   "@type": SCHEDULES,
@@ -142,7 +145,7 @@ const choices = (words: string[]) => [
   ...words.map((word) => ({ value: word, label: word })),
 ]
 
-/* The six fields a schedule is written in.
+/* The seven fields a schedule is written in.
  *
  * A label, the button and a select's options are translated by the package as
  * it draws them; the sentence under a field and the greyed example in it are
@@ -196,6 +199,18 @@ const fields: FormInterface["inputs"] = {
     controller: SelectInputController,
     valueOptions: choices(PRIORITIES),
   },
+  // The page body, and the part of a schedule that says what to do: every
+  // occurrence is born with it copied under its first line.
+  body: {
+    label: "Context",
+    get description() {
+      return t("Copied into every ticket it makes: what to do, where, and how you will know it is done.")
+    },
+    get placeholder() {
+      return t("What each occurrence has to do.")
+    },
+    controller: MarkdownInputController,
+  },
 }
 
 /* A new row, and the switch is deliberately not on it: a schedule is created
@@ -227,11 +242,11 @@ const editForm: FormInterface = {
 
 /* The name, and the way to the page it is written on.
  *
- * A schedule's page *body* is the brief of every ticket it makes — the one
- * thing about a schedule this console does not write — so a list that did not
- * lead there would be a list you leave to go and find the page by hand. The
- * package's own way of drawing a cell otherwise is a controller, and this is
- * the whole of it: the row's name, linked where the row says its page is.
+ * A schedule's page is where its history is — the comments, the edits, what
+ * Notion draws that a form does not — so a list that did not lead there would
+ * be a list you leave to go and find the page by hand. The package's own way
+ * of drawing a cell otherwise is a controller, and this is the whole of it:
+ * the row's name, linked where the row says its page is.
  */
 const PageLink: InputControllerComponentInterface = ({ formInput }) => {
   const { form } = useFormContext()
@@ -387,23 +402,25 @@ export const schedules = createViewResource<ScheduleItem, ScheduleItem, Schedule
       }),
     } as never
   },
-  // There is no route for one schedule: the database is read whole, and cheaply.
-  // Read again rather than taken from what is held, so a link opened cold — a
-  // tab that has never listed anything — answers too.
+  // Asked of the server every time, even for a row the list holds: the list
+  // carries no body — twenty rows would be twenty pages read — and the form
+  // this feeds is the one that writes it.
   getItem: async ({ id }) => {
-    const wanted = String(id)
-    const held = read.drawn?.schedules.find((schedule) => schedule.id === wanted)
-    if (held) return { data: item(held) }
-    const fresh = await load()
-    const found = fresh.schedules.find((schedule) => schedule.id === wanted)
-    if (!found) throw new Error(t("This schedule is no longer on the board."))
-    return { data: item(found) }
+    try {
+      return { data: item(await api.schedule(String(id))) }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404)
+        throw new Error(t("This schedule is no longer on the board."))
+      throw error
+    }
   },
   updateItem: async (patch) => {
     const id = String(patch.id ?? "")
     // Written field by field rather than as the row arrived: a row carries the
     // three columns a pass writes back, and the project it points at as a name
-    // rather than as the page the column holds.
+    // rather than as the page the column holds. The body only when the row
+    // came with one — the switch in the list saves a row read without it, and
+    // an absent body is not an empty page.
     await api.saveSchedule(id, {
       name: patch.name ?? "",
       cadence: patch.cadence ?? "",
@@ -412,10 +429,13 @@ export const schedules = createViewResource<ScheduleItem, ScheduleItem, Schedule
       active: patch.active === true,
       model: patch.model ?? "",
       priority: patch.priority ?? "",
+      ...(patch.body === undefined ? {} : { body: patch.body }),
     })
     const fresh = await load()
     const found = fresh.schedules.find((schedule) => schedule.id === id)
-    return { data: found ? item(found) : (patch as unknown as ScheduleItem) }
+    return {
+      data: found ? item({ ...found, body: patch.body }) : (patch as unknown as ScheduleItem),
+    }
   },
   createItem: async (fresh) => {
     const made = await api.createSchedule({
@@ -425,6 +445,7 @@ export const schedules = createViewResource<ScheduleItem, ScheduleItem, Schedule
       day: fresh.day ?? "",
       model: fresh.model ?? "",
       priority: fresh.priority ?? "",
+      ...(fresh.body ? { body: fresh.body } : {}),
     })
     const after = await load()
     const found = after.schedules.find((schedule) => schedule.id === made.id)
@@ -483,15 +504,15 @@ export const schedules = createViewResource<ScheduleItem, ScheduleItem, Schedule
       name: "A ticket that comes back",
       label: { create: "New schedule" },
       form: createForm,
-      // Over the list rather than instead of it: six short fields are not a
-      // page, and the list behind them is what says whether the row is a
-      // duplicate of one that already fires.
-      behavior: { openIn: "popup" },
+      // Over the list rather than instead of it — the list behind is what says
+      // whether the row is a duplicate of one that already fires — and against
+      // the edge at full height, since the last field is a brief.
+      behavior: { openIn: "drawer" },
     },
     [ActionList.update]: {
       name: "A ticket that comes back",
       form: editForm,
-      behavior: { openIn: "popup" },
+      behavior: { openIn: "drawer" },
     },
   },
 })
