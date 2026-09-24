@@ -5274,6 +5274,176 @@ def the_sessions_running_are_announced_when_they_change_and_kept_for_the_next_ta
         assert announced[-1] == {"sessions": []}, "the end of a session is news too"
 
 
+class _ColumnsClient(_TalkClient):
+    """A tickets database: three rows, one of them under no known heading."""
+
+    def __init__(self, statuses: list[str]) -> None:
+        super().__init__([])
+        self._statuses = statuses
+
+    def forget_database(self, database: str) -> None:
+        pass
+
+    def query(self, database: str, *args, **kwargs) -> list[notion.Page]:
+        return [
+            notion.Page(
+                id=f"{index:08d}-0000-0000-0000-000000000000",
+                url="",
+                title=f"ticket {index}",
+                properties={"Status": {"type": "status", "status": {"name": status} if status else None}},
+                raw={"created_time": "2026-09-01T09:00:00.000Z"},
+            )
+            for index, status in enumerate(self._statuses)
+        ]
+
+    def options(self, database: str, prop: str) -> list[str]:
+        return ["Ready", "In progress", "In review", "Blocked", "Failed", "Done"]
+
+
+@case
+def a_ticket_under_no_known_status_is_drawn_in_a_column_of_its_own():
+    """The board used to say "other" on the card and then draw no such column.
+
+    A ticket written without a status, or under one nobody configured, is the
+    card that needs a look — it is never claimed — and a console that left it
+    off the board was hiding exactly that one. The column carries no name: the
+    board has none for it, and the console says it in its own language.
+    """
+    api = _bare_api(_ColumnsClient(["Ready", "", "Parked"]))
+    api._runner._workspace = type("W", (), {"projects": "", "tickets": "db"})()
+    api._schema_at = time.time()
+    board = api.board()
+    keys = [column["key"] for column in board["columns"]]
+    assert keys[-1] == "other", keys
+    assert board["columns"][-1]["name"] == "", "the console names it, not the board"
+    assert [item["column"] for item in board["tickets"]] == ["ready", "other", "other"]
+
+    tidy = _bare_api(_ColumnsClient(["Ready", "Done"]))
+    tidy._runner._workspace = type("W", (), {"projects": "", "tickets": "db"})()
+    tidy._schema_at = time.time()
+    assert "other" not in [column["key"] for column in tidy.board()["columns"]], (
+        "an empty column of nothing is drawn only when something is in it"
+    )
+
+
+def _session_line(kind: str = "assistant") -> str:
+    if kind == "result":
+        return json.dumps({"type": "result", "result": "done", "session_id": "s"}) + "\n"
+    return json.dumps(
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "reading"}]}}
+    ) + "\n"
+
+
+@case
+def a_session_is_running_until_its_log_says_its_last_word():
+    """A step says a session is alive; only the `result` line says it is over.
+
+    Counted from the logs rather than from the steps a browser happened to see:
+    a console reloaded mid-run counted nothing, and one left open counted every
+    session it had ever seen as still writing.
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        working = folder / "20260830-120000-1a2b3c4d.jsonl"
+        working.write_text(_session_line(), encoding="utf-8")
+        finished = folder / "20260830-110000-9f8e7d6c.jsonl"
+        finished.write_text(_session_line() + _session_line("result"), encoding="utf-8")
+
+        running = web_live.active(folder, held=lambda: "4242 now")
+        assert running == [{"source": "1a2b3c4d", "log": working.name}], running
+        assert web_live.active(folder, held=lambda: "") == [], (
+            "no run holds the lock: a log that still looks fresh is a run that died"
+        )
+
+        # An answer longer than what is read of the end is still recognised.
+        huge = folder / "20260830-130000-00aa11bb.jsonl"
+        huge.write_text(
+            _session_line()
+            + json.dumps({"type": "result", "result": "x" * (web_live.ENDING_BYTES + 10)})
+            + "\n",
+            encoding="utf-8",
+        )
+        assert web_live.answered(huge)
+
+
+@case
+def the_sessions_running_are_announced_when_they_change_and_kept_for_the_next_tab():
+    hub = web_live.Hub()
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        log = folder / "20260830-120000-1a2b3c4d.jsonl"
+        log.write_text(_session_line(), encoding="utf-8")
+        tail = web_live.Tail(hub, folder, held=lambda: "4242")
+        said = []
+        publish = hub.publish
+
+        def listening(kind: str, **payload: object) -> None:
+            said.append((kind, payload))
+            publish(kind, **payload)
+
+        hub.publish = listening  # type: ignore[method-assign]
+        tail.pass_once()
+        tail.pass_once()
+        announced = [payload for kind, payload in said if kind == "sessions"]
+        assert announced == [{"sessions": [{"source": "1a2b3c4d", "log": log.name}]}], (
+            "said once, and not again while nothing changed"
+        )
+
+        # A tab opened now is told what is running before anything else moves.
+        fresh = hub.subscribe()
+        kinds = [fresh.get_nowait().kind for _ in range(fresh.qsize())]
+        assert kinds == ["sessions"], kinds
+
+        with log.open("a", encoding="utf-8") as handle:
+            handle.write(_session_line("result"))
+        tail.pass_once()
+        announced = [payload for kind, payload in said if kind == "sessions"]
+        assert announced[-1] == {"sessions": []}, "the end of a session is news too"
+
+
+@case
+def the_pages_before_the_console_speak_the_browsers_language():
+    """The sign-in, the gate and the first connection, as the console would say them.
+
+    Same rule as the console: the browser's own list decides. And every field
+    has a label that names it, rather than a greyed example that vanishes the
+    moment somebody starts typing.
+    """
+    from ticket_runner.web import server as web_server
+
+    assert web_server.language_of("fr-FR,fr;q=0.9,en;q=0.8") == "fr"
+    assert web_server.language_of("de-DE,en-GB;q=0.7") == "en"
+    assert web_server.language_of("") == "en"
+
+    for build in (web_server.sign_in_page, web_server.setup_page, web_server.gate_page):
+        french = build("fr")
+        assert '<html lang="fr">' in french
+        assert "Ouvrir la console" in french or "Tout configurer" in french
+        assert web_server.GUARD_HEADER in french or build is web_server.gate_page
+        for field in re.findall(r'<(?:input|textarea)[^>]*\bid="([^"]+)"', french):
+            assert f'<label for="{field}"' in french, f"{field} has no label"
+        assert "#3b82f6" not in french, "the door is drawn in the console's lime, not a blue"
+    assert '<html lang="en">' in web_server.SIGN_IN
+
+
+@case
+def the_gate_says_where_this_machines_token_actually_is():
+    """`~/.local/state/…` printed as a constant was wrong wherever XDG_STATE_HOME is set."""
+    from ticket_runner.web import server as web_server
+
+    previous = os.environ.get("XDG_STATE_HOME")
+    os.environ["XDG_STATE_HOME"] = "/srv/elsewhere"
+    try:
+        page = web_server.gate_page("en")
+    finally:
+        if previous is None:
+            os.environ.pop("XDG_STATE_HOME", None)
+        else:
+            os.environ["XDG_STATE_HOME"] = previous
+    assert "/srv/elsewhere/ticket-runner/web/token" in page
+    assert "~/.local/state" not in page
+
+
 # -- the settings tab ---------------------------------------------------------
 
 
