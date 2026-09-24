@@ -32,7 +32,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import git
+from . import disk, git
 from .config import state_dir
 
 
@@ -76,7 +76,7 @@ def remember(status: Status) -> None:
         "reason": status.reason,
     }
     try:
-        _stamp().write_text(json.dumps(payload), encoding="utf-8")
+        disk.write_atomic(_stamp(), json.dumps(payload))
     except OSError:
         pass
 

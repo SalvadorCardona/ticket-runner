@@ -184,7 +184,14 @@ compare itself against: it says so once per check and carries on.
 
 Everything lives in **`~/.config/ticket-runner/config.toml`**, created by the installer
 with mode `600` — it holds your Notion token. `ticket-runner config` opens it in
-`$EDITOR`.
+`$EDITOR`. The copies the console makes when it saves (`config.toml.bak`, and the scratch
+copy it checks before swapping it in) are created `600` too, as are the console's token,
+the session logs — under a `logs/` directory only your account can enter — and
+`history.jsonl`: each is created with that mode rather than tightened after the write, so
+there is no moment in which the umask decides who reads them. What the runner keeps
+between two runs (`claims.json`, the reconciliation stamps, the channels' cursors) is
+written to a copy and renamed over the old file, so a run killed mid-write leaves the old
+file whole rather than an empty one.
 
 ### 1. Create a Notion integration
 

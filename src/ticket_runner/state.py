@@ -20,12 +20,22 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import disk
 from .config import state_dir
 
 
 def logs_dir() -> Path:
+    """Where session transcripts go — readable by this account and nobody else.
+
+    A transcript is everything a session read and wrote: the brief, the code,
+    whatever a command printed, a secret included if one was in the way.
+    """
     path = state_dir() / "logs"
-    path.mkdir(parents=True, exist_ok=True)
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        path.chmod(0o700)
+    except OSError:
+        pass
     return path
 
 
@@ -40,22 +50,43 @@ class Busy(Exception):
 
 @contextmanager
 def lock():
+    """Hold the run lock for as long as the block lasts, or raise Busy.
+
+    The file is never deleted, and that is the point. Unlinking it on release
+    opened a window for two runs at once: a run that had opened the old file
+    and was waiting to lock it would lock a file no longer on disk, while the
+    next one created a fresh `run.lock` and locked that — two locks, two runs.
+    One path, one inode, for good.
+
+    And the file is opened without being emptied: `open("w")` truncated it
+    before the lock was even asked for, so a run turned away as busy had just
+    erased the PID of the run that turned it away. It is emptied and written
+    only once the lock is ours.
+    """
     state_dir().mkdir(parents=True, exist_ok=True)
     path = state_dir() / "run.lock"
-    handle = path.open("w")
+    handle = open(path, "a+", encoding="utf-8", opener=disk.opener())  # noqa: SIM115
     try:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError as error:
         handle.close()
         raise Busy(f"a run is already in progress (lock {path})") from error
+    handle.seek(0)
+    handle.truncate()
     handle.write(f"{os.getpid()} {datetime.now(timezone.utc).isoformat()}\n")
     handle.flush()
     try:
         yield
     finally:
+        # Emptied rather than removed: the next reader finds nobody named,
+        # which is what `running` says anyway once the flock is gone.
+        try:
+            handle.seek(0)
+            handle.truncate()
+        except OSError:
+            pass
         fcntl.flock(handle, fcntl.LOCK_UN)
         handle.close()
-        path.unlink(missing_ok=True)
 
 
 def running() -> str:
@@ -131,7 +162,9 @@ def claims() -> dict[str, str]:
 
 def _write_claims(held: dict[str, str]) -> None:
     try:
-        claims_path().write_text(json.dumps(held, ensure_ascii=False), encoding="utf-8")
+        # Whole or not at all: a file truncated by a crash reads as "no claim",
+        # and a validated ticket without its claim comes back as work to redo.
+        disk.write_atomic(claims_path(), json.dumps(held, ensure_ascii=False))
     except OSError:
         # A note nobody could write is a note nobody reads: the ticket goes back
         # to ready on a crash, exactly as it did before this existed.
@@ -140,7 +173,7 @@ def _write_claims(held: dict[str, str]) -> None:
 
 def record(entry: dict) -> None:
     entry = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), **entry}
-    with history_path().open("a", encoding="utf-8") as handle:
+    with disk.open_private(history_path(), "a") as handle:
         handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 

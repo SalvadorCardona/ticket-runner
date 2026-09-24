@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from .. import openrouter, progress, session
+from .. import disk, openrouter, progress, session
 from ..config import Config, state_dir
 
 # The verbs the console runs, written down one by one rather than read off the
@@ -142,8 +142,7 @@ class Chat:
             "messages": [message.as_dict() for message in self.messages[-200:]],
         }
         try:
-            self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-            self.path.chmod(0o600)
+            disk.write_atomic(self.path, json.dumps(payload, ensure_ascii=False, indent=2))
         except OSError:
             pass
 

@@ -2595,6 +2595,123 @@ def a_lock_left_by_a_dead_run_is_not_a_run():
 
 
 @case
+def a_run_turned_away_leaves_the_lock_and_its_holder_alone():
+    """The lock file is one inode for good, and its PID survives a refusal.
+
+    Unlinking it on release let a run waiting on the old inode and a run that
+    created a new one both hold "the" lock. And `open("w")` emptied the file
+    before asking for the lock — so a run turned away as busy had erased the
+    name of the run that turned it away.
+    """
+    with _state_home() as state_home:
+        path = state_home / "run.lock"
+        with state.lock():
+            inode = path.stat().st_ino
+            try:
+                with state.lock():
+                    raise AssertionError("two runs held the lock at once")
+            except state.Busy:
+                pass
+            assert path.read_text().startswith(f"{os.getpid()} "), "the holder is still named"
+            assert state.running().startswith(str(os.getpid()))
+        assert path.exists(), "the lock file is never removed"
+        assert path.stat().st_ino == inode, "and never replaced"
+        assert path.read_text() == "", "nobody is named once the lock is let go of"
+        assert path.stat().st_mode & 0o777 == 0o600
+        with state.lock():
+            assert path.stat().st_ino == inode
+            assert path.read_text().count("\n") == 1, "one holder, written once"
+
+
+@case
+def a_copy_of_a_secret_is_private_before_it_holds_anything():
+    """The console's token, and the copies a save makes of the configuration.
+
+    Written with the umask and tightened with `chmod` afterwards, each was
+    readable by the group for the moment in between — the configuration holds
+    the Notion token, the bot tokens and the console's password.
+    """
+    from ticket_runner import disk
+    from ticket_runner.web import server as web_server
+
+    created: list[tuple[str, int]] = []
+    original = disk.os.open
+
+    def spying(path, flags, mode=0o777, *rest, **kept):
+        if flags & os.O_CREAT:
+            created.append((str(path), mode))
+        return original(path, flags, mode, *rest, **kept)
+
+    previous = os.umask(0o022)
+    disk.os.open = spying
+    try:
+        with _state_home():
+            path = Path(tempfile.mkdtemp()) / "config.toml"
+            path.write_text('[notion]\ntoken = "ntn_real"\ntickets_database = "abc"\n')
+            path.chmod(0o600)
+            C.edit(path, [("runner", "model", "opus")])
+            secret = web_server.token(C.load(path))
+            kept = web_server.token_path()
+            assert kept.read_text().strip() == secret
+            assert kept.stat().st_mode & 0o777 == 0o600
+            backup = path.parent / "config.toml.bak"
+            assert backup.stat().st_mode & 0o777 == 0o600
+            assert path.stat().st_mode & 0o777 == 0o600
+    finally:
+        disk.os.open = original
+        os.umask(previous)
+    names = {Path(name).name: mode for name, mode in created}
+    assert names.get("token") == 0o600, names
+    assert names.get("config.toml.bak") == 0o600, names
+    assert any(name.startswith(".config.toml.saving") and mode == 0o600 for name, mode in names.items()), names
+
+
+@case
+def a_claim_is_written_whole_or_not_at_all():
+    """A crash halfway through a write must leave the claims as they were.
+
+    An empty `claims.json` reads as "no claim", and a validated ticket without
+    its claim comes back from a crash as work to redo.
+    """
+    from ticket_runner import disk
+
+    with _state_home():
+        state.claim("a" * 32, "Validated")
+        before = state.claims_path().read_text()
+
+        def crash(descriptor):
+            raise OSError("disk full")
+
+        original = disk.os.fsync
+        disk.os.fsync = crash
+        try:
+            state.claim("b" * 32, "Ready")
+        finally:
+            disk.os.fsync = original
+        assert state.claims_path().read_text() == before, "the old claims are intact"
+        assert state.claims() == {"a" * 32: "Validated"}
+        leftovers = [p.name for p in state.claims_path().parent.iterdir() if p.name.endswith(".tmp")]
+        assert not leftovers, leftovers
+        state.claim("b" * 32, "Ready")
+        assert state.claims() == {"a" * 32: "Validated", "b" * 32: "Ready"}
+        assert state.claims_path().stat().st_mode & 0o777 == 0o600
+
+
+@case
+def what_a_session_said_is_kept_for_this_account_only():
+    """Transcripts and the history carry briefs, code and whatever was printed."""
+    with _state_home():
+        previous = os.umask(0o022)
+        try:
+            state.record({"ticket": "t", "status": "done"})
+            logs = state.logs_dir()
+        finally:
+            os.umask(previous)
+        assert state.history_path().stat().st_mode & 0o777 == 0o600
+        assert logs.stat().st_mode & 0o777 == 0o700
+
+
+@case
 def a_timer_with_no_next_run_is_stalled_rather_than_enabled():
     """What the incident's timer answered, and what a healthy one answers."""
     starved = systemd.describe(

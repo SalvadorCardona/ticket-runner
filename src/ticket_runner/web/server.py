@@ -85,8 +85,9 @@ def token(config: Config) -> str:
     except OSError:
         pass
     fresh = secrets.token_urlsafe(24)
-    path.write_text(fresh + "\n", encoding="utf-8")
-    path.chmod(0o600)
+    from ..disk import write_private  # 0600 from its first byte, not after a chmod
+
+    write_private(path, fresh + "\n")
     return fresh
 
 

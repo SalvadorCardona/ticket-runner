@@ -39,7 +39,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .. import conversation
+from .. import conversation, disk
 from ..config import Notify, state_dir
 
 # How many questions a channel remembers, so that a reply arriving tomorrow
@@ -206,9 +206,7 @@ def _remember(name: str, changes: dict) -> None:
     everything = _memory()
     everything[name] = {**everything.get(name, {}), **changes}
     try:
-        memory_path().write_text(
-            json.dumps(everything, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        disk.write_atomic(memory_path(), json.dumps(everything, ensure_ascii=False, indent=2))
     except OSError:
         pass
 

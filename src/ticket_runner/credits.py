@@ -36,6 +36,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from . import disk
 from .config import state_dir
 
 # How long to wait when the refusal does not say when it lifts. Short on
@@ -99,9 +100,7 @@ def hold(until: float, *, what: str = "spent") -> None:
     one wasted session at a time.
     """
     try:
-        _note(what).write_text(
-            json.dumps({"until": float(until), "since": time.time()}), encoding="utf-8"
-        )
+        disk.write_atomic(_note(what), json.dumps({"until": float(until), "since": time.time()}))
     except OSError:
         pass
 

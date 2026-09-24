@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, quote, urlparse
 
-from . import credits
+from . import credits, disk
 
 
 @dataclass
@@ -143,7 +143,9 @@ def run(
     log.parent.mkdir(parents=True, exist_ok=True)
     stderr_path = log.with_suffix(".err")
 
-    with log.open("w", encoding="utf-8") as journal, stderr_path.open("w") as errors:
+    # Private from their first byte: a transcript is the brief, the code and
+    # whatever a command printed on the way, secrets included when one was.
+    with disk.open_private(log) as journal, disk.open_private(stderr_path) as errors:
         process = subprocess.Popen(
             command,
             cwd=str(cwd),

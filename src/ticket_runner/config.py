@@ -20,6 +20,7 @@ from pathlib import Path
 
 # The two vocabularies of `[storage]`, kept where the interface is declared —
 # `store.py` imports nothing from here, so this direction is the safe one.
+from . import disk
 from .store import CONFLICTS, MODES
 
 PLACEHOLDER = "ntn_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
@@ -592,7 +593,10 @@ def edit(path: Path, changes: list[tuple[str, str, object]]) -> list[str]:
     # Named per call: two saves at once — two browser tabs, a tab and the CLI —
     # would otherwise edit the same copy and the loser would win.
     scratch = path.parent / f".{path.name}.saving.{os.getpid()}.{threading.get_ident()}"
-    scratch.write_text(original, encoding="utf-8")
+    # Created private rather than tightened afterwards: this copy holds every
+    # token the file does, and a chmod after the write leaves a moment in which
+    # the umask decides who reads them.
+    disk.write_private(scratch, original)
     try:
         touched = [
             f"{table}.{key}"
@@ -619,8 +623,7 @@ def edit(path: Path, changes: list[tuple[str, str, object]]) -> list[str]:
         except OSError:
             mode = 0o600
         backup = path.parent / f"{path.name}.bak"
-        backup.write_text(original, encoding="utf-8")
-        backup.chmod(0o600)
+        disk.write_private(backup, original)
         scratch.chmod(mode)
         os.replace(scratch, path)
     finally:

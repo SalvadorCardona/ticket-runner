@@ -42,6 +42,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import disk
 from .files import COLLECTIONS, Board
 from .store import Page, StoreError, read
 
@@ -194,9 +195,9 @@ class Stamps:
     def save(self) -> None:
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_text(
-                json.dumps(self._known, ensure_ascii=False, indent=1), encoding="utf-8"
-            )
+            # Whole or not at all: a stamp lost to a half-written file turns
+            # "deleted on one side" back into "created on the other".
+            disk.write_atomic(self._path, json.dumps(self._known, ensure_ascii=False, indent=1))
         except OSError:
             pass
 
