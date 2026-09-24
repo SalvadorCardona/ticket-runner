@@ -1144,33 +1144,18 @@ def _branch_kept(
     return ""
 
 
-def command_clean(args: argparse.Namespace) -> int:
-    """Remove what failures left behind: worktrees, branches and scratch dirs."""
-    state_root = config_module.state_dir()
-    directories = [
-        directory
-        for parent in ("worktrees", "scratch")
-        if (state_root / parent).exists()
-        for directory in sorted((state_root / parent).iterdir())
-    ]
-    if not directories:
-        print("Nothing left behind.")
-        return 0
-    title(f"{len(directories)} directory(ies) kept")
-    for directory in directories:
-        branch = git.git(["rev-parse", "--abbrev-ref", "HEAD"], directory).out
-        print(f"  {directory}  {DIM}{branch or 'no repository'}{RESET}")
-    if not args.force:
-        print(f"\n{DIM}ticket-runner clean --force to remove them{RESET}")
-        return 0
+def _sweep(directories: list[Path]) -> None:
+    """Remove what `clean --force` was asked to, the run lock held."""
     try:
         configuration = config_module.load()
         configured_base, accounts = configuration.runner.base_branch, configuration.github
     except config_module.ConfigError:
         configured_base, accounts = "", {}
     for directory in directories:
-        origin = git.git(["rev-parse", "--path-format=absolute", "--git-common-dir"], directory).out
-        repo = Path(origin).parent if origin else None
+        # Only a repository that lists this directory as one of its worktrees
+        # is touched — see `git.repository_of`. Anything else is a directory,
+        # and goes as one.
+        repo = git.repository_of(directory)
         if not (repo and repo.exists()):
             shutil.rmtree(directory, ignore_errors=True)
             print(f"  removed {directory}")
@@ -1202,17 +1187,50 @@ def command_clean(args: argparse.Namespace) -> int:
             print(f"  removed branch {branch}")
         else:
             warn(f"branch {branch} kept — {dropped.err or dropped.out}")
-    removed = state.prune_logs(args.days)
-    if removed:
-        print(f"  removed {removed} log file(s) older than {args.days} days")
-    # The scratch directory a conversation runs in, for a ticket with no
-    # repository. Kept while the runner still remembers the page — that is what
-    # makes the next question land in the same Claude session.
-    talks = conversation.clean_talks(
-        {short_id(page) for page in conversation.Ledger.load().known_pages()}
-    )
-    if talks:
-        print(f"  removed {talks} conversation directory(ies)")
+
+
+def command_clean(args: argparse.Namespace) -> int:
+    """Remove what failures left behind: worktrees, branches and scratch dirs."""
+    state_root = config_module.state_dir()
+    directories = [
+        directory
+        for parent in ("worktrees", "scratch")
+        if (state_root / parent).exists()
+        for directory in sorted((state_root / parent).iterdir())
+    ]
+    if not directories:
+        print("Nothing left behind.")
+        return 0
+    title(f"{len(directories)} directory(ies) kept")
+    for directory in directories:
+        repo = git.repository_of(directory)
+        branch = git.git(["rev-parse", "--abbrev-ref", "HEAD"], directory).out if repo else ""
+        print(f"  {directory}  {DIM}{branch or 'no repository'}{RESET}")
+    if not args.force:
+        print(f"\n{DIM}ticket-runner clean --force to remove them{RESET}")
+        return 0
+    # Under the run lock, or not at all: a worktree kept by a failure and the
+    # worktree a session is working in right now sit side by side, and nothing
+    # on disk tells them apart. A run in progress is the one moment `clean`
+    # must not choose between them.
+    try:
+        with state.lock():
+            _sweep(directories)
+            removed = state.prune_logs(args.days)
+            if removed:
+                print(f"  removed {removed} log file(s) older than {args.days} days")
+            # The scratch directory a conversation runs in, for a ticket with no
+            # repository. Kept while the runner still remembers the page — that
+            # is what makes the next question land in the same Claude session.
+            talks = conversation.clean_talks(
+                {short_id(page) for page in conversation.Ledger.load().known_pages()}
+            )
+            if talks:
+                print(f"  removed {talks} conversation directory(ies)")
+    except state.Busy:
+        bad("a run is in progress, and some of these are the worktrees it works in")
+        print(f"  {DIM}try again once it has finished — ticket-runner status says when{RESET}")
+        return 1
     return 0
 
 

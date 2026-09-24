@@ -1835,6 +1835,14 @@ look at it — which is the point, since a commit that failed to push is sometim
 the only copy there is — and the line printed under it is the command that drops
 the branch once you have what you need.
 
+`clean --force` takes the run lock, and refuses while a run holds it: a worktree kept by a
+failure and the worktree a session is working in right now sit side by side, and nothing
+on disk tells them apart. And it only ever acts on a repository that claims the directory:
+a directory counts as a worktree when it carries git's `.git` *file* and the repository
+that file names lists it among its worktrees. Anything else — a scratch directory, a clone
+a session made inside one — is removed as a directory, and git is never asked from inside
+it, where it would have climbed to whatever repository the state directory sits in.
+
 ---
 
 ## What protects your code

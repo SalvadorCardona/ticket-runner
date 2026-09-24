@@ -6174,13 +6174,19 @@ def _cleaning(worktrees: dict[str, dict]) -> tuple[str, list[str]]:
         root.mkdir(parents=True)
         for name in worktrees:
             (root / name).mkdir()
+            # What a linked worktree carries, and what `clean` now asks for
+            # before it lets any repository answer for a directory.
+            (root / name / ".git").write_text(f"gitdir: {repo}/.git/worktrees/{name}\n")
 
         def facts(worktree) -> dict:
             return worktrees[Path(worktree).name]
 
-        def raw(args, cwd, timeout=300):
+        def raw(args, cwd, timeout=300, **kept):
             if args[1:2] == ["--path-format=absolute"]:
                 return git_module.Result(0, str(repo / ".git"), "")
+            if args == ["worktree", "list", "--porcelain"]:
+                listed = "\n".join(f"worktree {root / name}" for name in worktrees)
+                return git_module.Result(0, f"worktree {repo}\n{listed}", "")
             if args == ["rev-parse", "--abbrev-ref", "HEAD"]:
                 return git_module.Result(0, facts(cwd)["branch"], "")
             raise AssertionError(f"clean asked git something unexpected: {args}")
@@ -6202,7 +6208,7 @@ def _cleaning(worktrees: dict[str, dict]) -> tuple[str, list[str]]:
                 pull_request_on=lambda _repo, branch, accounts=None: requests.get(branch, ""),
                 commits_ahead=lambda worktree, _base: facts(worktree).get("commits", 0),
                 is_dirty=lambda worktree: facts(worktree).get("dirty", False),
-                remove_worktree=lambda _repo, worktree: Path(worktree).rmdir(),
+                remove_worktree=lambda _repo, worktree: shutil.rmtree(worktree),
                 delete_branch=delete,
             ), contextlib.redirect_stdout(printed):
                 assert cli_main(["clean", "--force"]) == 0
@@ -6212,6 +6218,59 @@ def _cleaning(worktrees: dict[str, dict]) -> tuple[str, list[str]]:
             else:
                 os.environ["TICKET_RUNNER_CONFIG"] = previous
     return _plain(printed.getvalue()), deleted
+
+
+@case
+def clean_leaves_the_worktrees_of_a_run_in_progress_alone():
+    """`clean --force` beside a running pass would remove the worktree a
+    session is writing in: kept by a failure or in use, nothing on disk tells
+    the two apart. It takes the run lock, or it does nothing."""
+    with _state_home() as state_root:
+        kept = state_root / "worktrees" / "app-1a2b3c4d"
+        kept.mkdir(parents=True)
+        printed = io.StringIO()
+        with state.lock(), contextlib.redirect_stdout(printed):
+            assert cli_main(["clean", "--force"]) == 1
+        assert kept.exists(), "a worktree was removed under a running pass"
+        assert "run is in progress" in _plain(printed.getvalue())
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert cli_main(["clean", "--force"]) == 0
+        assert not kept.exists(), "and once the pass is over, it goes"
+
+
+@case
+def a_scratch_directory_never_speaks_for_the_repository_around_it():
+    """`git rev-parse` in a directory that is no repository climbs to its
+    parents — and the state directory may well sit inside one. `clean` would
+    then prune that repository's worktrees and delete its branches."""
+    from ticket_runner import git as git_module
+
+    with tempfile.TemporaryDirectory() as directory:
+        outer = Path(directory) / "home"
+        outer.mkdir()
+        quiet = {"capture_output": True, "check": True}
+        subprocess.run(["git", "init", "--quiet", "-b", "main", str(outer)], **quiet)
+        identity = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"]
+        subprocess.run(["git", *identity, "-C", str(outer), "commit", "--quiet", "--allow-empty", "-m", "one"], **quiet)
+        scratch = outer / ".local" / "state" / "ticket-runner" / "scratch" / "deliver-1a2b3c4d"
+        scratch.mkdir(parents=True)
+        assert git_module.repository_of(scratch) is None, "a scratch directory is no worktree"
+
+        cloned = scratch.parent / "cloned-1a2b3c4d"
+        subprocess.run(["git", "init", "--quiet", str(cloned)], **quiet)
+        assert git_module.repository_of(cloned) is None, "a clone made in one is not either"
+
+        worktree = scratch.parent.parent / "worktrees" / "home-1a2b3c4d"
+        subprocess.run(
+            ["git", "-C", str(outer), "worktree", "add", "--quiet", "-b", "ticket/x", str(worktree)],
+            **quiet,
+        )
+        found = git_module.repository_of(worktree)
+        assert found is not None and found.resolve() == outer.resolve(), found
+
+        # A `.git` file that names a repository which does not list it back.
+        (scratch / ".git").write_text(f"gitdir: {outer}/.git/worktrees/home-1a2b3c4d\n")
+        assert git_module.repository_of(scratch) is None
 
 
 @case

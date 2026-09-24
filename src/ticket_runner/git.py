@@ -367,6 +367,41 @@ def _make_room(repo: Path, path: Path, base: str) -> None:
     remove_worktree(repo, path)
 
 
+def repository_of(worktree: Path) -> Path | None:
+    """The repository `worktree` is a linked worktree of — or None.
+
+    Asked by `clean`, of every directory the runner left under its state
+    directory, and the answer decides which repository has a worktree removed
+    and a branch deleted. So nothing outside that directory is ever allowed to
+    answer: a scratch directory is no repository at all, and `git rev-parse`
+    run inside it would climb to whatever encloses it — the home directory
+    under dotfiles, a repository the state directory happens to sit in — and
+    `clean` would then go and prune *that*.
+
+    Three things have to hold. The directory carries a `.git` *file*, which is
+    what a linked worktree has and a scratch directory (or a clone somebody
+    made inside one) does not; git is not allowed past the directory's parent;
+    and the repository it names lists this very directory among its worktrees.
+    """
+    if not (worktree / ".git").is_file():
+        return None
+    common = git(
+        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        worktree,
+        environment={"GIT_CEILING_DIRECTORIES": str(worktree.parent)},
+    )
+    if not common.ok or not common.out:
+        return None
+    repo = Path(common.out).parent
+    listed = git(["worktree", "list", "--porcelain"], repo)
+    if not listed.ok:
+        return None
+    for line in listed.out.splitlines():
+        if line.startswith("worktree ") and _same(line.split(" ", 1)[1], worktree):
+            return repo
+    return None
+
+
 def remove_worktree(repo: Path, path: Path) -> None:
     git(["worktree", "remove", "--force", str(path)], repo)
     if path.exists():
