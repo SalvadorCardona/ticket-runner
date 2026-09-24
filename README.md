@@ -1436,10 +1436,17 @@ over the page, another closes it, and no page is given up for it. It is one fiel
 gestures, and they are not made to look alike.
 
 - A line starting with `>` is a **`ticket-runner` subcommand** — `>status`, `>list`,
-  `>run`, `>doctor`, `>logs 1a2b3c4d`. The CLI is already the considered surface of this
+  `>doctor`, `>logs 1a2b3c4d`. The CLI is already the considered surface of this
   tool, so the console does not invent a second one; the command runs as a subprocess with
   no shell, and its output streams into the page. There is no shell in the browser, on
   purpose: it would add every risk and no capability the chat does not already have.
+  What it offers is a list written down — `doctor`, `history`, `list`, `logs`, `notify`,
+  `projects`, `schedules`, `status`, `sync` — and not the whole parser: `run` starts
+  sessions that outlive a typed command, `update` replaces the code the console runs on,
+  and `clean` deletes worktrees a session may be standing in, so those three (with `init`,
+  `enable`, `disable`, `config`, `open` and `serve`) are for a terminal. A command gets
+  three minutes, and at the end of them its whole process group is stopped, not only the
+  process the console started.
 - Anything else is a **message to your workspace**. One long Claude Code session, started
   in `workspace_root`, carried on from turn to turn — with your repositories under its
   feet and `ticket-runner` on its PATH. *"Create a ticket for the SQLite migration on

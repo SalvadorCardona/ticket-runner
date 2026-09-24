@@ -4568,7 +4568,7 @@ def a_typed_command_is_split_without_a_shell():
     assert commands.parse(">status") == ["status"]
     assert commands.parse("history -n 5") == ["history", "-n", "5"]
     # A quoted argument stays one argument, accents and spaces included.
-    assert commands.parse('run --ticket "à faire"') == ["run", "--ticket", "à faire"]
+    assert commands.parse('logs "à faire"') == ["logs", "à faire"]
 
 
 @case
@@ -4598,7 +4598,61 @@ def the_commands_that_would_hang_a_browser_are_not_offered():
             assert verb in str(error)
         else:
             raise AssertionError(f"{verb} should have been refused")
-    assert "run" in commands.allowed and "status" in commands.allowed
+    assert "status" in commands.allowed
+
+
+@case
+def the_console_runs_what_it_lists_and_nothing_the_cli_grows_later():
+    """A list written down, not the parser read back.
+
+    Deriving the verbs from the parser made every new command something a
+    browser could start. `run` starts Claude sessions that outlive the command's
+    timeout, `update` swaps the code the console runs on, `clean` deletes the
+    worktree a session is standing in: none of them is typed into a web page.
+    """
+    commands = web_console.Commands(lambda *a, **k: None, subcommands())
+    assert set(commands.allowed) <= set(web_console.OFFERED)
+    assert set(commands.allowed) <= set(subcommands()), "never a verb the CLI does not have"
+    for verb in ("run", "update", "clean", "init", "enable"):
+        assert verb not in commands.allowed, verb
+        try:
+            commands.parse(f"{verb} --force")
+        except ValueError as error:
+            assert verb in str(error), error
+        else:
+            raise AssertionError(f"{verb} should have been refused")
+    grown = web_console.Commands(lambda *a, **k: None, (*subcommands(), "wipe"))
+    assert "wipe" not in grown.allowed, "a verb added to the CLI is not offered by itself"
+
+
+@case
+def a_command_that_runs_too_long_takes_what_it_started_with_it():
+    """The timeout ends the command's process group, not only its leader.
+
+    `process.kill` used to stop the Python the console started and leave its
+    children — a Claude session, from `run` — running unowned. The shell below
+    starts a child of its own and waits on it; both have to be gone.
+    """
+    events: list[tuple[str, dict]] = []
+    commands = web_console.Commands(lambda kind, **said: events.append((kind, said)), ())
+    commands.timeout = 1
+    with tempfile.TemporaryDirectory() as directory:
+        marker = Path(directory) / "child"
+        script = f"sleep 60 & echo $! > {marker}; echo started; wait"
+        started = time.monotonic()
+        commands._stream(["sh", "-c", script])
+        took = time.monotonic() - started
+        child = int(marker.read_text().strip())
+
+    assert took < 30, f"the watchdog did not end the command ({took:.0f}s)"
+    assert events[-1] == ("command", {"stage": "ended", "code": events[-1][1]["code"]})
+    assert events[-1][1]["code"] != 0
+    assert any("stopped after" in said.get("text", "") for _, said in events), events
+    try:
+        stat = Path(f"/proc/{child}/stat").read_text()
+    except OSError:
+        return  # gone entirely
+    assert stat.split(")")[-1].split()[0] in ("Z", "X"), f"the child is still running: {stat}"
 
 
 @case
