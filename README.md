@@ -1741,6 +1741,12 @@ door, and `http://127.0.0.1:8787` is the whole of the address:
 └──────────────────────────────────────────────────┘
 ```
 
+`serve` starts on the file `install.sh` leaves, Notion token or not — this page is where
+the token gets filled in, so the console only refuses a configuration that is missing or
+does not parse. Until a token is there, the board and the other Notion-backed panes say so
+without sending the example's placeholder to Notion, and `ticket-runner run`, which is
+what the timer calls, keeps refusing with the list of what is missing.
+
 One press does the whole installation, in that order:
 
 - the **email and password** are written into `[web]`, and the browser is signed in with

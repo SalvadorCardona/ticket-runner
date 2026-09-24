@@ -2023,6 +2023,58 @@ def _http_error(code: int, retry_after: str = ""):
 
 
 @case
+def the_console_starts_on_the_file_install_sh_leaves():
+    """`serve` used to require a usable configuration, and exit 2 without a
+    Notion token — so the console whose first connection *asks* for that token
+    could not be reached, and its unit restarted in a loop on a fresh install.
+
+    It starts now; the board it cannot read yet says why without asking Notion,
+    and `run` — the timer's command — still refuses, out loud.
+    """
+    example = Path(__file__).resolve().parents[1] / "config.example.toml"
+    with _state_home(), tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "config.toml"
+        shutil.copy(example, path)
+        previous = os.environ.get("TICKET_RUNNER_CONFIG")
+        os.environ["TICKET_RUNNER_CONFIG"] = str(path)
+        printed, errors = io.StringIO(), io.StringIO()
+        try:
+            with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(errors):
+                assert cli_main(["serve", "--print-token"]) == 0, errors.getvalue()
+                try:
+                    cli_main(["run"])
+                except SystemExit as stopped:
+                    assert stopped.code == 2
+                else:
+                    raise AssertionError("run went ahead with no Notion token")
+        finally:
+            if previous is None:
+                os.environ.pop("TICKET_RUNNER_CONFIG", None)
+            else:
+                os.environ["TICKET_RUNNER_CONFIG"] = previous
+        assert printed.getvalue().strip(), "a token to open the console with"
+        assert "notion.token" in errors.getvalue()
+
+    import urllib.request
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("the placeholder token was sent to Notion")
+
+    original = urllib.request.urlopen
+    notion.urllib.request.urlopen = refuse
+    try:
+        for token in ("", C.PLACEHOLDER):
+            try:
+                notion.Client(token)._request("POST", "/databases/d/query", {})
+            except notion.NotionError as error:
+                assert "no Notion token yet" in str(error)
+            else:
+                raise AssertionError("a board with no token was read")
+    finally:
+        notion.urllib.request.urlopen = original
+
+
+@case
 def a_read_that_times_out_is_asked_again_and_says_notion_when_it_gives_up():
     """A timeout or a reset while reading used to escape as a bare OSError.
 

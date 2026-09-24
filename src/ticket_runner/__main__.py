@@ -1309,7 +1309,16 @@ def command_serve(args: argparse.Namespace) -> int:
     """The web console: the board, this CLI and a chat, in one page."""
     from . import web
 
-    configuration = load_config()
+    # Loaded, not required to be usable: the console is where an installation
+    # becomes usable — its first connection asks for the Notion token and the
+    # page — so refusing to start without them made that page unreachable, and
+    # the systemd unit restart forever on a fresh install. A file that is
+    # missing or does not parse still stops it: there is nothing to edit then.
+    try:
+        configuration = config_module.load()
+    except config_module.ConfigError as error:
+        print(f"{RED}error:{RESET} {error}", file=sys.stderr)
+        return 2
     if args.print_token:
         print(web.token(configuration))
         return 0

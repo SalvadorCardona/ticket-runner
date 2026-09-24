@@ -24,6 +24,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from .config import PLACEHOLDER
 from .store import Comment, Page, StoreError, read
 
 API = "https://api.notion.com/v1"
@@ -90,6 +91,15 @@ class Client:
     # -- transport -----------------------------------------------------------
 
     def _request(self, method: str, path: str, body: dict | None = None) -> dict:
+        if not self._token.strip() or self._token.strip() == PLACEHOLDER:
+            # A fresh installation: the console runs before anybody has typed a
+            # token, and asks for the board every few seconds while a browser
+            # is open. Sending the example's placeholder to Notion would only
+            # buy a 401 — or a timeout — per poll, to say what is known here.
+            raise NotionError(
+                "no Notion token yet — the console's first connection, "
+                "or `ticket-runner init`, sets it"
+            )
         data = json.dumps(body).encode() if body is not None else None
         request = urllib.request.Request(
             f"{endpoint()}{path}",
