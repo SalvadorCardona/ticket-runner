@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ticket-runner — your Notion tickets, played by Claude Code</title>
-<meta name="description" content="Write a ticket in Notion, move it to Ready, and a few minutes later a pull request is waiting — or the page itself is written. One Claude Code session per ticket, on your machine, in the background.">
+<meta name="description" content="Write a ticket in Notion, move it to Ready, and a few minutes later a pull request is waiting — or the page itself is written. One Claude Code session per ticket, on your machine, in the background — with recurring tickets, a web console, and answers from Telegram or Slack.">
 <meta name="theme-color" content="#0b0d12">
 <link rel="canonical" href="https://cardona.digital/ticket-runner/">
 <link rel="icon" type="image/svg+xml" href="icon.svg">
@@ -32,6 +32,18 @@
     "price": "0",
     "priceCurrency": "USD"
   },
+  "featureList": [
+    "One Claude Code session per Notion ticket, on a disposable git worktree",
+    "Pull request for code tickets, Notion page for document tickets",
+    "Validated column that merges pull requests or publishes documents",
+    "Recurring tickets from a schedules database",
+    "Questions and answers over Telegram and Slack",
+    "Replies to comments on a ticket",
+    "Local web console: live board, CLI, workspace chat, settings",
+    "Markdown-file board, or Notion and files kept in sync",
+    "Waits out Claude usage limits and keeps a credit reserve",
+    "Any model through OpenRouter, several GitHub accounts on one machine"
+  ],
   "author": {
     "@type": "Person",
     "name": "Salvador Cardona",
@@ -105,7 +117,7 @@
   }
   .nav-gh:hover{border-color:var(--accent-line);background:var(--accent-wash)}
   .nav-gh svg{width:16px;height:16px;fill:currentColor}
-  @media (max-width:860px){.nav-links a:not(.nav-gh){display:none}}
+  @media (max-width:960px){.nav-links a:not(.nav-gh){display:none}}
 
   /* ---------- hero ---------- */
   .hero{padding:86px 0 24px;text-align:center}
@@ -240,11 +252,6 @@
     padding:22px;transition:border-color .2s,transform .2s;
   }
   .card:hover{border-color:var(--accent-line);transform:translateY(-2px)}
-  .card .ico{
-    width:34px;height:34px;border-radius:9px;display:grid;place-items:center;
-    background:var(--accent-wash);border:1px solid var(--accent-line);margin-bottom:14px;
-  }
-  .card .ico svg{width:17px;height:17px;stroke:var(--accent-2);fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
   .card h4{margin:0 0 7px;font-size:15.5px;font-weight:600}
   .card p{margin:0;color:var(--muted);font-size:14.5px;line-height:1.6}
 
@@ -396,6 +403,171 @@
   .foot nav a{color:var(--muted)}
   .foot nav a:hover{color:var(--accent-2)}
 
+
+  /* ---------- icons, shared ---------- */
+  .ico{
+    width:34px;height:34px;flex:none;border-radius:9px;display:grid;place-items:center;
+    background:var(--accent-wash);border:1px solid var(--accent-line);
+  }
+  .ico svg{width:17px;height:17px;stroke:var(--accent-2);fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+  .card .ico{margin-bottom:14px}
+  .ico.g{background:rgba(74,222,128,.09);border-color:rgba(74,222,128,.3)} .ico.g svg{stroke:var(--ok)}
+  .ico.y{background:rgba(251,191,36,.09);border-color:rgba(251,191,36,.3)} .ico.y svg{stroke:var(--warn)}
+  .ico.v{background:rgba(192,132,252,.1);border-color:rgba(192,132,252,.32)} .ico.v svg{stroke:#c084fc}
+  .ico.o{background:rgba(251,146,60,.09);border-color:rgba(251,146,60,.3)} .ico.o svg{stroke:#fb923c}
+
+  /* ---------- works with ---------- */
+  .stack{display:flex;flex-wrap:wrap;justify-content:center;gap:9px;margin-top:28px}
+  .stack span{
+    display:inline-flex;align-items:center;gap:8px;padding:6px 13px 6px 10px;
+    border:1px solid var(--line);border-radius:999px;background:rgba(20,24,33,.7);
+    font-size:13.5px;color:var(--muted);font-weight:500;
+  }
+  .stack svg{width:17px;height:17px;flex:none}
+  .ln{stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+
+  /* ---------- features at a glance ---------- */
+  .feat-group{margin-top:40px}
+  .feat-group > h3{
+    display:flex;align-items:center;gap:10px;margin:0 0 14px;
+    font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600;
+  }
+  .feat-group > h3::after{content:"";flex:1;height:1px;background:var(--line)}
+  .feats{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,245px),1fr));gap:12px}
+  @media (min-width:900px){.feats.c3{grid-template-columns:repeat(3,1fr)}}
+  a.feat{
+    display:flex;gap:13px;align-items:flex-start;color:var(--text);
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:15px 16px;
+    transition:border-color .2s,transform .2s,background .2s;
+  }
+  a.feat:hover{text-decoration:none;border-color:var(--accent-line);transform:translateY(-2px);background:linear-gradient(160deg,#172033,var(--panel) 60%)}
+  .feat .ico{width:32px;height:32px}
+  .feat .ico svg{width:16px;height:16px}
+  .feat b{display:block;font-size:14.5px;font-weight:600;line-height:1.35}
+  .feat span{display:block;color:var(--muted);font-size:13.4px;line-height:1.5;margin-top:3px}
+
+  /* ---------- connectors ---------- */
+  .conn-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,430px),1fr));gap:18px;margin-top:40px}
+  .conn{
+    position:relative;overflow:hidden;background:var(--panel);
+    border:1px solid var(--line);border-radius:18px;padding:26px;
+    transition:border-color .25s;
+  }
+  .conn::before{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(460px 220px at 0 0,var(--glow),transparent 72%);
+  }
+  .conn > *{position:relative}
+  .conn.tg{--glow:rgba(42,171,238,.17);--brand:#2AABEE;--brand-wash:rgba(42,171,238,.13)}
+  .conn.sl{--glow:rgba(224,30,90,.13);--brand:#ECB22E;--brand-wash:rgba(236,178,46,.12)}
+  .conn.tg:hover{border-color:rgba(42,171,238,.45)}
+  .conn.sl:hover{border-color:rgba(224,30,90,.4)}
+  .conn-h{display:flex;align-items:center;gap:15px}
+  .logo{
+    width:52px;height:52px;flex:none;border-radius:14px;display:grid;place-items:center;
+    background:#fff;box-shadow:0 10px 30px -12px var(--brand);
+  }
+  .logo svg{width:32px;height:32px}
+  .conn.tg .logo{background:none;box-shadow:0 10px 30px -10px rgba(42,171,238,.7)}
+  .conn.tg .logo svg{width:52px;height:52px}
+  .conn-h h3{margin:0;font-family:var(--serif);font-weight:400;font-size:32px;line-height:1;letter-spacing:-.01em}
+  .conn-h .tag{display:block;margin-top:6px;font-size:13px;color:var(--muted)}
+  .conn-h .tag b{color:var(--brand);font-weight:600}
+  ul.ticks{list-style:none;padding:0;margin:20px 0 0}
+  .ticks li{position:relative;padding-left:28px;margin:10px 0;color:var(--muted);font-size:14.5px;line-height:1.55}
+  .ticks li b{color:var(--text);font-weight:600}
+  .ticks li::before{
+    content:"✓";position:absolute;left:0;top:.18em;width:18px;height:18px;border-radius:50%;
+    display:grid;place-items:center;font-size:11px;font-weight:700;
+    color:var(--brand);background:var(--brand-wash);
+  }
+
+  /* phone-sized mockups */
+  .mock{margin-top:22px;border-radius:14px;overflow:hidden;border:1px solid rgba(255,255,255,.07);font-size:13.5px;line-height:1.5}
+  .tgm-h{display:flex;align-items:center;gap:11px;background:#17212b;padding:10px 14px}
+  .av{width:34px;height:34px;flex:none;border-radius:50%;display:grid;place-items:center;font-weight:600;font-size:13px;color:#fff}
+  .tgm-h b{display:block;color:#fff;font-size:14px;font-weight:600;line-height:1.2}
+  .tgm-h small{color:#6d7f8f;font-size:12px}
+  .tgm-b{
+    background:#0e1621;padding:16px 14px 18px;display:flex;flex-direction:column;gap:8px;
+    background-image:radial-gradient(rgba(255,255,255,.025) 1px,transparent 1px);background-size:14px 14px;
+  }
+  .bub{max-width:84%;padding:8px 11px 6px;border-radius:13px;color:#e9eef3;position:relative}
+  .bub.in{align-self:flex-start;background:#182533;border-bottom-left-radius:4px}
+  .bub.out{align-self:flex-end;background:#2b5278;border-bottom-right-radius:4px}
+  .bub .ttl{font-weight:600;display:block}
+  .bub a{color:#6ab3f3}
+  .bub .quote{display:block;border-left:2px solid #6ab3f3;padding-left:8px;margin-bottom:4px;font-size:12.5px;color:#9bb8d3}
+  .bub time{display:block;text-align:right;font-size:11px;color:#6d8aa6;margin-top:1px}
+  .bub.out time{color:#8fb3d6}
+
+  .slm{background:#1a1d21;color:#d1d2d3}
+  .slm-h{display:flex;align-items:center;justify-content:space-between;padding:11px 16px;border-bottom:1px solid #2c2d30}
+  .slm-h b{color:#fff;font-weight:700;font-size:14.5px}
+  .slm-h small{color:#9a9b9e;font-size:12px}
+  .slm-b{padding:12px 0 14px}
+  .smsg{display:flex;gap:10px;padding:6px 16px}
+  .smsg .av{border-radius:8px;width:34px;height:34px}
+  .smsg .who{font-weight:700;color:#fff;font-size:14px}
+  .smsg .app{font-size:10px;font-weight:700;background:#35373b;color:#b9babd;border-radius:3px;padding:1px 4px;margin-left:5px;vertical-align:1px}
+  .smsg time{color:#9a9b9e;font-size:12px;margin-left:6px}
+  .smsg p{margin:1px 0 0;color:#d1d2d3}
+  .smsg a{color:#1d9bd1}
+  .sthread{display:inline-flex;align-items:center;gap:7px;margin-top:6px;font-size:12.5px;color:#1d9bd1;font-weight:600}
+  .sthread i{width:18px;height:18px;border-radius:4px;display:inline-block}
+  .sreplies{margin:6px 16px 0 60px;border-left:2px solid #35373b;padding:4px 0}
+  .sreplies .smsg{padding:5px 12px}
+  .sreplies .smsg .av{width:26px;height:26px;font-size:11px;border-radius:6px}
+
+  /* how an answer finds its ticket */
+  .route{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:12px;margin-top:20px;counter-reset:r}
+  .route > div{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 18px 16px;position:relative}
+  .route > div::before{
+    counter-increment:r;content:counter(r);position:absolute;top:16px;right:16px;
+    font:600 12px/24px var(--mono);width:24px;height:24px;text-align:center;border-radius:50%;
+    color:var(--accent-2);background:var(--accent-wash);border:1px solid var(--accent-line);
+  }
+  .route b{display:block;font-size:15px;margin:12px 0 4px}
+  .route p{margin:0;color:var(--muted);font-size:14px;line-height:1.55}
+  .route .only{display:inline-block;margin-top:9px;font-size:12px;color:var(--warn)}
+
+  .verdicts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:12px;margin-top:18px}
+  .verdicts > div{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .verdicts h4{margin:0 0 10px;font-size:14px;font-weight:600}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{font-family:var(--mono);font-size:12.5px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);color:var(--muted);background:var(--panel-2)}
+  .yes .chip{color:var(--ok);border-color:rgba(74,222,128,.32);background:rgba(74,222,128,.07)}
+  .no .chip{color:#f87171;border-color:rgba(248,113,113,.32);background:rgba(248,113,113,.07)}
+  .verdicts .rest{color:var(--muted);font-size:14px;margin:0}
+
+  .events{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px;margin-top:18px}
+  .ev{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:flex;gap:13px}
+  .ev b{display:block;font-family:var(--mono);font-size:13.5px;font-weight:500}
+  .ev span{display:block;color:var(--muted);font-size:14px;margin-top:3px;line-height:1.5}
+
+  /* the credit window */
+  .meter{margin:28px 0 8px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px 22px}
+  .meter-top{display:flex;justify-content:space-between;gap:12px;font-size:13.5px;color:var(--muted);margin-bottom:12px;flex-wrap:wrap}
+  .meter-top b{color:var(--text);font-weight:600}
+  .bar{position:relative;height:14px;border-radius:999px;background:var(--panel-2);border:1px solid var(--line-soft);overflow:hidden}
+  .bar .fill{position:absolute;inset:0 auto 0 0;width:78%;border-radius:999px;background:linear-gradient(90deg,var(--accent),var(--accent-2))}
+  .bar .res{position:absolute;inset:0 0 0 auto;width:5%;background:repeating-linear-gradient(135deg,rgba(251,191,36,.55) 0 4px,rgba(251,191,36,.18) 4px 8px)}
+  .meter-foot{display:flex;justify-content:space-between;gap:12px;margin-top:10px;font-family:var(--mono);font-size:12px;color:var(--dim);flex-wrap:wrap}
+  .meter-foot .w{color:var(--warn)}
+
+  /* schedules sample */
+  .sched-cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;margin-top:14px}
+  .sched-cal div{background:var(--panel-2);border:1px solid var(--line-soft);border-radius:8px;min-height:62px;padding:7px 8px;font-size:11.5px;color:var(--dim)}
+  .sched-cal div b{display:block;color:var(--muted);font-weight:500;margin-bottom:5px}
+  .sched-cal i{display:block;font-style:normal;border-radius:5px;padding:2px 6px;margin-top:3px;color:#dfe8ff;background:rgba(59,130,246,.22);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sched-cal i.m{background:rgba(192,132,252,.22)}
+  .sched-cal i.d{background:rgba(74,222,128,.18)}
+  @media (max-width:640px){.sched-cal{grid-template-columns:repeat(4,minmax(0,1fr))}.sched-cal div:nth-child(n+5){display:none}}
+
+  .split{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:18px;align-items:start}
+  .split > div > h3:first-child{margin-top:34px}
+  .pill{display:inline-block;font-size:11.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;border-radius:999px;padding:2px 9px;margin-left:8px;vertical-align:2px;color:var(--accent-2);background:var(--accent-wash);border:1px solid var(--accent-line)}
+
   @media (max-width:640px){
     .hero{padding-top:56px}
     .install{font-size:12px;padding-left:13px}
@@ -418,12 +590,13 @@
       ticket-runner
     </a>
     <div class="nav-links">
-      <a href="#installation">Installation</a>
-      <a href="#board">The board</a>
+      <a href="#features">Features</a>
+      <a href="#installation">Install</a>
+      <a href="#board">Board</a>
+      <a href="#connectors">Telegram &amp; Slack</a>
       <a href="#console">Console</a>
-      <a href="#configuration">Configuration</a>
+      <a href="#configuration">Config</a>
       <a href="#safety">Safety</a>
-      <a href="#troubleshooting">Troubleshooting</a>
       <a class="nav-gh" href="https://github.com/SalvadorCardona/ticket-runner">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
         GitHub
@@ -454,6 +627,16 @@
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
       The source code
     </a>
+  </div>
+
+  <div class="stack" aria-label="Works with">
+    <span><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3.5" fill="#fff"/><path d="M8.6 16.6V7.4h1.2l4.6 6.6V7.4h1.2v9.2h-1.2L9.8 10v6.6z" fill="#111"/></svg> Notion</span>
+    <span><svg viewBox="0 0 24 24" aria-hidden="true"><g stroke="#D97757" stroke-width="2.3" stroke-linecap="round"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"/></g></svg> Claude Code</span>
+    <span><svg style="color:#fff" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg> GitHub</span>
+    <span><svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="24" fill="#2AABEE"/><path fill="#fff" d="M10.9 23.4c7-3 11.6-5 13.9-6 6.6-2.7 8-3.2 8.9-3.2.2 0 .6 0 .9.3.2.2.3.5.3.7v.8c-.4 3.9-2 13.5-2.8 17.9-.3 1.9-1 2.5-1.6 2.6-1.4.1-2.4-.9-3.8-1.8-2.1-1.4-3.3-2.2-5.3-3.6-2.4-1.6-.8-2.4.5-3.8.3-.4 6.6-6 6.7-6.6 0-.1 0-.3-.1-.4-.2-.1-.4-.1-.5 0-.2.1-3.6 2.3-10.1 6.7-1 .7-1.8 1-2.6 1-.8 0-2.5-.5-3.7-.9-1.5-.5-2.7-.7-2.6-1.5.1-.4.6-.8 1.8-1.2Z"/></svg> Telegram</span>
+    <span><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#E01E5A" d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313z"/><path fill="#36C5F0" d="M8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312z"/><path fill="#2EB67D" d="M18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312z"/><path fill="#ECB22E" d="M15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/></svg> Slack</span>
+    <span><svg viewBox="0 0 24 24" aria-hidden="true" class="ln"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 15V9l2.5 3L11 9v6M16.5 9v6M14 12.5l2.5 2.5 2.5-2.5"/></svg> Markdown files</span>
+    <span><svg viewBox="0 0 24 24" aria-hidden="true" class="ln" style="color:#a78bfa"><path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/></svg> OpenRouter</span>
   </div>
 
   <div class="demo">
@@ -520,7 +703,7 @@
       <div class="card">
         <div class="ico"><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M11 18h2"/></svg></div>
         <h4>Asks you on your phone</h4>
-        <p>A ticket the agent would not guess at asks its question on <b>Telegram or Slack</b>. <em>oui</em> is the whole answer — it lands on the ticket and the next run carries on.</p>
+        <p>A ticket the agent would not guess at asks its question on <b>Telegram or Slack</b>. <em>oui</em> is the whole answer — it lands on the ticket and the next run carries on. <a href="#connectors">See the connectors →</a></p>
       </div>
       <div class="card">
         <div class="ico"><svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></svg></div>
@@ -539,10 +722,68 @@
   </div>
 </section>
 
+<section id="features">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="sec-num">02 — Features</span>
+      <h2>Everything it does, on one screen.</h2>
+      <p>Each of these is on by default or one line away, and each links to the part of this page that explains it.</p>
+    </div>
+
+    <div class="feat-group">
+      <h3>Doing the work</h3>
+      <div class="feats c3">
+        <a class="feat" href="#board"><div class="ico"><svg viewBox="0 0 24 24"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></div><div><b>A pull request, or a page</b><span>A project with a repository gets a branch and a PR; one without gets its answer written into the ticket.</span></div></a>
+        <a class="feat" href="#safety"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg></div><div><b>One worktree per ticket</b><span>Your checkout is never touched, and two tickets on one project move at once.</span></div></a>
+        <a class="feat" href="#board"><div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4M8 16h.01M16 16h.01"/></svg></div><div><b>Agents and project briefs</b><span>A context page, a project page and an agent page frame every ticket — your voice, not a generic one.</span></div></a>
+        <a class="feat" href="#board"><div class="ico"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div><div><b>Live, on the ticket</b><span>Every file read and every command run is written into the ticket, ten seconds at a time.</span></div></a>
+        <a class="feat" href="#board"><div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div><div><b>Priority, model, date</b><span>Per ticket: which runs first, on which model, and not before which moment.</span></div></a>
+        <a class="feat" href="#safety"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg></div><div><b>Picks up where it stopped</b><span>A retried ticket carries on its own branch and its own session instead of starting over.</span></div></a>
+      </div>
+    </div>
+
+    <div class="feat-group">
+      <h3>Closing the loop</h3>
+      <div class="feats">
+        <a class="feat" href="#validated"><div class="ico v"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></div><div><b>Validated merges, or publishes</b><span>Move a ticket one column right: its PR is merged, or its post is sent. Then it is Done.</span></div></a>
+        <a class="feat" href="#validated"><div class="ico v"><svg viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></div><div><b>Merged by hand? It notices</b><span>A pull request you merged yourself moves its ticket to Done on the next pass.</span></div></a>
+        <a class="feat" href="#rebase"><div class="ico v"><svg viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg></div><div><b>Ten tickets, one repository</b><span>Branches are rebased onto the newest base before the PR, and again when a merge is refused.</span></div></a>
+        <a class="feat" href="#schedules"><div class="ico v"><svg viewBox="0 0 24 24"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg></div><div><b>Tickets that come back</b><span>Monday’s review, the monthly report: a schedule creates the ticket when its moment comes.</span></div></a>
+      </div>
+    </div>
+
+    <div class="feat-group">
+      <h3>Talking to it</h3>
+      <div class="feats c3">
+        <a class="feat" href="#talk"><div class="ico y"><svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"/></svg></div><div><b>Answers in the comments</b><span>Reply under a report, or name @claude: it answers in the thread, and cannot change a thing.</span></div></a>
+        <a class="feat" href="#language"><div class="ico y"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></div><div><b>In your language</b><span><code>runner.language = "fr"</code> and every report, question and message comes back in French.</span></div></a>
+        <a class="feat" href="#connectors"><div class="ico y"><svg viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg></div><div><b>Telegram</b><span>Questions on your phone, answered in one word. Polls, so it works behind a NAT.</span></div></a>
+        <a class="feat" href="#connectors"><div class="ico y"><svg viewBox="0 0 24 24"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></svg></div><div><b>Slack</b><span>Posted to a channel, answered in its thread — two tickets can wait at once.</span></div></a>
+        <a class="feat" href="#connectors"><div class="ico y"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></div><div><b>Desktop notifications</b><span>One per finished ticket, and clicking it opens that ticket’s page.</span></div></a>
+        <a class="feat" href="#board"><div class="ico y"><svg viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></div><div><b>A real session, resumable</b><span>Every ticket is a Claude Code session: <code>claude --resume</code> reopens it, from any directory.</span></div></a>
+      </div>
+    </div>
+
+    <div class="feat-group">
+      <h3>Running it</h3>
+      <div class="feats">
+        <a class="feat" href="#console"><div class="ico g"><svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></svg></div><div><b>A web console</b><span>The live board, the CLI, a chat with your workspace, projects, schedules and settings — on 127.0.0.1.</span></div></a>
+        <a class="feat" href="#console"><div class="ico g"><svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2z"/></svg></div><div><b>Set up from the browser</b><span>The first connection is a form: password, Notion, your rules, Telegram. One press.</span></div></a>
+        <a class="feat" href="#beyond"><div class="ico g"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg></div><div><b>A board without Notion</b><span>Tickets as Markdown files — or Notion and files kept in step, and nothing ever deleted.</span></div></a>
+        <a class="feat" href="#beyond"><div class="ico g"><svg viewBox="0 0 24 24"><path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/></svg></div><div><b>Every other model</b><span>An OpenRouter key in every session — or the sessions themselves run on GPT, Gemini, anything.</span></div></a>
+        <a class="feat" href="#beyond"><div class="ico g"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></div><div><b>Several GitHub accounts</b><span>Your own and a client’s: each repository owner is worked under its own gh account.</span></div></a>
+        <a class="feat" href="#credits"><div class="ico o"><svg viewBox="0 0 24 24"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg></div><div><b>Credits, handled</b><span>A spent usage window puts it to sleep instead of failing tickets — and it keeps 5% for you.</span></div></a>
+        <a class="feat" href="#installation"><div class="ico o"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5M12 15V3"/></svg></div><div><b>Keeps itself up to date</b><span>Once an hour a run checks for a new version, and updates between two sessions.</span></div></a>
+        <a class="feat" href="#troubleshooting"><div class="ico o"><svg viewBox="0 0 24 24"><path d="M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6 6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1a.2.2 0 1 0 .3.3"/><path d="M8 15v1a6 6 0 0 0 6 6 6 6 0 0 0 6-6v-4"/><circle cx="20" cy="10" r="2"/></svg></div><div><b>A doctor</b><span><code>ticket-runner doctor</code> checks the token, every column, every channel — and names what is missing.</span></div></a>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section id="installation">
   <div class="wrap">
     <div class="sec-head">
-      <span class="sec-num">02 — Installation</span>
+      <span class="sec-num">03 — Installation</span>
       <h2>One command, then one page to share.</h2>
     </div>
 
@@ -610,7 +851,7 @@
 <section id="board">
   <div class="wrap">
     <div class="sec-head">
-      <span class="sec-num">03 — The board</span>
+      <span class="sec-num">04 — The board</span>
       <h2>Seven columns, and two of them are gestures.</h2>
       <p>This is where your control over the system lives. The names are yours — map them under <code>[notion.status]</code> — and <code>doctor</code> checks each one actually exists on the board.</p>
     </div>
@@ -680,7 +921,7 @@
 <section id="validated">
   <div class="wrap">
     <div class="sec-head">
-      <span class="sec-num">04 — Validated</span>
+      <span class="sec-num">05 — Validated</span>
       <h2>Reviewing ends in a gesture. This column takes it.</h2>
       <p>You read the pull request and it is good: someone still has to press <em>Merge</em>. You read the post and it is right: someone still has to publish it. That last step is pure mechanics — and it is the one part of a ticket the board always left to a human.</p>
     </div>
@@ -705,14 +946,90 @@ In review     <span class="ar">──────▶</span>     you read it. Goo
       <li><b>The column is opt-in.</b> A board whose <code>Status</code> does not offer <em>Validated</em> is never even queried; you merge by hand, exactly as before.</li>
       <li><b>A date still holds.</b> Accept the post on Tuesday for Thursday 18:00 and it sits in its column until Thursday 18:00 — nothing to come back and click.</li>
       <li><b>It is never guessed at.</b> No ticket is merged or published because a session felt sure of itself. <code>ticket-runner run --dry-run</code> says what it would do without touching anything.</li>
+      <li><b>It comes before the queue.</b> Merges and publications are settled at the top of a pass — work you accepted comes before work nobody has read — and a merge costs no place at all: validated at 14:20, merged at 14:20.</li>
     </ul>
+
+    <h3>You would rather merge by hand? The board catches up.</h3>
+    <p>The column is opt-in. Without it, every pass asks GitHub what became of the pull requests waiting <em>In review</em>, and a ticket whose own has been <b>merged</b> moves to <em>Done</em> with a comment saying so. You merge; nothing else to close.</p>
+
+    <h3 id="rebase">Ten tickets on one repository</h3>
+    <p>Ten sessions that started from the <code>main</code> of an hour ago means nine conflicts after the first merge. <code>runner.rebase</code>, on by default, answers it in two places:</p>
+    <div class="cards" style="margin-top:18px">
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg></div>
+        <h4>Before the pull request</h4>
+        <p>The branch is replayed onto its base between the commits and the push, so the PR sits on what the repository holds <em>now</em>. A conflict changes nothing: the PR opens anyway, and the conflict is written on the ticket.</p>
+      </div>
+      <div class="card">
+        <div class="ico v"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></div>
+        <h4>When a validated merge is refused</h4>
+        <p>Behind by noon? The branch is rebased, pushed with a lease on the very commit that was replayed, and the merge asked once more. A red check or a missing review is left as it came: <em>Blocked</em>, with GitHub’s own words.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="schedules">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="sec-num">06 — What comes back on its own</span>
+      <h2>Monday’s review writes its own ticket.</h2>
+      <p>Everything that <b>recurs</b> — the dependency review, the report on the first of the month, the weekly digest — used to be retyped by hand, or not done at all. A <em>schedule</em> is a row that describes a ticket and how often it is born. When its moment comes, the runner creates that ticket in <em>Ready</em>, and from there it is the same queue, the same session, the same pull request.</p>
+    </div>
+
+    <div class="window" style="margin-top:32px">
+      <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><span>Schedules — calendar · week</span></div>
+      <div style="padding:16px 18px 18px">
+        <div class="sched-cal">
+          <div><b>Mon</b><i>Revue des dépendances</i><i class="d">Digest</i></div>
+          <div><b>Tue</b><i class="d">Digest</i></div>
+          <div><b>Wed</b><i class="d">Digest</i></div>
+          <div><b>Thu</b><i class="d">Digest</i></div>
+          <div><b>Fri</b><i class="d">Digest</i><i>Weekly notes</i></div>
+          <div><b>Sat</b></div>
+          <div><b>Sun</b><i class="m">Rapport mensuel</i></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Column</th><th>What it says</th></tr></thead>
+        <tbody>
+          <tr><td><code>Cadence</code></td><td><code>Hourly</code>, <code>Daily</code>, <code>Weekly</code>, <code>Monthly</code></td></tr>
+          <tr><td><code>At</code> · <code>Day</code></td><td>the hour, written <code>09:00</code> — and Monday, or 1 to 31</td></tr>
+          <tr><td><code>Active</code></td><td>the tick that turns it on. Untick it and it stops, without deleting anything</td></tr>
+          <tr><td><code>Project</code>, <code>Model</code>, <code>Priority</code></td><td>whatever it carries, the ticket it makes carries too — and the <b>body of the page is the brief</b>, copied into each ticket</td></tr>
+          <tr><td><code>Next</code>, <code>Last</code>, <code>Last ticket</code></td><td>the runner’s to write</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Two rules that surprise people — and are the point</h3>
+    <div class="cards" style="margin-top:14px">
+      <div class="card">
+        <div class="ico v"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
+        <h4>Catching up makes one ticket, not twelve</h4>
+        <p>Laptop shut for three days: waking up gives one ticket for the occurrence that is due. <code>Next</code> is recomputed from now. This is anacron, not cron — no avalanche of sessions.</p>
+      </div>
+      <div class="card">
+        <div class="ico y"><svg viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg></div>
+        <h4>An open occurrence blocks the next</h4>
+        <p>While the last ticket is neither <em>Done</em> nor <em>Failed</em>, no second one is made, and the pass says so. One schedule stuck on a question never fills the board with twenty copies of itself.</p>
+      </div>
+    </div>
+
+    <pre data-copy><span class="p">$ </span>ticket-runner schedules                                <span class="c"># what repeats, and when it next happens</span>
+<span class="p">$ </span>ticket-runner schedules --run "Revue des dépendances"  <span class="c"># now, without waiting for Monday</span>
+<span class="p">$ </span>ticket-runner list                                     <span class="c"># the whole calendar: tickets and births</span></pre>
+    <p>The same calendar is the console’s <em>Schedules</em> page — a table where unticking <code>Active</code> stops a row, and a calendar by day, week or month. <code>ticket-runner init</code> adds the database to a board that predates it; <code>runner.schedule = false</code> turns the whole thing off.</p>
   </div>
 </section>
 
 <section id="talk">
   <div class="wrap">
     <div class="sec-head">
-      <span class="sec-num">05 — Talking to it</span>
+      <span class="sec-num">07 — Talking to it</span>
       <h2>A ticket is somewhere to talk, not only somewhere to ask.</h2>
       <p>The comments of a ticket go into the prompt, oldest first. A run asks a question, you answer it in a comment, and the next run reads your answer instead of asking again. <b>Answering is the whole gesture</b>: nothing to move on the board.</p>
     </div>
@@ -728,62 +1045,176 @@ In review     <span class="ar">──────▶</span>     you read it. Goo
 
     <p><b>It talks, it does not work.</b> That is not a promise made in a prompt: the reply session runs under <code>plan</code> mode, which Claude Code cannot write from. Ask it for a change and it tells you what the change would take — which is the beginning of your next ticket. Name it — <code>@claude</code> — anywhere on a ticket it has run, and it answers there too.</p>
 
-    <h3>From your phone</h3>
-    <p>The two moments that need you are the two you are least likely to be at your desk for: the agent asked a question, and a pull request is waiting. So the runner writes to <b>Telegram</b> or <b>Slack</b> — and what you answer there lands on the ticket, as a Notion comment, along the exact path a comment typed into Notion takes.</p>
+    <h3 id="language">The language it answers in</h3>
+    <p><code>runner.language = "fr"</code> — or <code>"FR"</code>, <code>"fr-FR"</code>, <code>"français"</code> — and every report, every question a blocked ticket asks, every line that reaches your phone comes back in French:</p>
+    <div class="thread">
+      <div class="msg bot"><span class="who">✅ À relire — PR #12 · 3 commits · 18 minutes · 1,20 $</span>Le header du tableau de bord a été retiré, les tests passent. <a href="#language">github.com/…/pull/12</a></div>
+    </div>
+    <p>It travels into every prompt too, so summaries, documents and answers are written in it. What it does <em>not</em> touch is the repository: commit messages and code keep the language the repository already uses. <b>Empty — the default — means nobody decided</b>: each session answers in the language the ticket was written in.</p>
 
-    <div class="diagram">
-<pre>   the runner                  your phone                   the ticket
+    <div class="note">
+      <p><b>Not at your desk?</b> The same conversation reaches your phone — on Telegram or Slack, and what you answer there lands on the ticket as a comment. <a href="#connectors">That is the next section.</a></p>
+    </div>
+  </div>
+</section>
 
-   blocked <span class="ar">────────▶</span>  🙋 Stuck · Le header
-                      Which header — the dashboard
-                      one or the public site?
-                      notion.so/…
-                                   │
-                                   │  <span class="hl">“celui du dashboard”</span>
-                                   ▼
-                      ✓ noted on “Le header”  <span class="ar">──────▶</span>  a comment on the page
-                                                       │
-   next run  <span class="ar">◀──────────────────────────────────────────┘</span>  the ticket runs again</pre>
+<section id="connectors">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="sec-num">08 — Connectors</span>
+      <h2>Telegram and Slack: the board, in your pocket.</h2>
+      <p>The two moments that need you are the two you are least likely to be at your desk for: the agent asked a question, and a pull request is waiting. So the runner writes to you where you already are — and <b>what you answer there lands on the ticket</b>, as a Notion comment, along the exact path a comment typed into Notion takes.</p>
     </div>
 
+    <div class="conn-grid">
+      <article class="conn tg">
+        <div class="conn-h">
+          <div class="logo"><svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="24" fill="#2AABEE"/><path fill="#fff" d="M10.9 23.4c7-3 11.6-5 13.9-6 6.6-2.7 8-3.2 8.9-3.2.2 0 .6 0 .9.3.2.2.3.5.3.7v.8c-.4 3.9-2 13.5-2.8 17.9-.3 1.9-1 2.5-1.6 2.6-1.4.1-2.4-.9-3.8-1.8-2.1-1.4-3.3-2.2-5.3-3.6-2.4-1.6-.8-2.4.5-3.8.3-.4 6.6-6 6.7-6.6 0-.1 0-.3-.1-.4-.2-.1-.4-.1-.5 0-.2.1-3.6 2.3-10.1 6.7-1 .7-1.8 1-2.6 1-.8 0-2.5-.5-3.7-.9-1.5-.5-2.7-.7-2.6-1.5.1-.4.6-.8 1.8-1.2Z"/></svg></div>
+          <div><h3>Telegram</h3><span class="tag"><b>For you</b> · the two-minute channel</span></div>
+        </div>
+        <ul class="ticks">
+          <li><b>No public URL, no webhook, no domain.</b> The runner <em>polls</em>, which makes it the one channel that installs on a laptop behind a NAT.</li>
+          <li><b>It pairs itself.</b> Say anything to your bot, run <code>ticket-runner notify --pair</code>, and the chat id is written into your configuration — nothing to look up, no token pasted into somebody else’s bot.</li>
+          <li><b>Only your chat is read.</b> A bot’s name is a public address; a message from any other chat is dropped before it can become a comment on your board.</li>
+          <li><b>Reply to the message</b> and the answer goes to that exact ticket.</li>
+        </ul>
+        <div class="mock" aria-hidden="true">
+          <div class="tgm-h"><span class="av" style="background:linear-gradient(135deg,#3b82f6,#7cb0ff)">TR</span><div><b>Ticket Runner</b><small>bot</small></div></div>
+          <div class="tgm-b">
+            <div class="bub in"><span class="ttl">🙋 Stuck · Le header</span>Which header — the dashboard one or the public site?<br><a>notion.so/Le-header-3de45168</a><time>09:41</time></div>
+            <div class="bub out"><span class="quote">🙋 Stuck · Le header</span>celui du dashboard<time>09:43 ✓✓</time></div>
+            <div class="bub in">✓ noted on “Le header” — the next run carries on.<time>09:43</time></div>
+            <div class="bub in"><span class="ttl">✅ To review — PR #12 · 9 minutes · $0.74</span>Removed the header from the dashboard.<br><a>github.com/…/pull/12</a><time>09:58</time></div>
+            <div class="bub out">👍<time>10:02 ✓✓</time></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="conn sl">
+        <div class="conn-h">
+          <div class="logo"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#E01E5A" d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313z"/><path fill="#36C5F0" d="M8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312z"/><path fill="#2EB67D" d="M18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312z"/><path fill="#ECB22E" d="M15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/></svg></div>
+          <div><h3>Slack</h3><span class="tag"><b>For the team</b> · where everyone already is</span></div>
+        </div>
+        <ul class="ticks">
+          <li><b>One question, one thread.</b> Each is posted to the channel and answered in its thread, so two tickets can be waiting at once without their answers being confused.</li>
+          <li><b>A room is not an approval.</b> A colleague’s “ok” typed in the channel answers nothing unless it is in the thread, or names its ticket.</li>
+          <li><b>Two scopes.</b> <code>chat:write</code>, plus the history scope for where it lives: <code>channels:history</code>, <code>groups:history</code> or <code>im:history</code>.</li>
+          <li><b>Signed by you.</b> The comment opens with <em>Answered from Slack by …</em>, so the next run knows it is the ticket’s author speaking.</li>
+        </ul>
+        <div class="mock slm" aria-hidden="true">
+          <div class="slm-h"><b># tickets</b><small>3 members</small></div>
+          <div class="slm-b">
+            <div class="smsg"><span class="av" style="background:linear-gradient(135deg,#3b82f6,#7cb0ff)">TR</span><div><span class="who">Ticket Runner</span><span class="app">APP</span><time>14:02</time><p>🙋 <b style="color:#fff">Stuck · Migrer vers SQLite</b><br>Keep the JSON export, or drop it with the migration?<br><a>notion.so/Migrer-vers-SQLite-9f2c</a></p>
+              <span class="sthread"><i style="background:#e8912d"></i><i style="background:#2eb67d;margin-left:-11px;outline:2px solid #1a1d21"></i>2 replies</span></div></div>
+            <div class="sreplies">
+              <div class="smsg"><span class="av" style="background:#e8912d">SC</span><div><span class="who">Salvador</span><time>14:05</time><p>keep it, one release more</p></div></div>
+              <div class="smsg"><span class="av" style="background:linear-gradient(135deg,#3b82f6,#7cb0ff)">TR</span><div><span class="who">Ticket Runner</span><span class="app">APP</span><time>14:05</time><p>✓ noted on “Migrer vers SQLite”</p></div></div>
+            </div>
+            <div class="smsg" style="margin-top:8px"><span class="av" style="background:linear-gradient(135deg,#3b82f6,#7cb0ff)">TR</span><div><span class="who">Ticket Runner</span><span class="app">APP</span><time>14:31</time><p>✅ <b style="color:#fff">To review — PR #14 · 4 commits · 26 minutes · $1.10</b><br>Storage moved to SQLite, JSON export kept behind a flag.<br><a>github.com/…/pull/14</a></p>
+              <span class="sthread"><i style="background:#e8912d"></i>1 reply</span></div></div>
+            <div class="sreplies">
+              <div class="smsg"><span class="av" style="background:#e8912d">SC</span><div><span class="who">Salvador</span><time>14:40</time><p>👍</p></div></div>
+            </div>
+          </div>
+        </div>
+      </article>
+    </div>
+
+    <h3>How an answer finds its ticket</h3>
+    <p style="color:var(--muted);margin-top:0">Answers are read at the top of every run, so a ticket answered thirty seconds ago is picked up by that very run. Which question it answers is settled narrowest first:</p>
+    <div class="route">
+      <div><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg></div><b>A reply to the runner’s message</b><p>A Telegram reply, a Slack thread. The surest link there is.</p></div>
+      <div><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/></svg></div><b>A ticket named in the text</b><p>Its link, or the eight characters the runner prints everywhere — <code>3de45168</code>.</p></div>
+      <div><div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div><b>The last question asked</b><p>What a bare “oui” means when it arrives thirty seconds after the phone buzzed.</p><span class="only">Telegram only — in a shared room, the message beside yours is somebody else’s.</span></div>
+    </div>
+
+    <h3>One word is enough</h3>
+    <div class="verdicts">
+      <div class="yes"><h4>Read as a yes</h4><div class="chips"><span class="chip">yes</span><span class="chip">oui</span><span class="chip">ok</span><span class="chip">go</span><span class="chip">ship it</span><span class="chip">vas-y</span><span class="chip">ça marche</span><span class="chip">👍</span><span class="chip">✅</span></div></div>
+      <div class="no"><h4>Read as a no</h4><div class="chips"><span class="chip">no</span><span class="chip">non</span><span class="chip">stop</span><span class="chip">cancel</span><span class="chip">laisse tomber</span><span class="chip">annule</span><span class="chip">👎</span><span class="chip">❌</span></div></div>
+      <div><h4>Anything else</h4><p class="rest">travels verbatim. A verdict is spelled out for the session that will read it — a bare “oui” means nothing to an agent that never saw the notification — and a word plus a sentence keeps both.</p></div>
+    </div>
+
+    <h3>What gets sent, and what does not</h3>
+    <div class="events">
+      <div class="ev"><div class="ico o"><svg viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg></div><div><b>blocked</b><span>a question — the one message that expects something back.</span></div></div>
+      <div class="ev"><div class="ico g"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></div><div><b>done</b><span>a pull request waiting for you, or a document written.</span></div></div>
+      <div class="ev"><div class="ico y"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg></div><div><b>failed</b><span>a log to read, with the link to it.</span></div></div>
+    </div>
+    <pre data-copy><span class="k">[notify]</span>
+replies = <span class="n">true</span>                             <span class="c"># read what you write back — false keeps the messages, stops the listening</span>
+events = [<span class="s">"blocked"</span>, <span class="s">"failed"</span>, <span class="s">"done"</span>]     <span class="c"># events = ["blocked"] is a defensible whole configuration</span>
+
+<span class="k">[notify.telegram]</span>
+token = <span class="s">"123456:ABC…"</span>                    <span class="c"># from @BotFather</span>
+chat = <span class="s">""</span>                               <span class="c"># filled in by `ticket-runner notify --pair`</span>
+
+<span class="k">[notify.slack]</span>
+token = <span class="s">"xoxb-…"</span>
+channel = <span class="s">"C0123456789"</span>                  <span class="c"># ··· → View channel details, at the bottom</span></pre>
+
+    <h3>Setting them up</h3>
     <details>
-      <summary>Telegram — the two-minute channel</summary>
+      <summary><span style="display:inline-flex;width:20px;height:20px"><svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="24" fill="#2AABEE"/><path fill="#fff" d="M10.9 23.4c7-3 11.6-5 13.9-6 6.6-2.7 8-3.2 8.9-3.2.2 0 .6 0 .9.3.2.2.3.5.3.7v.8c-.4 3.9-2 13.5-2.8 17.9-.3 1.9-1 2.5-1.6 2.6-1.4.1-2.4-.9-3.8-1.8-2.1-1.4-3.3-2.2-5.3-3.6-2.4-1.6-.8-2.4.5-3.8.3-.4 6.6-6 6.7-6.6 0-.1 0-.3-.1-.4-.2-.1-.4-.1-.5 0-.2.1-3.6 2.3-10.1 6.7-1 .7-1.8 1-2.6 1-.8 0-2.5-.5-3.7-.9-1.5-.5-2.7-.7-2.6-1.5.1-.4.6-.8 1.8-1.2Z"/></svg></span> Telegram — four steps, two minutes</summary>
       <div class="details-body">
-        <p>No public URL, no webhook: the runner <em>polls</em>, which is what makes this the one channel that installs on a laptop behind a NAT.</p>
         <ol class="steps">
           <li>talk to <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a> → <code>/newbot</code> → put the token in <code>[notify.telegram] token</code>;</li>
           <li>open the chat with your new bot and say anything to it;</li>
           <li><code>ticket-runner notify --pair</code> reads that message and writes the chat id into your configuration;</li>
           <li><code>ticket-runner notify</code> sends you a first message.</li>
         </ol>
-        <p style="margin-top:14px">Only that chat is ever read: a message from any other chat is dropped before it can become a comment on your board.</p>
+        <p style="margin-top:14px">Or skip all four: the console’s <a href="#console">first connection</a> asks for the bot token and pairs the chat by itself.</p>
       </div>
     </details>
-
     <details>
-      <summary>Slack — where the team already is</summary>
+      <summary><span style="display:inline-flex;width:18px;height:18px"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="#E01E5A" d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313z"/><path fill="#36C5F0" d="M8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312z"/><path fill="#2EB67D" d="M18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312z"/><path fill="#ECB22E" d="M15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/></svg></span> Slack — one app, one invitation</summary>
       <div class="details-body">
-        <p>A question is posted to the channel and answered <b>in its thread</b>, which is how two tickets can be waiting at once without their answers being confused.</p>
         <ol class="steps">
           <li><a href="https://api.slack.com/apps" target="_blank" rel="noopener">api.slack.com/apps</a> → <em>Create New App</em> → <em>From scratch</em>;</li>
-          <li><em>OAuth &amp; Permissions</em> → Bot Token Scopes: <code>chat:write</code>, plus <code>channels:history</code> (or <code>groups:history</code>, <code>im:history</code>);</li>
+          <li><em>OAuth &amp; Permissions</em> → Bot Token Scopes: <code>chat:write</code>, plus <code>channels:history</code> (public), <code>groups:history</code> (private) or <code>im:history</code> (direct message);</li>
           <li><em>Install to Workspace</em>, copy the <code>xoxb-</code> token into <code>[notify.slack] token</code>;</li>
           <li><code>/invite @your-bot</code> in the channel — the step everyone forgets — and put the channel ID in <code>channel</code>.</li>
         </ol>
       </div>
     </details>
 
-    <pre data-copy><span class="k">[notify]</span>
-replies = <span class="n">true</span>                             <span class="c"># read what you write back</span>
-events = [<span class="s">"blocked"</span>, <span class="s">"failed"</span>, <span class="s">"done"</span>]     <span class="c"># the moments worth a message</span></pre>
-    <p><em>yes</em>, <em>oui</em>, <em>ok</em>, <em>go</em>, 👍 — and their opposites — are read as a verdict and spelled out for the session that will read them. Anything else travels verbatim.</p>
+    <div class="tbl">
+      <table>
+        <thead><tr><th></th><th>Telegram</th><th>Slack</th></tr></thead>
+        <tbody>
+          <tr><td>Best for</td><td>one person, on the move</td><td>a team that already lives in a channel</td></tr>
+          <tr><td>Setup</td><td>a bot token and one message</td><td>an app, two scopes, an invitation</td></tr>
+          <tr><td>Public URL needed</td><td>no — the runner polls</td><td>no — the runner polls</td></tr>
+          <tr><td>Where you answer</td><td>a reply, the ticket’s link, or just the next message</td><td>in the question’s thread, or naming the ticket</td></tr>
+          <tr><td>Who is read</td><td>the paired chat, and nobody else</td><td>the configured channel</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="cards" style="margin-top:22px">
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></div>
+        <h4>And on the desktop</h4>
+        <p>One notification per finished ticket, which names it — and clicking it opens that ticket’s page. <code>runner.notify = false</code> silences it.</p>
+      </div>
+      <div class="card">
+        <div class="ico g"><svg viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg></div>
+        <h4>Fails quietly</h4>
+        <p>An expired token, a bot removed from its channel, a network down: none of it is a reason for a ticket to fail. <code>doctor</code> says which channel is live, as whom, and where.</p>
+      </div>
+      <div class="card">
+        <div class="ico y"><svg viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4M12 17h.01"/></svg></div>
+        <h4>Why not WhatsApp</h4>
+        <p>Its API delivers inbound messages only to a public HTTPS webhook verified by Meta — a server, the opposite of a runner on your machine. A channel is four methods, so the day you have one, it is one file.</p>
+      </div>
+    </div>
   </div>
 </section>
 
 <section id="console">
   <div class="wrap">
     <div class="sec-head">
-      <span class="sec-num">06 — The web console</span>
+      <span class="sec-num">09 — The web console</span>
       <h2>Notion is where tickets are written. This is where you steer.</h2>
       <p>A second window on the same workspace, served from your own machine — running already: the installer starts it and prints the address, token included.</p>
     </div>
@@ -794,10 +1225,10 @@ events = [<span class="s">"blocked"</span>, <span class="s">"failed"</span>, <sp
 │  v0.9.2       │                              │  Where is the SQLite ticket │
 │               │  Ready     1   In progress 1 │                             │
 │ ▸ Board    4  │  ┌──────────┐  ┌──────────┐  │  <span class="hl">workspace</span>                  │
-│   1 ready     │  │ Retirer  │  │ Migrer   │  │  Six minutes in, on Trader  │
-│   Live     1  │  │ le       │  │ vers     │  │  IA. It has rewritten       │
-│   Settings    │  │ bandeau  │  │ SQLite   │  │  src/storage.py and is on   │
-│               │  │ High     │  │ pytest   │  │  pytest. Nothing committed. │
+│   Live     1  │  │ Retirer  │  │ Migrer   │  │  Six minutes in, on Trader  │
+│   Projects    │  │ le       │  │ vers     │  │  IA. It has rewritten       │
+│   Schedules   │  │ bandeau  │  │ SQLite   │  │  src/storage.py and is on   │
+│   Settings    │  │ High     │  │ pytest   │  │  pytest. Nothing committed. │
 │               │  └──────────┘  └──────────┘  │                             │
 │               │                              │  <span class="hl">&gt;</span> status                   │
 │ <span class="ok">●</span> live        │                    ───▶      │  timer on · 30 min          │
@@ -807,20 +1238,49 @@ events = [<span class="s">"blocked"</span>, <span class="s">"failed"</span>, <sp
 
     <div class="cards">
       <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 7v7M12 7v4M16 7v9"/></svg></div>
         <h4>The board</h4>
         <p>The Notion board, read from Notion and written back to it, drawn as the columns the board has. Drag a card into a column and the ticket moves. What it adds is the running session’s steps, live, and a <b>validate</b> button on every card in review.</p>
       </div>
       <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/></svg></div>
         <h4>A card is a way in</h4>
         <p>Click one and the ticket becomes a page — the brief, the report, the notes under it — with its terminal beside it: everything said on the ticket, and a field to say the next thing. What you type is a comment on the ticket — the gesture the runner already knows.</p>
       </div>
       <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></svg></div>
         <h4>The console</h4>
         <p>A line starting with <code>&gt;</code> is a <code>ticket-runner</code> subcommand, streamed into the page. Anything else is a message to your workspace: one long Claude Code session with your repositories under its feet.</p>
       </div>
       <div class="card">
+        <div class="ico v"><svg viewBox="0 0 24 24"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2z"/></svg></div>
+        <h4>Projects</h4>
+        <p>Every project the installation knows of — from the board, from <code>[projects]</code>, from the disk — as cards or as a table. Open one to read its brief; <em>Edit</em> changes its name, repository, path and brief.</p>
+      </div>
+      <div class="card">
+        <div class="ico v"><svg viewBox="0 0 24 24"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg></div>
+        <h4>Schedules</h4>
+        <p>What comes back on its own, as a table where unticking a row stops it, or as a calendar by day, week or month. A pencil opens the six columns it is written in.</p>
+      </div>
+      <div class="card">
+        <div class="ico g"><svg viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></div>
         <h4>Settings</h4>
         <p><code>config.toml</code> drawn as a page — every key, from the Notion token to what your board calls its <em>Blocked</em> column. A save is all of it or none of it; your tokens never come back to the browser.</p>
+      </div>
+      <div class="card">
+        <div class="ico g"><svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2z"/></svg></div>
+        <h4>The first connection</h4>
+        <p>A console nobody has claimed serves a form: your email and password, the Notion token and page — the board is built there and then — your rules, and a Telegram bot that pairs itself. One press.</p>
+      </div>
+      <div class="card">
+        <div class="ico y"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+        <h4>Sign in, rather than paste a token</h4>
+        <p>An email and a password, in <code>[web]</code> or in the environment. A restart does not sign you out; changing the password signs out every browser at once.</p>
+      </div>
+      <div class="card">
+        <div class="ico y"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></div>
+        <h4>In English, or in French</h4>
+        <p>Read from your browser, or from your time zone when it says nothing. The menu, the board, the settings down to the sentence under each field.</p>
       </div>
     </div>
 
@@ -835,10 +1295,106 @@ events = [<span class="s">"blocked"</span>, <span class="s">"failed"</span>, <sp
   </div>
 </section>
 
+<section id="beyond">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="sec-num">10 — Beyond the defaults</span>
+      <h2>Notion, Anthropic and one GitHub are defaults, not walls.</h2>
+      <p>Three switches for the setups that do not look like the first one: a board with no Notion, models from every other provider, and a machine that answers to more than one GitHub.</p>
+    </div>
+
+    <div class="split">
+      <div>
+        <h3><svg width="20" height="20" style="vertical-align:-4px;margin-right:6px" viewBox="0 0 24 24" aria-hidden="true" class="ln"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 15V9l2.5 3L11 9v6M16.5 9v6M14 12.5l2.5 2.5 2.5-2.5"/></svg>The board as Markdown files</h3>
+        <p><code>mode = "markdown"</code> and nothing reaches the network: no token, no page to share. The board is a directory, one file is one page, properties go in a frontmatter — and <code>git</code>, <code>grep</code> and <code>$EDITOR</code> become its interface. The console works against it exactly as against Notion.</p>
+        <div class="diagram" style="margin:18px 0">
+<pre>board/
+<span class="ar">├──</span> <span class="hl">context.md</span>                <span class="ar">←</span> read into every prompt
+<span class="ar">├──</span> tickets/<span class="hl">&lt;slug&gt;-&lt;id&gt;.md</span>
+<span class="ar">├──</span> projects/  agents/  schedules/
+<span class="ar">└──</span> comments/&lt;id&gt;.md          <span class="ar">←</span> a page’s discussion</pre>
+        </div>
+        <pre data-copy><span class="k">[storage]</span>
+mode = <span class="s">"markdown"</span>        <span class="c"># "notion" (default) · "markdown" · "both"</span>
+path = <span class="s">""</span>                <span class="c"># empty: ~/.local/state/ticket-runner/board</span></pre>
+      </div>
+      <div>
+        <h3><svg width="20" height="20" viewBox="0 0 24 24" style="vertical-align:-4px;margin-right:6px;stroke:var(--accent-2);fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>Or both, kept in step</h3>
+        <p><code>mode = "both"</code>: a pass reconciles before it reads the queue, and every write lands on both sides at once. Three rules, and they are the ones worth arguing about:</p>
+        <ul class="ticks" style="--brand:var(--accent-2);--brand-wash:var(--accent-wash)">
+          <li><b>The newest wins, and the loser is written down</b> — in a journal, with both timestamps.</li>
+          <li><b>Nothing is deleted, ever.</b> A file disappears for a hundred reasons; none of them is a decision to delete a ticket.</li>
+          <li><b>A page missing on one side is created there</b> — which is what makes the switch work from a board that is already full.</li>
+        </ul>
+        <pre data-copy><span class="p">$ </span>ticket-runner sync             <span class="c"># reconcile now, and say what moved</span>
+<span class="p">$ </span>ticket-runner sync --journal   <span class="c"># what past reconciliations did</span></pre>
+      </div>
+    </div>
+
+    <div class="split">
+      <div>
+        <h3><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" class="ln" style="color:#a78bfa;vertical-align:-4px;margin-right:6px"><path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/></svg>Every other model</h3>
+        <p>An <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">OpenRouter</a> key is one account in front of every provider. Set alone, it is simply <em>there</em> — <code>OPENROUTER_API_KEY</code> in every session — so a ticket can have a GPT write the copy or another model make the video.</p>
+        <p><code>route_sessions = true</code> is a decision rather than a convenience: the sessions themselves run on it, and every model named becomes an OpenRouter slug. The bill is OpenRouter’s then, and Claude in Chrome does not load.</p>
+        <pre data-copy><span class="k">[openrouter]</span>
+key = <span class="s">"sk-or-v1-…"</span>
+route_sessions = <span class="n">true</span>
+
+<span class="k">[runner]</span>
+model = <span class="s">"openai/gpt-5"</span>     <span class="c"># or anything on the list</span></pre>
+      </div>
+      <div>
+        <h3><svg width="19" height="19" style="vertical-align:-3px;margin-right:7px" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>Several GitHub accounts</h3>
+        <p>One machine often answers to two GitHubs — yours and a client’s — and <code>gh</code> only ever has one active. Log each in once, and say which owner is whose: the clone, the push, the pull request and the merge then go out under the right account, whichever is active.</p>
+        <pre data-copy><span class="p">$ </span>gh auth login      <span class="c"># then again, for the second account</span>
+
+<span class="k">[github]</span>
+<span class="s">"animalink"</span> = <span class="s">"dev-animalink"</span>        <span class="c"># owner in the URL = gh account</span>
+<span class="s">"salvadorcardona"</span> = <span class="s">"salvadevme"</span></pre>
+        <p>The token never touches the file: it is asked of <code>gh</code> when needed. A line naming an account <code>gh</code> does not know is what <code>doctor</code> calls dead.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="credits">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="sec-num">11 — When the credits run out</span>
+      <h2>A spent window puts it to sleep, not your board to the sword.</h2>
+      <p>A Claude subscription is metered in windows. A runner nobody watches used to read <em>usage limit reached</em> as one more broken session — and one spent window cost a whole board of failures. Now it waits, and it leaves some for you.</p>
+    </div>
+
+    <div class="meter">
+      <div class="meter-top"><span><b>This window</b> · the tighter of the session and the week, as <code>/usage</code> shows them</span><span>78% spent</span></div>
+      <div class="bar"><div class="fill"></div><div class="res"></div></div>
+      <div class="meter-foot"><span>0%</span><span class="w">95% — nothing new starts past here</span><span>100%</span></div>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <div class="ico o"><svg viewBox="0 0 24 24"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg></div>
+        <h4>It stops before the wall</h4>
+        <p><code>credit_reserve_percent = 5</code>: past 95%, nothing new starts — no ticket, no publication, no reply. What runs finishes; what costs no credit, like a merge, carries on.</p>
+      </div>
+      <div class="card">
+        <div class="ico o"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
+        <h4>It waits the window out</h4>
+        <p>A session that dies on the quota sends its ticket back to <em>Ready</em>, ticked <em>waiting for credit</em> — not to <em>Blocked</em>, which means <em>you</em> are needed. Until the moment Claude Code named, runs do nothing at all.</p>
+      </div>
+      <div class="card">
+        <div class="ico o"><svg viewBox="0 0 24 24"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg></div>
+        <h4>It finishes before it starts</h4>
+        <p>The first run with credit takes the ticked tickets first, and picks their very conversation back up. <code>status</code> and the console’s <em>Live</em> page say how long is left. You are told once, not on every pass.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section id="configuration">
   <div class="wrap">
     <div class="sec-head">
-      <span class="sec-num">07 — Configuration</span>
+      <span class="sec-num">12 — Configuration</span>
       <h2>Everything fits in one file.</h2>
       <p><code>~/.config/ticket-runner/config.toml</code> — created by the installer with mode <code>600</code>, opened by <code>ticket-runner config</code>, and drawn as a page in the console’s <em>Settings</em> tab.</p>
     </div>
@@ -884,12 +1440,19 @@ port = <span class="n">8787</span></pre>
         <tbody>
           <tr><td><code>runner.interval_seconds</code></td><td><code>1800</code></td><td>down to a few seconds if you want a ticket picked up as soon as you move it</td></tr>
           <tr><td><code>runner.push</code> / <code>open_pull_request</code></td><td><code>true</code></td><td><code>false</code>: commits stay local, or the branch is pushed without a PR</td></tr>
+          <tr><td><code>runner.language</code></td><td><code>""</code></td><td><code>"fr"</code>: reports, questions and messages in French — empty answers in the ticket’s own language</td></tr>
+          <tr><td><code>runner.rebase</code></td><td><code>true</code></td><td>replay the branch onto its base before the PR, and again when a validated merge is refused</td></tr>
+          <tr><td><code>runner.credit_reserve_percent</code></td><td><code>5</code></td><td>the share of each usage window the runner never touches — <code>0</code> to <code>50</code></td></tr>
+          <tr><td><code>runner.wait_for_credits</code></td><td><code>true</code></td><td><code>false</code> for an API-key runner, billed per token, with nothing to wait for</td></tr>
+          <tr><td><code>runner.schedule</code></td><td><code>true</code></td><td><code>false</code> turns recurring tickets off without unticking a row</td></tr>
           <tr><td><code>runner.permission_mode</code></td><td><code>"bypassPermissions"</code></td><td><code>"acceptEdits"</code> forbids unapproved shell commands — at the cost of sessions that stop often</td></tr>
           <tr><td><code>runner.keep_worktree_on_failure</code></td><td><code>true</code></td><td>keep enough around to understand a failure</td></tr>
           <tr><td><code>runner.attach_sessions</code></td><td><code>true</code></td><td>file each session under its project, so <code>claude --resume</code> there lists it</td></tr>
           <tr><td><code>runner.session_host</code></td><td><code>""</code></td><td>the ssh destination a Session link opens, when the runner lives on a server</td></tr>
           <tr><td><code>runner.prompt_file</code></td><td><code>""</code></td><td>your own prompt template — and <code>document_prompt_file</code>, <code>delivery_prompt_file</code> for the two other kinds of session</td></tr>
           <tr><td><code>notion.tickets_database</code></td><td><code>""</code></td><td>one database instead of a workspace; wins when both are set</td></tr>
+          <tr><td><code>storage.mode</code></td><td><code>"notion"</code></td><td><code>"markdown"</code> or <code>"both"</code> — see <a href="#beyond">beyond the defaults</a></td></tr>
+          <tr><td><code>[github]</code>, <code>[openrouter]</code></td><td></td><td>several GitHub accounts, every other model</td></tr>
         </tbody>
       </table>
     </div>
@@ -900,7 +1463,7 @@ port = <span class="n">8787</span></pre>
 <section id="usage">
   <div class="wrap">
     <div class="sec-head">
-      <span class="sec-num">08 — Usage</span>
+      <span class="sec-num">13 — Usage</span>
       <h2>Mostly, you do not run it. It runs.</h2>
       <p>The timer does the work. The command line is for looking, and for the first attempt — best made by hand, on a ticket you choose.</p>
     </div>
@@ -915,13 +1478,16 @@ port = <span class="n">8787</span></pre>
 <span class="p">$ </span>ticket-runner status       <span class="c"># timer, console, current run, recent tickets</span>
 <span class="p">$ </span>ticket-runner history      <span class="c"># what has been handled, with cost, duration and pull requests</span>
 <span class="p">$ </span>ticket-runner projects     <span class="c"># Notion project → local repository mapping</span>
+<span class="p">$ </span>ticket-runner schedules    <span class="c"># what comes back on its own, and when it next does</span>
+<span class="p">$ </span>ticket-runner sync         <span class="c"># reconcile the Notion board and the Markdown one</span>
 <span class="p">$ </span>ticket-runner doctor       <span class="c"># full diagnostics</span>
 <span class="p">$ </span>ticket-runner clean --force          <span class="c"># remove worktrees, their branches, and scratch dirs</span>
 <span class="p">$ </span>ticket-runner update       <span class="c"># move the installation to the newest version</span>
 <span class="p">$ </span>ticket-runner enable       <span class="c"># apply interval_seconds, start the timer and the console</span>
 <span class="p">$ </span>ticket-runner disable      <span class="c"># stop the timer and the console</span>
 <span class="p">$ </span>ticket-runner serve        <span class="c"># the web console, in this terminal</span>
-<span class="p">$ </span>ticket-runner notify       <span class="c"># send yourself a test message on Telegram or Slack</span></pre>
+<span class="p">$ </span>ticket-runner notify       <span class="c"># send yourself a test message on Telegram or Slack</span>
+<span class="p">$ </span>ticket-runner notify --pair   <span class="c"># find your Telegram chat id and save it</span></pre>
 
     <p><code>clean --force</code> removes a ticket’s branch along with its worktree — but only when nothing on it is anybody’s but the runner’s. A branch with commits not on the base, one whose pull request is still open, or a worktree holding uncommitted changes: those are kept, named, and given the reason, since a commit that failed to push is sometimes the only copy there is.</p>
   </div>
@@ -930,7 +1496,7 @@ port = <span class="n">8787</span></pre>
 <section id="safety">
   <div class="wrap">
     <div class="sec-head">
-      <span class="sec-num">09 — What protects your code</span>
+      <span class="sec-num">14 — What protects your code</span>
       <h2>An agent with nobody there to stop it needs a frame.</h2>
       <p>Eight guardrails, all of them on the program’s normal path rather than in a prompt.</p>
     </div>
@@ -981,7 +1547,7 @@ port = <span class="n">8787</span></pre>
 <section id="troubleshooting">
   <div class="wrap">
     <div class="sec-head">
-      <span class="sec-num">10 — Troubleshooting</span>
+      <span class="sec-num">15 — Troubleshooting</span>
       <h2>Always start with the doctor.</h2>
       <p><code>ticket-runner doctor</code> checks the token, the database, every column, every status, the comment capabilities, the notification channels and the version — and names what is missing.</p>
     </div>
@@ -1030,7 +1596,7 @@ port = <span class="n">8787</span></pre>
 <section id="author">
   <div class="wrap">
     <div class="sec-head">
-      <span class="sec-num">11 — The author</span>
+      <span class="sec-num">16 — The author</span>
       <h2>Handmade, by a developer — and by the runner itself.</h2>
       <p>Most of this repository’s pull requests were opened by ticket-runner, from tickets on its own board. The releases are cut the same way.</p>
     </div>
