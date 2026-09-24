@@ -327,8 +327,25 @@ def deep_link(session_id: str, cwd: Path | str | None = None, host: str = "") ->
     return f"{link}?{'&'.join(query)}" if query else link
 
 
-def open_link(uri: str) -> int:
-    """Handle a ticket-runner:// URI by opening a terminal on that session."""
+# What a session identifier and an ssh destination may be made of, and nothing
+# more. A link is something anybody can put in a Notion cell or a web page, and
+# clicking it hands both words to a command line: `host=-oProxyCommand=…` is an
+# ssh *option*, not a machine, and runs whatever it says before any connection
+# is attempted. So the two are checked against their shape rather than escaped
+# — a word that cannot begin with a dash cannot become an option. Claude Code
+# names its sessions with UUIDs, and `new_id` draws them the same way.
+_SESSION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,127}$")
+_HOST = re.compile(r"^[A-Za-z0-9_.@:\[\]-]{1,255}$")
+
+
+def resume_command(uri: str) -> tuple[str, list[str]]:
+    """The directory and the command a ticket-runner:// link means.
+
+    Kept apart from `open_link` so that what a link is allowed to run can be
+    checked without a terminal opening. Raises ValueError for anything that is
+    not a link this module wrote: an unknown action, an identifier that is not
+    one, a host that is not a host.
+    """
     parsed = urlparse(uri)
     if parsed.scheme != SCHEME:
         raise ValueError(f"not a {SCHEME}:// link: {uri}")
@@ -338,25 +355,39 @@ def open_link(uri: str) -> int:
     session_id = parsed.path.strip("/").split("/")[-1]
     if not session_id:
         raise ValueError("no session identifier in the link")
+    if not _SESSION_ID.match(session_id):
+        raise ValueError(
+            f"“{session_id}” is not a session identifier — letters, digits and dashes, "
+            "not starting with a dash"
+        )
     query = parse_qs(parsed.query)
     cwd = (query.get("cwd") or [str(Path.home())])[0]
     host = (query.get("host") or [""])[0]
 
     if host:
+        if host.startswith("-") or not _HOST.match(host):
+            raise ValueError(
+                f"“{host}” is not an ssh destination — user@host, with letters, digits "
+                "and . _ : @ [ ] - only, and never a leading dash"
+            )
         # The session lives on another machine, so resuming means going there.
         # No local claude is needed — only ssh, and an account that has one.
         if not shutil.which("ssh"):
             raise FileNotFoundError(f"ssh not found — cannot reach {host}")
         remote = f"cd {shlex.quote(cwd)} 2>/dev/null; claude --resume {shlex.quote(session_id)}"
-        command = ["ssh", "-t", host, remote]
+        # `--` before the destination: whatever it is, ssh reads it as one.
+        return str(Path.home()), ["ssh", "-t", "--", host, remote]
+    if not Path(cwd).is_dir():
         cwd = str(Path.home())
-    else:
-        if not Path(cwd).is_dir():
-            cwd = str(Path.home())
-        binary = available()
-        if not binary:
-            raise FileNotFoundError("claude not found in PATH")
-        command = [binary, "--resume", session_id]
+    binary = available()
+    if not binary:
+        raise FileNotFoundError("claude not found in PATH")
+    return cwd, [binary, "--resume", session_id]
+
+
+def open_link(uri: str) -> int:
+    """Handle a ticket-runner:// URI by opening a terminal on that session."""
+    cwd, command = resume_command(uri)
 
     preferred = os.environ.get("TICKET_RUNNER_TERMINAL", "")
     candidates = list(TERMINALS)

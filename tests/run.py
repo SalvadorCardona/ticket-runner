@@ -1881,6 +1881,46 @@ def a_deep_link_survives_a_round_trip():
     assert session.deep_link("abc") == "ticket-runner://session/abc"
 
 
+@case
+def a_link_cannot_slip_an_option_into_ssh_or_claude():
+    """A link is something anybody can paste into a cell, and a click runs it.
+
+    `host=-oProxyCommand=…` is not a machine, it is an ssh option that runs a
+    command before any connection is tried — and an identifier starting with a
+    dash would be an option to `claude` just the same. Both are refused before
+    anything is looked up, and the destination ssh is given comes after `--`.
+    """
+    identifier = "0486a9fd-44f6-4fff-9dee-9e58bc4062ba"
+    for uri in (
+        f"ticket-runner://session/{identifier}?host=-oProxyCommand=touch%20/tmp/owned",
+        f"ticket-runner://session/{identifier}?host=me%40box%20-oProxyCommand=x",
+        f"ticket-runner://session/{identifier}?host=me;id",
+        "ticket-runner://session/--dangerously-skip-permissions",
+        "ticket-runner://session/abc$(id)",
+    ):
+        try:
+            session.resume_command(uri)
+        except ValueError as error:
+            assert str(error), uri
+        else:
+            raise AssertionError(f"accepted: {uri}")
+
+    original = shutil.which
+    session.shutil.which = lambda name, *rest, **kept: f"/usr/bin/{name}"
+    try:
+        cwd, command = session.resume_command(
+            session.deep_link(identifier, "/srv/work/app", "salva@vps.example.org")
+        )
+        _, bracketed = session.resume_command(
+            f"ticket-runner://session/{identifier}?host=me%40%5B::1%5D"
+        )
+    finally:
+        session.shutil.which = original
+    assert command[:4] == ["ssh", "-t", "--", "salva@vps.example.org"], command
+    assert command[4].endswith(f"claude --resume {identifier}"), command
+    assert bracketed[3] == "me@[::1]", bracketed
+
+
 # -- Notion encoding ---------------------------------------------------------
 
 

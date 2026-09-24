@@ -2033,6 +2033,12 @@ transcript there, so a link opening a local terminal would find nothing. Set
 session_host = "salva@vps.example.com"
 ```
 
+A link is something anybody can paste into a cell, so the handler reads it as data and
+nothing else: the destination must look like one — letters, digits and `. _ : @ [ ] -`,
+never a leading dash — the session identifier must be letters, digits and dashes, and ssh
+is given the destination after `--`. A link that does not fit is refused with the reason
+rather than opened, which is what keeps `?host=-oProxyCommand=…` from being an option.
+
 **Desktop notifications are pointless there.** They fail quietly, so nothing breaks, but
 set `notify = false` to stop trying. This is where
 [Telegram or Slack](#being-told-and-answering-with-one-word) stops being a convenience and
