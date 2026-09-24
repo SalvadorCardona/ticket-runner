@@ -11,6 +11,6 @@ to install, no build step.
 
 ## Docs
 
-- [Documentation](https://cardona.digital/ticket-runner/): installation, the board, the web console, configuration, safety, troubleshooting
+- [Documentation](https://cardona.digital/ticket-runner/): features, installation, the board, the Validated column, recurring tickets, Telegram and Slack connectors, the web console, the Markdown board, OpenRouter, several GitHub accounts, usage limits, configuration, safety, troubleshooting
 - [Repository](https://github.com/SalvadorCardona/ticket-runner): source code, README
 - [Changelog](https://github.com/SalvadorCardona/ticket-runner/blob/main/CHANGELOG.md): what changed, release by release
