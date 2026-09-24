@@ -677,13 +677,22 @@ def command_doctor(args: argparse.Namespace) -> int:
 
     title("Version")
     print(f"  {DIM}ticket-runner {__version__} — releases: CHANGELOG.md{RESET}")
-    status = update_module.check()
+    channel = configuration.runner.update_channel
+    status = update_module.check(channel=channel)
     if status.reason:
         warn(status.reason)
     elif status.stale:
-        warn(f"{status.current[:8]} installed, {status.latest[:8]} available")
+        available = f"{status.tag} ({status.latest[:8]})" if status.tag else status.latest[:8]
+        warn(f"{status.current[:8]} installed, {available} available")
     else:
-        ok(f"newest version installed ({status.current[:8]})")
+        newest = f"{status.tag}, " if status.tag else ""
+        ok(f"newest version installed ({newest}{status.current[:8]})")
+    following = (
+        "every commit of the branch it was installed from"
+        if channel == "main"
+        else "the newest release tag (vX.Y.Z), never a commit in between"
+    )
+    print(f"  {DIM}runner.update_channel = \"{channel}\" — follows {following}{RESET}")
     if configuration.runner.auto_update:
         every = configuration.runner.update_interval_seconds
         print(f"  {DIM}checked by a run every {every}s (runner.auto_update){RESET}")
@@ -1236,26 +1245,27 @@ def command_clean(args: argparse.Namespace) -> int:
 
 def command_update(args: argparse.Namespace) -> int:
     """What a run does once an hour, on demand and out loud."""
-    status = update_module.check()
+    try:
+        settings = config_module.load().runner
+    except config_module.ConfigError:
+        settings = config_module.Runner()
+    status = update_module.check(channel=settings.update_channel)
     if status.reason:
         bad(status.reason)
         return 1
     if not status.stale:
-        ok(f"already on the newest version ({status.current[:8]})")
+        newest = f"{status.tag}, " if status.tag else ""
+        ok(f"already on the newest version ({newest}{status.current[:8]})")
         return 0
-    print(f"  {status.current[:8]} → {status.latest[:8]}")
+    print(f"  {update_module.describe(status)}")
     if args.check:
         print(f"  {DIM}ticket-runner update to apply it{RESET}")
         return 0
-    try:
-        interval = config_module.load().runner.interval_seconds
-    except config_module.ConfigError:
-        interval = config_module.Runner().interval_seconds
-    error = update_module.apply(status, interval)
+    error = update_module.apply(status, settings.interval_seconds)
     if error:
         bad(error)
         return 1
-    ok(f"updated to {status.latest[:8]}")
+    ok(f"updated to {status.tag or status.latest[:8]}")
     return 0
 
 

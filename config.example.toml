@@ -422,6 +422,15 @@ schedule = true
 # from a local copy (TR_SRC=.) has no remote to compare itself against, and says
 # so once instead of updating.
 auto_update = true
+
+# What "the newest" means.
+#   "release"  the newest release tag (vX.Y.Z) and nothing in between: a commit
+#              pushed to main is not something every installation runs until it
+#              is released. No tag yet means no update, and the run says so. An
+#              installation already ahead of the newest tag is never taken back.
+#   "main"     every commit of the branch it was installed from, within the hour.
+# Anything else reads as "release". `ticket-runner doctor` says which is in use.
+update_channel = "release"
 update_interval_seconds = 3600   # one hour; a minute is the floor
 
 # Drop session logs older than this. 0 keeps everything. The Notion comment

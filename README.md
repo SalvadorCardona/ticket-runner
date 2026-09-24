@@ -157,13 +157,22 @@ launcher and the systemd units included — before claiming a single ticket. The
 therefore lands between two sessions, never inside one, and the new code takes over on the
 next pass.
 
+What it asks about is **the newest release** — the highest `vX.Y.Z` tag on the remote —
+and not the tip of `main`. A commit merged into `main` is not something every installation
+should be running an hour later; a release is somebody having said *this one*. No release
+tagged yet means no update at all, and the run says so rather than falling back on `main`;
+an installation already ahead of the newest tag is left where it is rather than taken back.
+`runner.update_channel = "main"` is the other answer, for whoever wants every commit as it
+lands.
+
 ```sh
 ticket-runner update --check   # what is available, changing nothing
 ticket-runner update           # apply it now
 ```
 
 `runner.auto_update = false` turns the automatic half off; `runner.update_interval_seconds`
-changes the hour. An installation made from a local copy (`TR_SRC=.`) has no remote to
+changes the hour; `runner.update_channel` chooses between releases and `main` —
+`ticket-runner doctor` says which one is followed. An installation made from a local copy (`TR_SRC=.`) has no remote to
 compare itself against: it says so once per check and carries on.
 
 > **Requirements** — Linux with systemd in the user session, `python3` >= 3.11 (no
@@ -315,6 +324,7 @@ for reading rather than for filling in.
 | `runner.keep_worktree_on_failure` | `true` | keep enough around to understand a failure |
 | `runner.notify` | `true` | one desktop notification per finished ticket, clicked to open its Notion page — `[notify]` carries it to your phone |
 | `runner.auto_update` | `true` | a run keeps the installation on the latest version |
+| `runner.update_channel` | `"release"` | what "latest" means: the newest `vX.Y.Z` tag, or `"main"` for every commit. No tag, no update; anything unknown reads as `"release"` |
 | `runner.update_interval_seconds` | `3600` | how often a run asks; one minute is the floor |
 | `runner.log_retention_days` | `14` | drop older session logs; `0` keeps everything |
 | `runner.attach_sessions` | `true` | file each session under its project, so `claude --resume` there lists it |
@@ -2152,10 +2162,11 @@ read from an installed runner's point of view: **major** when your installation 
 hand to keep working, **minor** when the runner gained something, **patch** when it
 stopped getting something wrong.
 
-**A release does not change how the runner updates itself.** It follows the branch it was
-installed from, commit by commit — an installation on `main` picks up work as it is
-merged, and never waits for a version. Tags are for people: the changelog you read before
-merging an update, and
+**A release is what an installation updates to.** By default the runner follows the
+newest `vX.Y.Z` tag and nothing pushed in between, so tagging a version *is* shipping it to
+every installation within the hour — and merging into `main` is not. An installation that
+would rather have every commit as it is merged says `runner.update_channel = "main"`. Tags
+are also for people: the changelog you read before an update lands, and
 
 ```sh
 TR_REF=v0.1.0 sh install.sh

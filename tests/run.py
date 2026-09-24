@@ -2647,6 +2647,81 @@ def a_stamp_that_cannot_be_read_makes_the_check_due():
         assert update.due(3600)
 
 
+@contextmanager
+def _installation():
+    """A remote and an installation cloned from it, as `install.sh` leaves one.
+
+    Yields `commit(message, tag="")`, which lands a commit on the remote's
+    `main` — tagged when asked — and the installation's directory.
+    """
+    quiet = {"capture_output": True, "check": True}
+    who = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"]
+    with tempfile.TemporaryDirectory() as directory:
+        remote, work, app = (Path(directory) / name for name in ("remote.git", "work", "app"))
+        subprocess.run(["git", "init", "--quiet", "--bare", "-b", "main", str(remote)], **quiet)
+        subprocess.run(["git", "clone", "--quiet", str(remote), str(work)], **quiet)
+
+        def commit(message: str, tag: str = "") -> str:
+            subprocess.run(["git", *who, "-C", str(work), "commit", "--quiet", "--allow-empty",
+                            "-m", message], **quiet)
+            if tag:
+                subprocess.run(["git", *who, "-C", str(work), "tag", "-a", tag, "-m", tag], **quiet)
+            subprocess.run(["git", "-C", str(work), "push", "--quiet", "--follow-tags", "origin",
+                            "HEAD:main"], **quiet)
+            return subprocess.run(["git", "-C", str(work), "rev-parse", "HEAD"],
+                                  capture_output=True, text=True, check=True).stdout.strip()
+
+        first = commit("one")
+        subprocess.run(["git", "clone", "--quiet", str(remote), str(app)], **quiet)
+        yield commit, app, first
+
+
+@case
+def an_installation_follows_releases_and_not_every_commit_of_main():
+    """Every commit pushed to `main` used to run on every installation within
+    the hour. The default now follows the newest `vX.Y.Z` tag — and with none,
+    updates nothing and says why rather than falling back on `main`."""
+    with _state_home(), _installation() as (commit, app, first):
+        commit("two, merged but not released")
+        status = update.check(app, "release")
+        assert not status.stale, "no release, no update"
+        assert "no release" in status.reason, status.reason
+
+        released = commit("three", tag="v0.2.0")
+        commit("four, not released yet")
+        commit("a pre-release", tag="v0.3.0-rc1")
+        status = update.check(app, "release")
+        assert status.stale and status.latest == released and status.tag == "v0.2.0", status
+        assert status.current == first
+
+        followed = update.check(app, "main")
+        assert followed.stale and followed.latest not in (released, first), "main is every commit"
+        assert not followed.tag
+
+        # Already past the release — a clone of main switched to the release
+        # channel — is not taken back to it.
+        subprocess.run(["git", "-C", str(app), "reset", "--quiet", "--hard", followed.latest],
+                       capture_output=True, check=True)
+        ahead = update.check(app, "release")
+        assert not ahead.stale and not ahead.reason, ahead
+
+    assert update.newest_release(["v0.9.0", "v0.10.0", "v0.10.0-rc2", "vnext", "v1"]) == "v0.10.0"
+    assert update.newest_release([]) == ""
+
+
+@case
+def the_update_channel_is_release_unless_the_file_says_main():
+    assert C.Runner().update_channel == "release"
+    assert _config("[runner]\n").runner.update_channel == "release"
+    assert _config('[runner]\nupdate_channel = "main"\n').runner.update_channel == "main"
+    assert _config('[runner]\nupdate_channel = "Main"\n').runner.update_channel == "main"
+    assert _config('[runner]\nupdate_channel = "nightly"\n').runner.update_channel == "release", (
+        "a typo must not put an installation on every commit"
+    )
+    example = (Path(__file__).resolve().parents[1] / "config.example.toml").read_text()
+    assert 'update_channel = "release"' in example
+
+
 @case
 def a_copy_is_told_apart_from_a_clone_before_anything_is_fetched():
     """An install made with TR_SRC has no remote: a reason, not a failure."""

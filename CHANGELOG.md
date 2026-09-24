@@ -365,6 +365,14 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Changed
 
+- **An installation updates to releases, not to every commit of `main`.** The
+  runner followed the branch it was installed from, so anything merged into
+  `main` was running everywhere within the hour, before anybody had called it a
+  version. It now follows the newest `vX.Y.Z` tag, updates nothing while there
+  is none — and says so in the journal — and never takes an installation that is
+  already ahead of the tag back to it. `runner.update_channel = "main"` keeps the
+  old behaviour; `ticket-runner doctor` says which one is followed.
+
 - **The bar says where you are, and the discussion opens from a bubble.** The
   top of every page carried a row of pills — the timer and its interval, a run
   in flight, how many tickets had been handled and for how many dollars, a

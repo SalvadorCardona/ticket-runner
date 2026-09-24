@@ -31,7 +31,7 @@ from pathlib import Path
 
 from .. import config as config_module
 from .. import voice
-from ..config import EVENTS, MERGE_METHODS, Config
+from ..config import EVENTS, MERGE_METHODS, UPDATE_CHANNELS, Config
 from ..store import CONFLICTS, MODES
 
 # What Claude Code accepts, and what each of them means for a runner nobody is
@@ -424,6 +424,10 @@ SECTIONS: tuple[Section, ...] = (
         blurb="A run asks the remote whether the installed code is still the newest.",
         fields=(
             Field("runner", "auto_update", "bool", "Update itself between two runs"),
+            Field("runner", "update_channel", "choice", "What it follows",
+                  "`release`: the newest `vX.Y.Z` tag, and nothing pushed in between. "
+                  "`main`: every commit of the branch it was installed from, as it lands.",
+                  choices=UPDATE_CHANNELS),
             Field("runner", "update_interval_seconds", "int", "Ask at most every (seconds)",
                   minimum=60),
             Field("runner", "notify", "bool", "One desktop notification per ticket",

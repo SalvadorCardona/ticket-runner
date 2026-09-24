@@ -171,12 +171,21 @@ class Runner:
     # unticking a single row — see schedules.py.
     schedule: bool = True
     auto_update: bool = True
+    # What an update follows. "release": the newest `vX.Y.Z` tag, and nothing
+    # in between — a commit pushed to `main` is not yet something every
+    # installation runs. "main": every commit of the branch installed from, as
+    # soon as it lands. See update.py.
+    update_channel: str = "release"
     update_interval_seconds: int = 3600
     log_retention_days: int = 14
     dry_run: bool = False
     prompt_file: str = ""
     document_prompt_file: str = ""
     delivery_prompt_file: str = ""
+
+
+# What an installation may follow when it updates itself — see `Runner`.
+UPDATE_CHANNELS = ("release", "main")
 
 
 # What `gh pr merge` accepts, and the whole of it: anything else is a typo, and
@@ -772,6 +781,14 @@ def load(path: Path | None = None) -> Config:
         or defaults.reply_permission_mode,
         schedule=bool(runner_raw.get("schedule", defaults.schedule)),
         auto_update=bool(runner_raw.get("auto_update", defaults.auto_update)),
+        # Filtered rather than trusted: a typo here must not quietly put an
+        # installation on every commit of `main`. Anything unknown is the
+        # careful answer.
+        update_channel=(
+            str(runner_raw.get("update_channel", "")).strip().lower()
+            if str(runner_raw.get("update_channel", "")).strip().lower() in UPDATE_CHANNELS
+            else defaults.update_channel
+        ),
         # A run asks the remote at most once per this interval. The floor is a
         # minute: at a ten-second cadence, an unbounded value would turn into a
         # `git fetch` six times a minute, forever.

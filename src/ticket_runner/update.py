@@ -16,6 +16,19 @@ pass, which is at most one interval away.
 The console is the exception, and `restart_console` is why: it is one process
 that answers for weeks, so nothing about it takes over on its own.
 
+What "the newest" means is `runner.update_channel`, and the default is the
+careful one: **the newest release**, a `vX.Y.Z` tag. Following `main` meant
+that every commit pushed there — a runner opens its own pull requests, and
+merges the ones you validate — was running on every installation within the
+hour, before anybody had called it a version. A tag is somebody saying "this
+one"; `main` stays available for whoever wants every commit as it lands. No tag
+at all is not a reason to fall back on `main`: nothing is updated, and the run
+says why.
+
+A release is only ever a step *forward*. An installation already ahead of the
+newest tag — a clone of `main` that has just been switched to the release
+channel — is left where it is rather than taken back to the tag.
+
 An installation made from a local copy (`TR_SRC=.`) has no remote to compare
 itself against. That is not an error and never fails a run — it is said once,
 and the runner carries on.
@@ -25,6 +38,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -42,11 +56,19 @@ def app_dir() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+# A release, as `scripts/release.py` tags one: `v` and three numbers. A
+# pre-release (`v1.0.0-rc1`) is not one, and neither is anything else starting
+# with a `v`.
+RELEASE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
+
+
 @dataclass
 class Status:
     current: str = ""
     latest: str = ""
     reason: str = ""
+    # The release `latest` is, on the release channel — what a person reads.
+    tag: str = ""
 
     @property
     def stale(self) -> bool:
@@ -75,6 +97,7 @@ def remember(status: Status) -> None:
         "current": status.current,
         "latest": status.latest,
         "reason": status.reason,
+        "tag": status.tag,
     }
     try:
         disk.write_atomic(_stamp(), json.dumps(payload))
@@ -98,6 +121,7 @@ def remembered() -> Status:
         current=str(payload.get("current") or ""),
         latest=str(payload.get("latest") or ""),
         reason=str(payload.get("reason") or ""),
+        tag=str(payload.get("tag") or ""),
     )
 
 
@@ -113,7 +137,7 @@ def due(interval_seconds: int) -> bool:
     return time.time() - last_check() >= interval_seconds
 
 
-def _look(app: Path) -> Status:
+def _look(app: Path, channel: str = "release") -> Status:
     if not (app / ".git").exists():
         return Status(
             reason=f"{app} is a copy, not a clone — run install.sh again to follow the repository"
@@ -121,27 +145,61 @@ def _look(app: Path) -> Status:
     ref = git.git(["rev-parse", "--abbrev-ref", "HEAD"], app).out
     if not ref or ref == "HEAD":
         # Installed on a tag (TR_REF=v1.2): a fixed revision is a choice, and
-        # following the default branch instead would quietly undo it.
+        # following anything else instead would quietly undo it.
         return Status(reason=f"{app} is pinned to a fixed revision — nothing to follow")
-    fetched = git.git(["fetch", "--quiet", "origin", ref], app, timeout=120)
+    if channel == "main":
+        fetched = git.git(["fetch", "--quiet", "origin", ref], app, timeout=120)
+        if not fetched.ok:
+            return Status(reason=f"git fetch: {fetched.err or fetched.out}")
+        current = git.git(["rev-parse", "HEAD"], app).out
+        latest = git.git(["rev-parse", "FETCH_HEAD"], app).out
+        if not current or not latest:
+            return Status(reason=f"nothing to compare in {app}")
+        return Status(current=current, latest=latest)
+    return _release(app)
+
+
+def _release(app: Path) -> Status:
+    """The newest release tag, against what is installed — never a step back."""
+    fetched = git.git(["fetch", "--quiet", "--tags", "origin"], app, timeout=120)
     if not fetched.ok:
         return Status(reason=f"git fetch: {fetched.err or fetched.out}")
+    tag = newest_release(git.git(["tag", "--list", "v*"], app).out.splitlines())
+    if not tag:
+        return Status(
+            reason='no release tagged yet (vX.Y.Z) — nothing to update to; '
+            'runner.update_channel = "main" follows every commit instead'
+        )
     current = git.git(["rev-parse", "HEAD"], app).out
-    latest = git.git(["rev-parse", "FETCH_HEAD"], app).out
+    latest = git.git(["rev-parse", f"refs/tags/{tag}^{{commit}}"], app).out
     if not current or not latest:
         return Status(reason=f"nothing to compare in {app}")
-    return Status(current=current, latest=latest)
+    if latest != current and git.git(["merge-base", "--is-ancestor", latest, current], app).ok:
+        # Already past it: a clone of `main` newer than the last release. Going
+        # back to the tag would be a downgrade nobody asked for.
+        return Status(current=current, latest=current, tag=tag)
+    return Status(current=current, latest=latest, tag=tag)
 
 
-def check(app: Path | None = None) -> Status:
-    """What is installed, against what the remote has.
+def newest_release(tags: list[str]) -> str:
+    """The highest `vX.Y.Z` of those, compared as numbers — or "" for none."""
+    releases = [
+        (tuple(int(part) for part in match.groups()), tag.strip())
+        for tag in tags
+        if (match := RELEASE.match(tag.strip()))
+    ]
+    return max(releases)[1] if releases else ""
+
+
+def check(app: Path | None = None, channel: str = "release") -> Status:
+    """What is installed, against what the remote has on that channel.
 
     Never raises: a remote that hangs until the timeout, or a directory that has
     become unreadable, are answers like any other. Checking a version is not
     worth failing a run over.
     """
     try:
-        status = _look(app or app_dir())
+        status = _look(app or app_dir(), channel)
     except (OSError, subprocess.SubprocessError) as error:
         status = Status(reason=f"version not checked: {error}")
     remember(status)
@@ -163,17 +221,18 @@ def between_runs(
     pass.
 
     Nothing here can fail a run: an unreachable remote, an installation made
-    from a copy, a refused write are all one line and then the tickets.
+    from a copy, no release to follow, a refused write are all one line and
+    then the tickets.
     """
     if not settings.auto_update or not due(settings.update_interval_seconds):
         return
-    status = check()
+    status = check(channel=settings.update_channel)
     if status.reason:
         say(f"  ! version not checked: {status.reason}")
         return
     if not status.stale:
         return
-    short = f"{status.current[:8]} → {status.latest[:8]}"
+    short = describe(status)
     say(f"  ↑ a newer version is out ({short}) — updating")
     error = apply(status, settings.interval_seconds)
     if error:
@@ -181,6 +240,12 @@ def between_runs(
         return
     say("    updated — the next run uses it")
     notify("ticket-runner updated", short)
+
+
+def describe(status: Status) -> str:
+    """“1a2b3c4d → v0.4.0 (5e6f7a8b)”, or the two commits when there is no tag."""
+    target = f"{status.tag} ({status.latest[:8]})" if status.tag else status.latest[:8]
+    return f"{status.current[:8]} → {target}"
 
 
 # -- what install.sh generates outside the app directory ----------------------
