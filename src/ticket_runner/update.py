@@ -31,9 +31,10 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from . import disk, git
-from .config import state_dir
+from .config import Runner, state_dir
 
 
 def app_dir() -> Path:
@@ -145,6 +146,41 @@ def check(app: Path | None = None) -> Status:
         status = Status(reason=f"version not checked: {error}")
     remember(status)
     return status
+
+
+def between_runs(
+    settings: Runner,
+    *,
+    say: Callable[[str], None],
+    notify: Callable[[str, str], None],
+) -> None:
+    """Once an interval, make sure the installed code is still the newest.
+
+    Called at the top of a pass rather than by a timer of its own: a run already
+    wakes up on a schedule, and doing it there — under the run lock, before a
+    single ticket is claimed — is what makes an update land between two
+    sessions instead of underneath one. The new code takes over on the next
+    pass.
+
+    Nothing here can fail a run: an unreachable remote, an installation made
+    from a copy, a refused write are all one line and then the tickets.
+    """
+    if not settings.auto_update or not due(settings.update_interval_seconds):
+        return
+    status = check()
+    if status.reason:
+        say(f"  ! version not checked: {status.reason}")
+        return
+    if not status.stale:
+        return
+    short = f"{status.current[:8]} → {status.latest[:8]}"
+    say(f"  ↑ a newer version is out ({short}) — updating")
+    error = apply(status, settings.interval_seconds)
+    if error:
+        say(f"  ! update failed: {error}")
+        return
+    say("    updated — the next run uses it")
+    notify("ticket-runner updated", short)
 
 
 # -- what install.sh generates outside the app directory ----------------------

@@ -27,6 +27,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -68,15 +69,36 @@ def run(
         # leave a GITHUB_TOKEN inherited from elsewhere to answer for the tools
         # that read it instead.
         environment = {**(environment or os.environ), "GH_TOKEN": token, "GITHUB_TOKEN": token}
-    process = subprocess.run(
-        args,
-        cwd=str(cwd) if cwd else None,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env=environment,
-    )
+    try:
+        process = subprocess.run(
+            args,
+            cwd=str(cwd) if cwd else None,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=environment,
+        )
+    except subprocess.TimeoutExpired as error:
+        # An answer like any other, and the one `timeout` itself gives: every
+        # caller already knows what to do with a command that failed, and none
+        # of them was written to catch this — a fetch that hung on a dead remote
+        # used to take the whole pass down with it.
+        said = _decoded(error.stderr) or _decoded(error.stdout)
+        why = f"{' '.join(args[:3])}: timed out after {timeout}s"
+        return Result(TIMED_OUT, _decoded(error.stdout), f"{why}\n{said}" if said else why)
     return Result(process.returncode, process.stdout.strip(), process.stderr.strip())
+
+
+# What `timeout(1)` answers for a command it had to stop, and what `run` answers
+# for one that outlived its own.
+TIMED_OUT = 124
+
+
+def _decoded(output: str | bytes | None) -> str:
+    """What a stopped command had said, whichever type `subprocess` kept it as."""
+    if isinstance(output, bytes):
+        return output.decode(errors="replace").strip()
+    return (output or "").strip()
 
 
 def git(
@@ -96,8 +118,11 @@ Accounts = dict[str, str]
 
 # Asked of `gh` once per account and kept: a token is not something that changes
 # under a run, and a board with forty tickets would otherwise spawn forty `gh
-# auth token` on the way to the same answer.
-_TOKENS: dict[str, str] = {}
+# auth token` on the way to the same answer. A refusal is kept too, but only for
+# a minute: the console lives for weeks, and a `gh auth login` typed after one
+# failed lookup has to be heard without anybody restarting it.
+_TOKENS: dict[str, tuple[str, float]] = {}
+FAILED_TOKEN_SECONDS = 60
 
 
 def owner(reference: str) -> str:
@@ -118,14 +143,17 @@ def owner(reference: str) -> str:
 
 def account_token(account: str) -> str:
     """The token `gh` holds for that account, or nothing — see `token_for`."""
-    if account not in _TOKENS:
-        result = (
-            run(["gh", "auth", "token", "--user", account], timeout=60)
-            if shutil.which("gh")
-            else Result(1, "", "gh not found")
-        )
-        _TOKENS[account] = result.out if result.ok else ""
-    return _TOKENS[account]
+    held = _TOKENS.get(account)
+    if held and (held[0] or time.monotonic() < held[1]):
+        return held[0]
+    result = (
+        run(["gh", "auth", "token", "--user", account], timeout=60)
+        if shutil.which("gh")
+        else Result(1, "", "gh not found")
+    )
+    token = result.out if result.ok else ""
+    _TOKENS[account] = (token, time.monotonic() + FAILED_TOKEN_SECONDS)
+    return token
 
 
 def token_for(reference: str, accounts: Accounts | None) -> str:

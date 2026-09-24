@@ -19,6 +19,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Iterable
 
 from . import disk
 from .config import state_dir
@@ -175,6 +176,18 @@ def record(entry: dict) -> None:
     entry = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), **entry}
     with disk.open_private(history_path(), "a") as handle:
         handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def record_all(entries: Iterable[dict | None]) -> list[dict]:
+    """Record every entry there is, and hand them back as a list.
+
+    A `None` is skipped rather than written: it is what a publication that had
+    nothing to do returns, and a history line saying nothing is noise.
+    """
+    kept = [entry for entry in entries if entry]
+    for entry in kept:
+        record(entry)
+    return kept
 
 
 def history(limit: int = 20) -> list[dict]:

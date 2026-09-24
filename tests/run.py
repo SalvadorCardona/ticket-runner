@@ -3282,6 +3282,83 @@ def the_reserve_is_read_again_at_every_free_place_not_once_a_pass():
 
 
 @case
+def a_ticket_that_raises_fails_alone_and_the_pass_goes_on():
+    """An exception out of one ticket used to come back out of `future.result()`
+    and end the pass: the other sessions ran on unreported, and the ticket that
+    raised sat in progress until a later sweep put it back — to raise again."""
+    with _state_home(), _usage(_windows(10)):
+        runner = _reserving([_ready("p-1"), _ready("p-2")])
+        runner.prepare = lambda ticket: ticket_module.Job(
+            ticket, projects.Project(name="", path=None), branch="", base="",
+            workdir=Path(tempfile.mkdtemp()) / "doc",
+        )
+
+        def execute(job):
+            if job.ticket.id == "p1":
+                raise subprocess.TimeoutExpired(["git", "push"], 300)
+            return {"ticket": job.ticket.title, "id": job.ticket.id, "status": "done"}
+
+        runner.execute = execute
+        results = runner._work(runner.queue()[0], None, refill=False)
+        history = state.history()
+
+    by_id = {result["id"]: result for result in results}
+    assert by_id["p2"]["status"] == "done", "the other ticket ran to its end"
+    assert by_id["p1"]["status"] == "failed", results
+    assert any("TimeoutExpired" in text for text in runner.client.comments_written), (
+        runner.client.comments_written
+    )
+    assert [page for page, values in runner.client.written if values.get("Status") == "Failed"] == [
+        "p-1"
+    ], runner.client.written
+    assert {entry["id"] for entry in history} == {"p1", "p2"}, "both are in the history"
+
+
+@case
+def a_git_command_that_hangs_is_a_failure_git_callers_already_read():
+    """`subprocess.TimeoutExpired` was caught nowhere: a fetch on a remote that
+    stopped answering raised through every caller up to the pass itself."""
+    from ticket_runner import git as git_module
+
+    result = git_module.run([sys.executable, "-c", "import time; print('begun', flush=True); time.sleep(30)"], timeout=1)
+    assert not result.ok and result.code == git_module.TIMED_OUT, result
+    assert "timed out after 1s" in result.err, result.err
+
+
+@case
+def an_account_gh_did_not_know_is_asked_again_once_it_might():
+    """A token found is kept; a refusal is kept for a minute and no more — the
+    console lives for weeks, and a `gh auth login` typed after one failed lookup
+    has to be heard without a restart."""
+    from ticket_runner import git as git_module
+
+    answers = [git_module.Result(1, "", "not logged in"), git_module.Result(0, "gho-new", "")]
+    asked: list[list[str]] = []
+
+    def run(args, *rest, **kept):
+        asked.append(args)
+        return answers.pop(0)
+
+    held = dict(git_module._TOKENS)
+    git_module._TOKENS.clear()
+    original_which = shutil.which
+    git_module.shutil.which = lambda name, *rest, **kept: f"/usr/bin/{name}"
+    try:
+        with _git_answering(run=run):
+            assert git_module.account_token("someone") == ""
+            assert git_module.account_token("someone") == "", "within the minute: not asked again"
+            assert len(asked) == 1
+            git_module._TOKENS["someone"] = ("", time.monotonic() - 1)  # the minute is over
+            assert git_module.account_token("someone") == "gho-new"
+            assert git_module.account_token("someone") == "gho-new"
+            assert len(asked) == 2, "a token found is kept"
+    finally:
+        git_module.shutil.which = original_which
+        git_module._TOKENS.clear()
+        git_module._TOKENS.update(held)
+
+
+@case
 def a_ticket_waiting_for_credit_goes_before_one_that_never_started():
     """It is the one already half done: a branch with commits on it and a
     session that can be picked back up. Starting a fresh ticket first is how a

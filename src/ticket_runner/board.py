@@ -433,3 +433,39 @@ class Board(Base):
             )
             closed += 1
         return closed
+
+    def _again(self, started: set[str]) -> list[Ticket]:
+        """The tickets a freed place can be filled with, board read afresh.
+
+        Read afresh on purpose: a pass that lasts hours must not run on the
+        board it saw at the top of the hour. The comments are dropped so that a
+        ticket answered mid-pass wakes up (see `woken`), and the answers typed
+        in Telegram or Slack are written onto their tickets first, so a "yes"
+        sent five minutes ago is in that very reading.
+
+        `converse` is *not* called here, and that is deliberate rather than
+        forgotten: answering a comment starts a session of its own, and doing it
+        alongside a full pool would put more sessions in flight than
+        `max_concurrent` allows. A question asked during a long pass is
+        therefore still answered by the next pass — which is one ticket's worth
+        of work away, not the whole board's, now that a place is filled as soon
+        as it frees.
+
+        And a Notion that will not answer leaves the place empty rather than
+        failing the pass: the sessions in flight are hours of work, and a
+        refusal here is the next completion's problem.
+        """
+        self._comments.clear()
+        self.answers()
+        try:
+            tickets, waiting = self.queue()
+        except store.StoreError as error:
+            self.say(f"  ! the board could not be read again: {voice_module.line(error)}")
+            return []
+        fresh = [ticket for ticket in tickets if ticket.id not in started]
+        # Queued or held for later, both are work about to happen: `converse`
+        # leaves them alone, because their comments are going into a prompt.
+        self._claimed |= {ticket.id for ticket in fresh} | {ticket.id for ticket, _ in waiting}
+        if fresh:
+            self.say(f"  ↺ {len(fresh)} ticket(s) ready since — filling the free place(s).")
+        return fresh

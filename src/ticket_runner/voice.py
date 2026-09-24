@@ -197,6 +197,10 @@ _SAID: dict[str, dict[str, str]] = {
         "en": "the Claude session would not start",
         "fr": "la session Claude n'a pas voulu démarrer",
     },
+    "crashed": {
+        "en": "the runner itself broke while handling this ticket",
+        "fr": "le runner lui-même a cassé en traitant ce ticket",
+    },
     "no-worktree": {
         "en": "I could not make the worktree to work in",
         "fr": "je n'ai pas pu créer le worktree pour travailler",

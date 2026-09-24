@@ -41,6 +41,20 @@ from .ticket import Job, Ticket, short_id
 class Delivery(Base):
     """What a validated ticket sets off, and how far it is taken."""
 
+    def delivered(self) -> list[dict]:
+        """`deliver`, with what it did written into the history.
+
+        Merged, published, or refused: as much a run of this ticket as a session
+        is, and `ticket-runner history` should say so. It runs in a dry run too,
+        where it only says what it would do — the one gesture that cannot be
+        taken back is the one worth rehearsing — and a rehearsal is not history.
+        """
+        done = self.deliver()
+        for entry in done:
+            if entry.get("status") != "dry-run":
+                state.record(entry)
+        return done
+
     def deliver(self) -> list[dict]:
         """Carry out the tickets you have validated.
 
@@ -317,11 +331,13 @@ class Delivery(Base):
         if not publishing:
             return []
         if len(publishing) == 1:
-            done = self._publish(*publishing[0])
+            done = self._guarded(publishing[0][0], self._publish, *publishing[0])
             return [done] if done else []
         workers = min(len(publishing), max(1, self.config.runner.max_concurrent))
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            results = list(pool.map(lambda pair: self._publish(*pair), publishing))
+            results = list(
+                pool.map(lambda pair: self._guarded(pair[0], self._publish, *pair), publishing)
+            )
         return [done for done in results if done]
 
     def _publish(self, ticket: Ticket, project: Project) -> dict | None:

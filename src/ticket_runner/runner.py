@@ -36,9 +36,8 @@ from __future__ import annotations
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 
 from . import base, board, credits, delivery, execution, preparation
-from . import recurrence, replies, reports, state, store
+from . import recurrence, replies, reports, state
 from . import update as update_module
-from . import voice as voice_module
 from .projects import Project
 from .ticket import Ticket
 
@@ -55,39 +54,11 @@ class Runner(
 ):
     """One pass of the runner, over everything a pass is made of."""
 
-    def update(self) -> None:
-        """Once an hour, make sure the installed code is still the newest.
-
-        Here rather than in a timer of its own: a run already wakes up on a
-        schedule, and doing it at the top of one — under the run lock, before a
-        single ticket is claimed — is what makes an update land between two
-        sessions instead of underneath one. The new code takes over on the next
-        pass.
-
-        Nothing here can fail a run: an unreachable remote, an installation made
-        from a copy, a refused write are all one line and then the tickets.
-        """
-        if not self.config.runner.auto_update or self.dry_run:
-            return
-        if not update_module.due(self.config.runner.update_interval_seconds):
-            return
-        status = update_module.check()
-        if status.reason:
-            self.say(f"  ! version not checked: {status.reason}")
-            return
-        if not status.stale:
-            return
-        short = f"{status.current[:8]} → {status.latest[:8]}"
-        self.say(f"  ↑ a newer version is out ({short}) — updating")
-        error = update_module.apply(status, self.config.runner.interval_seconds)
-        if error:
-            self.say(f"  ! update failed: {error}")
-            return
-        self.say("    updated — the next run uses it")
-        self._notify("ticket-runner updated", short)
-
     def tick(self, *, limit: int | None = None, reference: str = "") -> list[dict]:
-        self.update()
+        # At the top, under the run lock, before a single ticket is claimed:
+        # what makes an update land between two sessions — see update.py.
+        if not self.dry_run:
+            update_module.between_runs(self.config.runner, say=self.say, notify=self._notify)
         # Nothing at all while the subscription is out: every session this pass
         # could start would die on the same sentence, and every ticket it
         # touched would come back as a failure of its own. The run that put the
@@ -125,22 +96,9 @@ class Runner(
             if not self.dry_run:
                 self.sweep()
                 self.close_merged()
-            # `deliver` runs in a dry run too, where it only says what it would
-            # do: the one gesture that cannot be taken back is the one worth
-            # rehearsing.
-            delivered = self.deliver()
-            # Merged, published, or refused: as much a run of this ticket as a
-            # session is, and `ticket-runner history` should say so.
-            for done in delivered:
-                if done.get("status") != "dry-run":
-                    state.record(done)
-            # Before the queue, so a ticket born at 09:00 is claimed by this
-            # very pass rather than by the next one. A birth is an entry of its
-            # own kind — `ticket-runner history` shows it as it shows a merge.
-            for newborn in self.recur():
-                if newborn.get("status") != "dry-run":
-                    state.record(newborn)
-                    delivered.append(newborn)
+            # Both before the queue, and both recorded as they happen: see
+            # `delivered` and `born`.
+            delivered = self.delivered() + self.born()
             tickets, waiting = self.queue()
             # Every ticket the queue wants, and not only the ones that will fit
             # in this pass: a ticket queued for the next run — or held until
@@ -159,9 +117,7 @@ class Runner(
                 # that stays full while nothing runs reads as a broken runner,
                 # which is the one thing this is not. Said once — the column is
                 # empty by the next pass, and a ticket already in it is skipped.
-                parked = self.park(tickets)
-                for done in parked:
-                    state.record(done)
+                parked = state.record_all(self.park(tickets))
                 if self.announce_idle and not parked and not delivered:
                     self.say(f"Nothing new started until {credits.when(reserved)}.")
                 return delivered + parked
@@ -253,9 +209,7 @@ class Runner(
                 # to save credit would spend what it has already cost.
                 if not stalled and self.under_reserve():
                     stalled = True
-                    for parked in self.park(queued):
-                        results.append(parked)
-                        state.record(parked)
+                    results += state.record_all(self.park(queued))
                     queued = []
                     publishing = []
                 # Publications first: a validated ticket is one gesture from
@@ -265,7 +219,7 @@ class Runner(
                 # column, and this was taken off another one.
                 while publishing and not stalled and len(flight) < width:
                     ticket, project = publishing.pop(0)
-                    flight.add(pool.submit(self._publish, ticket, project))
+                    flight.add(pool.submit(self._guarded, ticket, self._publish, ticket, project))
                 while (
                     queued
                     and not stalled
@@ -282,7 +236,9 @@ class Runner(
                     # tickets never race over the same repository index.
                     job = self.prepare(ticket)
                     if job:
-                        flight.add(pool.submit(self.execute, job))
+                        # Guarded: a ticket that raises lands in failed with
+                        # what it raised, and the rest of the pass carries on.
+                        flight.add(pool.submit(self._guarded, ticket, self.execute, job))
                 if not flight:
                     return results
                 # An empty place is a reason to come back before a session ends,
@@ -299,10 +255,7 @@ class Runner(
                     timeout=self.config.runner.interval_seconds if looking else None,
                     return_when=FIRST_COMPLETED,
                 )
-                for future in done:
-                    result = future.result()
-                    results.append(result)
-                    state.record(result)
+                results += state.record_all(future.result() for future in done)
                 spent = 0.0 if stalled else self.waiting_for_credits()
                 if spent:
                     # A session died on the quota while this pass was running.
@@ -312,9 +265,7 @@ class Runner(
                     # it did not start, exactly as the reserve's tickets do.
                     # Publications are sessions too.
                     stalled = True
-                    for parked in self.park(queued, spent):
-                        results.append(parked)
-                        state.record(parked)
+                    results += state.record_all(self.park(queued, spent))
                     queued = []
                     publishing = []
                 if stalled:
@@ -327,9 +278,7 @@ class Runner(
                 # same reason tickets are — Notion may still be serving the
                 # status that was just written over.
                 settled, fresh = self.delivering(carried)
-                for result in settled:
-                    results.append(result)
-                    state.record(result)
+                results += state.record_all(settled)
                 carried |= {entry["id"] for entry in settled} | {
                     ticket.id for ticket, _ in fresh
                 }
@@ -341,39 +290,3 @@ class Runner(
                     )
                 if (done or empty) and (remaining is None or remaining > 0):
                     queued = self._again(started)
-
-    def _again(self, started: set[str]) -> list[Ticket]:
-        """The tickets a freed place can be filled with, board read afresh.
-
-        Read afresh on purpose: a pass that lasts hours must not run on the
-        board it saw at the top of the hour. The comments are dropped so that a
-        ticket answered mid-pass wakes up (see `woken`), and the answers typed
-        in Telegram or Slack are written onto their tickets first, so a "yes"
-        sent five minutes ago is in that very reading.
-
-        `converse` is *not* called here, and that is deliberate rather than
-        forgotten: answering a comment starts a session of its own, and doing it
-        alongside a full pool would put more sessions in flight than
-        `max_concurrent` allows. A question asked during a long pass is
-        therefore still answered by the next pass — which is one ticket's worth
-        of work away, not the whole board's, now that a place is filled as soon
-        as it frees.
-
-        And a Notion that will not answer leaves the place empty rather than
-        failing the pass: the sessions in flight are hours of work, and a
-        refusal here is the next completion's problem.
-        """
-        self._comments.clear()
-        self.answers()
-        try:
-            tickets, waiting = self.queue()
-        except store.StoreError as error:
-            self.say(f"  ! the board could not be read again: {voice_module.line(error)}")
-            return []
-        fresh = [ticket for ticket in tickets if ticket.id not in started]
-        # Queued or held for later, both are work about to happen: `converse`
-        # leaves them alone, because their comments are going into a prompt.
-        self._claimed |= {ticket.id for ticket in fresh} | {ticket.id for ticket, _ in waiting}
-        if fresh:
-            self.say(f"  ↺ {len(fresh)} ticket(s) ready since — filling the free place(s).")
-        return fresh
