@@ -464,6 +464,9 @@ class Api:
             "enabled": self.config.runner.schedule,
             "database": database,
             "page": self.config.notion.page("schedules"),
+            # Which board: "a row in the database" is Notion's sentence, and a
+            # Markdown board has files.
+            "storage": self.config.storage.mode,
             "schedules": [self._schedule(row, projects) for row in rows],
         }
 

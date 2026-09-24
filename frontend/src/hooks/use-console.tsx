@@ -63,7 +63,7 @@ const nextId = () => ++counter
 /* One literal rather than two joined: it is also the key it is looked up by,
  * and a key nobody can search for is a key nobody translates. */
 const WELCOME =
-  "Ask me anything about your workspace — I can read your repositories, look at the board and create tickets. Type > followed by a command (>status, >list, >run) to use the CLI directly."
+  "Ask me anything about your workspace — I can read your repositories, look at the board and create tickets. Type > followed by a command (>status, >list, >doctor) to use the CLI directly."
 
 interface ConsoleValue {
   board: Board

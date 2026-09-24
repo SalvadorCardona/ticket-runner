@@ -10,7 +10,6 @@ import {
   type InputControllerComponentInterface,
 } from "react-data-form"
 import {
-  NoResultComponent,
   calendarViewOptionFactory,
   createResourceCollection,
   createViewResource,
@@ -19,6 +18,7 @@ import {
   type RowInterface,
 } from "react-resource-view"
 
+import { EmptyState } from "@/components/console/empty-state"
 import { MarkdownInputController } from "@/components/console/markdown-editor"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { ApiError, api, why } from "@/lib/api"
@@ -353,24 +353,21 @@ function NoSchedule() {
   // Named rather than left blank: an empty parameter is not substituted, so the
   // sentence would show the placeholder itself. See `react-mini-i18n`.
   const page = drawn?.page || "Schedules"
+  // A Markdown board has no database to write a row in: a schedule there is
+  // a file, and the sentence that said "database" was Notion's.
+  const markdown = drawn?.storage === "markdown"
   return drawn && !drawn.database ? (
-    <NoResultComponent
-      icon={CalendarOff}
-      title={t("Nothing repeats here")}
-      body={() => (
-        <>
-          {t("This workspace has no “{{page}}” page.", { page })}{" "}
-          <code className="font-mono text-xs">ticket-runner init &lt;page-url&gt;</code>{" "}
-          {t("builds it.")}
-        </>
-      )}
-    />
+    <EmptyState icon={CalendarOff} title={t("Nothing repeats here")}>
+      {t("This workspace has no “{{page}}” page.", { page })}{" "}
+      <code className="font-mono text-xs">ticket-runner init &lt;page-url&gt;</code>{" "}
+      {t("builds it.")}
+    </EmptyState>
   ) : (
-    <NoResultComponent
-      icon={CalendarClock}
-      title={t("Nothing repeats here yet")}
-      body={() => <>{t("A row in the “{{page}}” database is a ticket that comes back.", { page })}</>}
-    />
+    <EmptyState icon={CalendarClock} title={t("Nothing repeats here yet")}>
+      {markdown
+        ? t("A schedule written here is a ticket that comes back on its own.")
+        : t("A row in the “{{page}}” database is a ticket that comes back.", { page })}
+    </EmptyState>
   )
 }
 

@@ -7,6 +7,7 @@ import { api, why } from "@/lib/api"
 import { useT } from "@/lib/i18n"
 import type { Context } from "@/lib/types"
 
+import { EmptyState } from "./empty-state"
 import { Eyebrow, PageHead } from "./frame"
 import { MarkdownEditor } from "./markdown-editor"
 
@@ -108,14 +109,14 @@ export function ContextPane() {
       ) : !drawn ? (
         <p className="text-muted-foreground text-sm">{t("Reading the context…")}</p>
       ) : !drawn.editable ? (
-        <p className="text-muted-foreground rounded-xl border border-dashed px-4 py-10 text-center text-sm">
+        <EmptyState icon={BookOpen}>
           {t("This workspace has no “{{page}}” page, so there is nowhere to write.", {
             page: drawn.where,
           })}
           <br />
           <code className="font-mono text-xs">ticket-runner init &lt;page-url&gt;</code>{" "}
           {t("builds it.")}
-        </p>
+        </EmptyState>
       ) : (
         <>
           <MarkdownEditor
