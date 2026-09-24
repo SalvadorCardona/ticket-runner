@@ -29,7 +29,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { useConsole } from "@/hooks/use-console"
+import { useConsole, useStatus } from "@/hooks/use-console"
 import { useTheme } from "@/hooks/use-theme"
 import { useT } from "@/lib/i18n"
 import { visible, type PaneMenuItem } from "@/lib/menu"
@@ -57,7 +57,8 @@ import { TICKETS, boardHref } from "@/resources/tickets"
  * every entry keeps its name in a tooltip.
  */
 export function AppSidebar({ route }: { route: Route }) {
-  const { board, sessions, connection, refresh, runner } = useConsole()
+  const { board, refresh, runner } = useConsole()
+  const { connection, running } = useStatus()
   const { theme, toggle } = useTheme()
   const { state, isMobile, setOpenMobile } = useSidebar()
   const t = useT()
@@ -77,7 +78,7 @@ export function AppSidebar({ route }: { route: Route }) {
       page: "live",
       icon: Activity,
       priority: 20,
-      badge: sessions.length || undefined,
+      badge: running.length || undefined,
     },
     {
       name: t("Projects"),

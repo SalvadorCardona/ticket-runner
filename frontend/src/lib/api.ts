@@ -1,5 +1,6 @@
 import type {
   Board,
+  LogEntry,
   ChatState,
   Context,
   Message,
@@ -12,6 +13,7 @@ import type {
   Schedules,
   Settings,
   SettingValue,
+  Step,
   Talk,
   TicketDetail,
 } from "./types"
@@ -49,6 +51,33 @@ export class ApiError extends Error {
   }
 }
 
+let leaving = false
+
+/* The sign-in page is what the server answers `/` with to a browser it does
+ * not know, so going back to it is reloading the page. Once: two requests
+ * refused in the same second must not reload twice. */
+function backToTheDoor() {
+  if (leaving) return
+  leaving = true
+  window.location.reload()
+}
+
+/** Whether the server still knows this browser — asked when the stream closes. */
+export async function signedOut(): Promise<boolean> {
+  try {
+    const response = await fetch("/api/state", {
+      headers: { ...GUARD },
+      credentials: "same-origin",
+    })
+    if (response.status !== 401) return false
+  } catch {
+    // The server is down, not the session: the stream is tried again.
+    return false
+  }
+  backToTheDoor()
+  return true
+}
+
 async function request<T>(path: string, body?: unknown): Promise<T> {
   const options: RequestInit = body
     ? {
@@ -58,6 +87,10 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
       }
     : { headers: { ...GUARD } }
   const response = await fetch(path, { ...options, credentials: "same-origin" })
+  // Signed out underneath the page — a password changed, a cookie expired, the
+  // console restarted with another token. Every call after this one would fail
+  // the same way, each with its own toast: the page goes back to the door.
+  if (response.status === 401) backToTheDoor()
   const payload = await response.json().catch(() => ({}) as Record<string, unknown>)
   if (!response.ok) {
     const said = (payload as { error?: string }).error
@@ -78,6 +111,8 @@ export const api = {
   project: (id: string) => request<ProjectDetail>(`/api/projects/${id}`),
   ticket: (id: string) => request<TicketDetail>(`/api/tickets/${id}`),
   talk: (id: string) => request<Talk>(`/api/tickets/${id}/talk`),
+  logs: () => request<{ logs: LogEntry[] }>("/api/logs"),
+  log: (name: string) => request<{ name: string; steps: Step[] }>(`/api/logs/${encodeURIComponent(name)}`),
 
   createTicket: (ticket: {
     title: string

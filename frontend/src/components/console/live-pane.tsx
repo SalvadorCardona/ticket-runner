@@ -1,10 +1,11 @@
 import { Activity, Gauge, Timer } from "lucide-react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { useConsole } from "@/hooks/use-console"
-import { useT } from "@/lib/i18n"
+import { useConsole, useSteps } from "@/hooks/use-console"
+import { t as translate, useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
+import { EmptyState } from "./empty-state"
 import { Eyebrow, PageHead, Panel } from "./frame"
 import { Steps } from "./steps"
 import { Rich } from "./text"
@@ -18,6 +19,25 @@ import { Rich } from "./text"
  * are read off the state every pane already has: this page asks the server for
  * nothing of its own.
  */
+
+/* What the timer's state is called, in words. `systemctl is-enabled` answers
+ * in its own vocabulary — `not-found`, `masked`, `static` — and the pane used
+ * to print it as it came: "timer not-found" is a log line, not a sentence. */
+const TIMER: Record<string, string> = {
+  disabled: "timer switched off — ticket-runner enable",
+  "not-found": "timer not installed — ticket-runner enable",
+  "not installed": "timer not installed — ticket-runner enable",
+  masked: "timer masked in systemd",
+  stalled: "timer on, with no next run",
+  "no systemd": "no systemd on this machine",
+  unknown: "timer state unknown",
+}
+
+function timerNote(state: string | undefined): string {
+  if (!state) return "—"
+  const said = TIMER[state]
+  return said ? translate(said) : translate("timer {{state}}", { state })
+}
 
 /** An interval, as somebody would say it out loud. */
 function every(seconds: number): string {
@@ -58,7 +78,8 @@ function Tile({
 }
 
 export function LivePane() {
-  const { sessions, runner, board } = useConsole()
+  const { runner, board } = useConsole()
+  const { sessions } = useSteps()
   const t = useT()
   const running = board.tickets.filter((item) => item.column === "running").length
 
@@ -130,7 +151,7 @@ export function LivePane() {
           note={
             runner?.timer === "enabled"
               ? t("between two runs")
-              : t("timer {{state}}", { state: runner?.timer || "—" })
+              : timerNote(runner?.timer)
           }
           tone={runner?.timer === "enabled" ? undefined : "text-tr-amber"}
         />
@@ -160,9 +181,9 @@ export function LivePane() {
           ))}
         </div>
       ) : (
-        <p className="text-muted-foreground rounded-xl border border-dashed px-4 py-10 text-center text-sm">
+        <EmptyState icon={Activity}>
           {t("Nothing is running. A session that starts writes here as it works.")}
-        </p>
+        </EmptyState>
       )}
     </div>
   )

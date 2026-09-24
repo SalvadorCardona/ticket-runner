@@ -2,17 +2,20 @@ import * as React from "react"
 import { toast } from "sonner"
 
 import { api, why } from "@/lib/api"
-import { patchTicket, publishBoard } from "@/lib/board-store"
+import { currentBoard, moveTicket, publishBoard } from "@/lib/board-store"
 import { t } from "@/lib/i18n"
 import type {
   Board,
   ChatEvent,
+  ColumnKey,
   CommandEvent,
   Message,
   NoticeEvent,
   Project,
   Role,
+  Running,
   RunnerState,
+  SessionsEvent,
   Step,
   StepEvent,
   TalkEvent,
@@ -20,11 +23,19 @@ import type {
 } from "@/lib/types"
 import { useStream, type Connection } from "./use-stream"
 
-/* Everything the console knows, in one place.
+/* Everything the console knows, in three places.
  *
  * The hand-written console kept a `state` object at the top of its single file
  * and mutated it. This is the same object, held by React so that the parts of
  * the page that care about a field redraw when it changes and the rest do not.
+ *
+ * Three contexts rather than one, because the fields do not move at the same
+ * speed. A running session writes ten steps a second; the board moves every
+ * few seconds at most; whether the stream is up and which sessions are running
+ * changes a few times an hour. With one context, every step redrew the menu,
+ * the board, the settings and the drawer — so the steps have a context of
+ * their own, the connection and the list of sessions another, and the rest a
+ * third, each value built once per change rather than once per render.
  *
  * The rule underneath is unchanged and is the reason this is a stream and not a
  * store: a click posts and says nothing. What lands here is what came back on
@@ -55,25 +66,22 @@ const WELCOME =
   "Ask me anything about your workspace — I can read your repositories, look at the board and create tickets. Type > followed by a command (>status, >list, >run) to use the CLI directly."
 
 interface ConsoleValue {
-  connection: Connection
   board: Board
   runner: RunnerState | null
   projects: Project[]
   transcript: Entry[]
   busy: boolean
-  sessions: Session[]
   ticket: Ticket | null
   talk: Message[]
   mention: string
-  ticketSteps: Step[]
   talkLoading: boolean
   openTicket: (ticket: Ticket) => void
   closeTicket: () => void
   rereadTalk: () => void
   tell: (text: string) => Promise<void>
-  submit: (text: string) => Promise<void>
+  submit: (text: string) => Promise<boolean>
   resetChat: () => Promise<void>
-  move: (ticket: Ticket, column: string) => Promise<void>
+  move: (ticket: Ticket, column: ColumnKey) => Promise<void>
   createTicket: (ticket: {
     title: string
     body: string
@@ -86,11 +94,38 @@ interface ConsoleValue {
   say: (role: Role, text: string) => void
 }
 
+/** Whether the stream is up, and which sessions are running. Slow to change. */
+interface StatusValue {
+  connection: Connection
+  running: Running[]
+}
+
+/** What the running sessions are doing. Changes with every step. */
+interface StepsValue {
+  sessions: Session[]
+  /** The steps of the open ticket's session, if it has one this console saw. */
+  ticketSteps: Step[]
+}
+
 const Context = React.createContext<ConsoleValue | null>(null)
+const StatusContext = React.createContext<StatusValue | null>(null)
+const StepsContext = React.createContext<StepsValue | null>(null)
 
 export function useConsole(): ConsoleValue {
   const value = React.useContext(Context)
   if (!value) throw new Error("useConsole outside its provider")
+  return value
+}
+
+export function useStatus(): StatusValue {
+  const value = React.useContext(StatusContext)
+  if (!value) throw new Error("useStatus outside its provider")
+  return value
+}
+
+export function useSteps(): StepsValue {
+  const value = React.useContext(StepsContext)
+  if (!value) throw new Error("useSteps outside its provider")
   return value
 }
 
@@ -100,30 +135,62 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const [projects, setProjects] = React.useState<Project[]>([])
   const [transcript, setTranscript] = React.useState<Entry[]>([])
   const [busy, setBusy] = React.useState(false)
-  const [sessions, setSessions] = React.useState<Session[]>([])
+  const [running, setRunning] = React.useState<Running[]>([])
+  const [steps, setSteps] = React.useState<Record<string, Step[]>>({})
   const [ticket, setTicket] = React.useState<Ticket | null>(null)
   const [talk, setTalk] = React.useState<Message[]>([])
   const [mention, setMention] = React.useState("")
-  const [ticketSteps, setTicketSteps] = React.useState<Step[]>([])
   const [talkLoading, setTalkLoading] = React.useState(false)
 
   // What the stream handlers need to read without being rebuilt for it.
   const openId = React.useRef<string | null>(null)
-  const openShort = React.useRef<string>("")
   const openColumn = React.useRef<string>("")
+  // The logs whose steps were already asked for, so a list announced twice
+  // does not read the same log twice.
+  const asked = React.useRef(new Set<string>())
 
   const say = React.useCallback((role: Role, text: string) => {
     setTranscript((entries) => [...entries, { id: nextId(), kind: "turn", role, text }])
   }, [])
 
+  /* -- the sessions --------------------------------------------------------- */
+
+  /* A session this page did not see start — the page was reloaded, or opened
+   * mid-run — has its steps read back from its log, once, rather than
+   * starting blank and filling from wherever it happened to be. */
+  const catchUp = React.useCallback((sessions: Running[]) => {
+    setRunning(sessions)
+    for (const session of sessions) {
+      if (asked.current.has(session.log)) continue
+      asked.current.add(session.log)
+      void api
+        .log(session.log)
+        .then((payload) => {
+          const read = payload.steps.slice(-KEPT)
+          // Steps that arrived on the stream while the log was being read are
+          // in the log too: whichever says more is the one kept.
+          setSteps((current) => {
+            const seen = current[session.source] ?? []
+            return seen.length >= read.length ? current : { ...current, [session.source]: read }
+          })
+        })
+        .catch(() => {
+          // A log that cannot be read leaves the session to fill from the
+          // stream, as it did before there was anything to catch up with.
+        })
+    }
+  }, [])
+
   const reloadState = React.useCallback(async () => {
     try {
-      setRunner(await api.state())
+      const fresh = await api.state()
+      setRunner(fresh)
+      if (fresh.sessions) catchUp(fresh.sessions)
     } catch {
       // The header going stale is not worth a message: the stream is still up,
       // and the next event asks again.
     }
-  }, [])
+  }, [catchUp])
 
   /* -- the ticket's terminal ------------------------------------------------ */
 
@@ -150,11 +217,9 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     (open: Ticket) => {
       const another = openId.current !== open.id
       openId.current = open.id
-      openShort.current = open.short
       openColumn.current = open.column
       setTicket(open)
       if (another) {
-        setTicketSteps([])
         setTalk([])
         void loadTalk(open)
       }
@@ -164,10 +229,8 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
 
   const closeTicket = React.useCallback(() => {
     openId.current = null
-    openShort.current = ""
     openColumn.current = ""
     setTicket(null)
-    setTicketSteps([])
     setTalk([])
   }, [])
 
@@ -194,27 +257,20 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
       if (!moved) return
       const changed = moved.column !== openColumn.current
       openColumn.current = moved.column
-      openShort.current = moved.short
       setTicket(moved)
       if (changed) void loadTalk(moved)
     },
 
+    // Which sessions are running: the server's word, not a count of the steps
+    // this tab happened to see. A session that ended leaves the list here.
+    sessions: (event: SessionsEvent) => catchUp(event.sessions ?? []),
+
     step: (event: StepEvent) => {
       const line: Step = { label: event.label, detail: event.detail }
-      setSessions((current) => {
-        const found = current.findIndex((item) => item.source === event.source)
-        if (found < 0) return [{ source: event.source, steps: [line] }, ...current]
-        const kept = [...current]
-        kept[found] = {
-          ...kept[found],
-          steps: [...kept[found].steps, line].slice(-KEPT),
-        }
-        return kept
-      })
-      // The same step, in the terminal of the ticket it belongs to — so that
-      // reading a ticket and watching it work are one place rather than two.
-      if (event.source === openShort.current)
-        setTicketSteps((steps) => [...steps, line].slice(-KEPT))
+      setSteps((current) => ({
+        ...current,
+        [event.source]: [...(current[event.source] ?? []), line].slice(-KEPT),
+      }))
     },
 
     chat: (event: ChatEvent) => {
@@ -317,17 +373,20 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
 
   /* -- what a click does ---------------------------------------------------- */
 
+  /** Says whether the line was taken, so the field is emptied only then. */
   const submit = React.useCallback(
     async (text: string) => {
       const line = text.trim()
-      if (!line) return
+      if (!line) return false
       try {
         if (line.trimStart().startsWith(">"))
           await api.command(line.replace(/^\s*>/, ""))
         else await api.send(line)
+        return true
       } catch (error) {
         say("error", why(error))
         setBusy(false)
+        return false
       }
     },
     [say]
@@ -360,20 +419,21 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     await api.tell(id, text.trim())
   }, [])
 
-  const move = React.useCallback(
-    async (target: Ticket, column: string) => {
-      // The card moves now; the board event that follows the write agrees.
-      patchTicket(target.id, { column: column as Ticket["column"] })
-      try {
-        await api.setStatus(target.id, column)
-      } catch (error) {
-        toast.error(t("could not move “{{title}}”", { title: target.title }), {
-          description: why(error),
-        })
-      }
-    },
-    []
-  )
+  /* A gesture on a card. The card moves now, goes back if the write fails, and
+   * says where it went — a ticket put on hold lands in a column that is often
+   * off the screen, and a card that simply vanished reads as a card lost. */
+  const move = React.useCallback(async (target: Ticket, column: ColumnKey) => {
+    const name =
+      currentBoard()?.columns.find((item) => item.key === column)?.name || column
+    try {
+      if (await moveTicket(target.id, column))
+        toast.success(t("“{{title}}” moved to {{column}}", { title: target.title, column: name }))
+    } catch (error) {
+      toast.error(t("could not move “{{title}}”", { title: target.title }), {
+        description: why(error),
+      })
+    }
+  }, [])
 
   const createTicket = React.useCallback(
     async (fresh: { title: string; body: string; project: string; ready: boolean }) => {
@@ -384,7 +444,9 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   )
 
   const refresh = React.useCallback(() => {
-    void api.refresh().catch(() => {})
+    api.refresh().catch((error) => {
+      toast.error(t("The board could not be read again"), { description: why(error) })
+    })
   }, [])
 
   /* -- opening -------------------------------------------------------------- */
@@ -420,32 +482,76 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
       .catch(() => {})
   }, [reloadState, say])
 
-  const value: ConsoleValue = {
-    connection,
-    board,
-    runner,
-    projects,
-    transcript,
-    busy,
-    sessions,
-    ticket,
-    talk,
-    mention,
-    ticketSteps,
-    talkLoading,
-    openTicket,
-    closeTicket,
-    rereadTalk,
-    tell,
-    submit,
-    resetChat,
-    move,
-    createTicket,
-    refresh,
-    runCommand,
-    reloadState,
-    say,
-  }
+  const value = React.useMemo<ConsoleValue>(
+    () => ({
+      board,
+      runner,
+      projects,
+      transcript,
+      busy,
+      ticket,
+      talk,
+      mention,
+      talkLoading,
+      openTicket,
+      closeTicket,
+      rereadTalk,
+      tell,
+      submit,
+      resetChat,
+      move,
+      createTicket,
+      refresh,
+      runCommand,
+      reloadState,
+      say,
+    }),
+    [
+      board,
+      runner,
+      projects,
+      transcript,
+      busy,
+      ticket,
+      talk,
+      mention,
+      talkLoading,
+      openTicket,
+      closeTicket,
+      rereadTalk,
+      tell,
+      submit,
+      resetChat,
+      move,
+      createTicket,
+      refresh,
+      runCommand,
+      reloadState,
+      say,
+    ]
+  )
 
-  return <Context.Provider value={value}>{children}</Context.Provider>
+  const status = React.useMemo<StatusValue>(() => ({ connection, running }), [connection, running])
+
+  const openShort = ticket?.short ?? ""
+  const live = React.useMemo<StepsValue>(
+    () => ({
+      sessions: running.map((session) => ({
+        source: session.source,
+        steps: steps[session.source] ?? [],
+      })),
+      // Kept after the session ends: the open ticket's terminal shows how the
+      // run it just finished went, until another ticket is opened.
+      ticketSteps: openShort ? (steps[openShort] ?? []) : [],
+    }),
+    [running, steps, openShort]
+  )
+
+  return (
+    <StatusContext.Provider value={status}>
+      <StepsContext.Provider value={live}>
+        <Context.Provider value={value}>{children}</Context.Provider>
+      </StepsContext.Provider>
+    </StatusContext.Provider>
+  )
 }

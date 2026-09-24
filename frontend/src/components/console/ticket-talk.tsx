@@ -2,7 +2,7 @@ import * as React from "react"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { useConsole } from "@/hooks/use-console"
+import { useConsole, useSteps } from "@/hooks/use-console"
 import { why } from "@/lib/api"
 import { currentLanguage, t as translate, useT } from "@/lib/i18n"
 
@@ -30,7 +30,8 @@ function moment(at?: string): string {
  * the same words typed into Notion do the same.
  */
 export function TicketTalk() {
-  const { ticket, talk, mention, ticketSteps, tell, rereadTalk, talkLoading } = useConsole()
+  const { ticket, talk, mention, tell, rereadTalk, talkLoading } = useConsole()
+  const { ticketSteps } = useSteps()
   const t = useT()
   const [text, setText] = React.useState("")
   const [sending, setSending] = React.useState(false)
@@ -55,7 +56,7 @@ export function TicketTalk() {
       {/* Room at the right for the drawer's own close, which floats over this
           corner: a heading that ran under it would be a heading with a cross
           in the middle of it. */}
-      <div className="border-b py-2.5 pr-10 pl-3.5">
+      <div className="border-b py-2.5 pr-12 pl-3.5">
         <Eyebrow>{t("the ticket")}</Eyebrow>
         <h3 className="mt-1 text-base leading-tight font-semibold tracking-[-0.01em]">
           {ticket ? (
