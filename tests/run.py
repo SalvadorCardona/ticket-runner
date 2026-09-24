@@ -1882,6 +1882,42 @@ def a_deep_link_survives_a_round_trip():
 
 
 @case
+def a_prompt_too_long_for_an_argument_reaches_the_session_on_stdin():
+    """Linux refuses one argument over 128 KiB before the process exists, and a
+    ticket with a long brief, its discussion and the standing context gets
+    there. Past `ARGUMENT_LIMIT` the prompt is piped; below it nothing changes."""
+    with tempfile.TemporaryDirectory() as directory:
+        home = Path(directory)
+        seen = home / "seen.json"
+        (home / "claude").write_text(
+            "#!" + sys.executable + "\n"
+            "import json, sys\n"
+            "args = sys.argv[1:]\n"
+            "last = args[-1]\n"
+            "argued = not last.startswith('-') and last not in ('bypassPermissions', 'stream-json')\n"
+            "prompt = last if argued else sys.stdin.read()\n"
+            f"open({str(seen)!r}, 'w').write(json.dumps({{'argued': argued, 'size': len(prompt)}}))\n"
+            "print(json.dumps({'type': 'result', 'result': 'RESULT: ok', 'session_id': 's'}))\n"
+        )
+        (home / "claude").chmod(0o755)
+        previous = os.environ["PATH"]
+        os.environ["PATH"] = f"{home}{os.pathsep}{previous}"
+        try:
+            outcome = session.run(
+                "x" * (session.ARGUMENT_LIMIT * 3), cwd=home, log=home / "long.jsonl",
+                timeout_minutes=1,
+            )
+            long = json.loads(seen.read_text())
+            session.run("a short brief", cwd=home, log=home / "short.jsonl", timeout_minutes=1)
+            short = json.loads(seen.read_text())
+        finally:
+            os.environ["PATH"] = previous
+    assert outcome.ok, outcome.error
+    assert long == {"argued": False, "size": session.ARGUMENT_LIMIT * 3}, long
+    assert short == {"argued": True, "size": len("a short brief")}, short
+
+
+@case
 def a_link_cannot_slip_an_option_into_ssh_or_claude():
     """A link is something anybody can paste into a cell, and a click runs it.
 

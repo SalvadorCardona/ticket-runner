@@ -411,7 +411,19 @@ import json, os, subprocess, sys
 from pathlib import Path
 
 args = sys.argv[1:]
-prompt = args[-1] if args else ""
+# The prompt is the one word that is neither an option nor an option's value —
+# and when there is none, `--print` reads it from stdin, which is where the
+# runner sends a prompt too long to be an argument.
+VALUED = {"--session-id", "--resume", "--output-format", "--permission-mode", "--model"}
+words, skip = [], False
+for word in args:
+    if skip:
+        skip = False
+    elif word in VALUED:
+        skip = True
+    elif not word.startswith("--"):
+        words.append(word)
+prompt = words[-1] if words else sys.stdin.read()
 session = args[args.index("--session-id") + 1] if "--session-id" in args else ""
 
 log = os.environ.get("FAKE_CLAUDE_LOG")

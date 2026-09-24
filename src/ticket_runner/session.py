@@ -66,6 +66,15 @@ _LOST = re.compile(
 )
 
 
+# Past this, the prompt goes to the session on its standard input rather than
+# as its last argument. Linux refuses any single argument over 128 KiB
+# (MAX_ARG_STRLEN) with E2BIG, before the session exists — and a ticket with a
+# long brief, a long discussion and the standing context gets there. `--print`
+# reads its prompt from stdin when it is given none, so the long ones take that
+# road; the short ones keep the argument, which is what every session did.
+ARGUMENT_LIMIT = 100_000  # bytes, well under the kernel's 131072
+
+
 def available() -> str:
     return shutil.which("claude") or ""
 
@@ -129,7 +138,9 @@ def run(
     ]
     if model:
         command += ["--model", model]
-    command.append(prompt)
+    piped = len(prompt.encode("utf-8")) > ARGUMENT_LIMIT
+    if not piped:
+        command.append(prompt)
 
     # What the caller adds comes last: an OpenRouter key configured for the
     # runner is meant to win over one that happens to be in this shell. See
@@ -155,7 +166,17 @@ def run(
             bufsize=1,
             env=inherited,
             start_new_session=True,  # its own process group, so we can kill it all
+            # Only a piped prompt changes what the session reads: every other
+            # one inherits stdin, exactly as before.
+            stdin=subprocess.PIPE if piped else None,
         )
+        if piped:
+            # From a thread: a prompt larger than the pipe's buffer would block
+            # this write until the session reads it, while the session may be
+            # waiting for us to read what it has already written.
+            threading.Thread(
+                target=_feed, args=(process, prompt), name="tr-prompt", daemon=True
+            ).start()
 
         timed_out = threading.Event()
 
@@ -403,6 +424,15 @@ def open_link(uri: str) -> int:
     raise FileNotFoundError(
         "no terminal emulator found — set TICKET_RUNNER_TERMINAL to the one you use"
     )
+
+
+def _feed(process: subprocess.Popen, prompt: str) -> None:
+    """Hand the prompt to the session on stdin, then close it: that is the end."""
+    try:
+        process.stdin.write(prompt)  # type: ignore[union-attr]
+        process.stdin.close()  # type: ignore[union-attr]
+    except (BrokenPipeError, OSError, ValueError):
+        pass  # the session died first; what it said on the way out is the story
 
 
 def _verdict(answer: str) -> str:
