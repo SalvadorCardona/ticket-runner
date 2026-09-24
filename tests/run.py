@@ -1924,6 +1924,134 @@ def a_link_cannot_slip_an_option_into_ssh_or_claude():
 # -- Notion encoding ---------------------------------------------------------
 
 
+@contextmanager
+def _notion_answering(*answers):
+    """Notion's transport replaced by a script: each call takes the next answer.
+
+    An answer is a dict (the JSON Notion returns) or an exception to raise, the
+    way `urlopen` raises it. Yields the calls made, as (method, path), and the
+    pauses taken between them — none of which are slept for real.
+    """
+    import urllib.error
+    import urllib.request
+
+    calls: list[tuple[str, str]] = []
+    pauses: list[float] = []
+    queue = list(answers)
+
+    class _Response:
+        def __init__(self, body: dict) -> None:
+            self._body = json.dumps(body).encode()
+
+        def read(self) -> bytes:
+            return self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc) -> None:
+            return None
+
+    def urlopen(request, timeout=None):
+        calls.append((request.get_method(), request.full_url.split("/v1", 1)[-1]))
+        answer = queue.pop(0)
+        if isinstance(answer, BaseException):
+            raise answer
+        return _Response(answer)
+
+    original_open, original_sleep = urllib.request.urlopen, notion.time.sleep
+    notion.urllib.request.urlopen = urlopen
+    notion.time.sleep = pauses.append
+    try:
+        yield calls, pauses
+    finally:
+        notion.urllib.request.urlopen = original_open
+        notion.time.sleep = original_sleep
+
+
+def _http_error(code: int, retry_after: str = ""):
+    import email.message
+    import urllib.error
+
+    headers = email.message.Message()
+    if retry_after:
+        headers["Retry-After"] = retry_after
+    body = io.BytesIO(json.dumps({"message": f"status {code}"}).encode())
+    return urllib.error.HTTPError("https://api.notion.com/v1/x", code, "no", headers, body)
+
+
+@case
+def a_read_that_times_out_is_asked_again_and_says_notion_when_it_gives_up():
+    """A timeout or a reset while reading used to escape as a bare OSError.
+
+    Nothing catches an OSError around a Notion call — `StoreError` is what the
+    runner is written to survive — so one slow answer took the whole pass down.
+    """
+    import urllib.error
+
+    client = notion.Client("ntn_x")
+    with _notion_answering(TimeoutError("timed out"), ConnectionResetError(104, "reset"),
+                           {"object": "page", "id": "p"}) as (calls, pauses):
+        assert client._request("GET", "/pages/p") == {"object": "page", "id": "p"}
+    assert len(calls) == 3 and len(pauses) == 2, (calls, pauses)
+
+    with _notion_answering(*[TimeoutError("timed out")] * notion.MAX_ATTEMPTS) as (calls, _):
+        try:
+            client._request("POST", "/databases/d/query", {})
+        except notion.NotionError as error:
+            assert "gave up" in str(error), error
+        else:
+            raise AssertionError("a Notion that never answers was taken for an answer")
+    assert len(calls) == notion.MAX_ATTEMPTS, "a query is a read, and is retried"
+
+    refused = urllib.error.URLError(ConnectionRefusedError(111, "refused"))
+    with _notion_answering(refused, {"results": []}) as (calls, _):
+        assert client._request("GET", "/users/me") == {"results": []}
+
+
+@case
+def a_comment_is_never_posted_twice_on_the_strength_of_a_silence():
+    """A write that may have landed is not sent again: a duplicate comment is
+    worse than an error. Only what Notion refused outright — a 429, or a
+    connection that never carried the request — is safe to send twice."""
+    import urllib.error
+
+    client = notion.Client("ntn_x")
+    for silence in (TimeoutError("timed out"), ConnectionResetError(104, "reset"), _http_error(502)):
+        with _notion_answering(silence, {"object": "comment"}) as (calls, _):
+            try:
+                client._request("POST", "/comments", {"rich_text": []})
+            except notion.NotionError:
+                pass
+            else:
+                raise AssertionError(f"{silence!r} was retried on a write")
+        assert calls == [("POST", "/comments")], (silence, calls)
+
+    refused = urllib.error.URLError(ConnectionRefusedError(111, "refused"))
+    with _notion_answering(refused, {"object": "comment"}) as (calls, _):
+        assert client._request("POST", "/comments", {}) == {"object": "comment"}
+    assert len(calls) == 2, "never sent is safe to send"
+
+    with _notion_answering(_http_error(429, retry_after="7"), {"object": "comment"}) as (calls, pauses):
+        assert client._request("POST", "/comments", {}) == {"object": "comment"}
+    assert len(calls) == 2 and pauses == [7.0], (calls, pauses)
+
+    with _notion_answering(_http_error(429, retry_after="86400"), {}) as (_, pauses):
+        client._request("GET", "/users/me")
+    assert pauses == [notion.LONGEST_WAIT], "a day is not a pause, it is a refusal"
+
+    with _notion_answering(TimeoutError("timed out"), {}) as (calls, _):
+        try:
+            client._request("PATCH", "/blocks/b/children", {"children": []})
+        except notion.NotionError:
+            pass
+    assert len(calls) == 1, "appending blocks twice is two copies of them"
+
+    with _notion_answering(_http_error(503), {"id": "p"}) as (calls, _):
+        client._request("PATCH", "/pages/p", {"properties": {}})
+    assert len(calls) == 2, "setting a value twice is setting it once"
+
+
 @case
 def the_api_is_notions_unless_a_test_says_otherwise():
     """The one seam `tests/functional.py` needs, and what it must not become.

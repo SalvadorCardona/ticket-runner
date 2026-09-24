@@ -46,6 +46,36 @@ def endpoint() -> str:
     return os.environ.get(API_ENV, "").strip().rstrip("/") or API
 
 
+# Past this, a Retry-After is not a pause, it is Notion saying "not today": the
+# run moves on and the next one asks again.
+LONGEST_WAIT = 60
+
+
+def _replayable(method: str, path: str) -> bool:
+    """May this request be sent again after it may already have been carried out?
+
+    A read, yes, and the two reads Notion spells as a POST — a database query and
+    a search. A write that sets a value, too: setting it twice is setting it
+    once. What *adds* something — a page, a comment, blocks appended to a page —
+    is not: the second copy is a duplicate somebody has to delete by hand.
+    """
+    if method in ("GET", "DELETE"):
+        return True
+    if method == "POST":
+        return path.endswith("/query") or path == "/search"
+    if method == "PATCH":
+        return not path.endswith("/children")
+    return False
+
+
+def _retry_after(error: urllib.error.HTTPError) -> float:
+    """What a 429 asks us to wait, in seconds — bounded, and 0 when unsaid."""
+    try:
+        return min(float(error.headers.get("Retry-After", "") or 0), LONGEST_WAIT)
+    except (TypeError, ValueError, AttributeError):
+        return 0.0
+
+
 class NotionError(StoreError):
     """The API returned an error, or the network is unreachable."""
 
@@ -73,28 +103,54 @@ class Client:
             },
         )
         last = ""
+        replayable = _replayable(method, path)
         for attempt in range(MAX_ATTEMPTS):
+            wait = 1.5 * (attempt + 1)
             try:
                 with urllib.request.urlopen(request, timeout=self._timeout) as response:
                     return json.loads(response.read() or b"{}")
             except urllib.error.HTTPError as error:
-                payload = error.read().decode(errors="replace")
+                # First: an HTTPError is a URLError, which is an OSError.
+                try:
+                    payload = error.read().decode(errors="replace")
+                except OSError:
+                    payload = ""  # the status says enough; its body timed out
                 message = payload
                 try:
                     message = json.loads(payload).get("message", payload)
                 except json.JSONDecodeError:
                     pass
                 last = f"{error.code} {message}"
-                # 429: rate limited. 5xx: transient. Anything else is our fault.
-                if error.code not in (429, 500, 502, 503, 504):
+                if error.code == 429:
+                    # Refused before anything was done, whatever the method:
+                    # always worth the wait Notion asks for.
+                    wait = max(wait, _retry_after(error))
+                elif error.code in (500, 502, 503, 504) and replayable:
+                    pass
+                else:
+                    # Anything else is our fault — or a 5xx on a write, which
+                    # Notion may have carried out before failing to say so.
                     raise NotionError(f"{method} {path}: {last}") from error
             except urllib.error.URLError as error:
+                # Raised while connecting or sending: the request never reached
+                # Notion whole, so even a comment is safe to send again.
                 last = str(error.reason)
-            except (http.client.HTTPException, ValueError) as error:
+            except (ValueError, http.client.InvalidURL) as error:
                 # A malformed path never becomes valid by retrying — most often
-                # a configuration value that is not what it claims to be.
+                # a configuration value that is not what it claims to be. And
+                # an answer that is not JSON is not going to become JSON either.
                 raise NotionError(f"{method} {path}: {error}") from error
-            time.sleep(1.5 * (attempt + 1))
+            except (OSError, http.client.HTTPException) as error:
+                # Raised while *reading* the answer — a timeout, a reset, a
+                # connection closed halfway. The request may have been carried
+                # out, and a second comment is worse than an error.
+                last = f"{type(error).__name__}: {error}" if str(error) else type(error).__name__
+                if not replayable:
+                    raise NotionError(
+                        f"{method} {path}: {last} — not retried, it may have been applied"
+                    ) from error
+            if attempt < MAX_ATTEMPTS - 1:
+                time.sleep(wait)
         raise NotionError(f"{method} {path}: {last} (gave up after {MAX_ATTEMPTS} attempts)")
 
     # -- reading -------------------------------------------------------------
