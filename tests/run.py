@@ -114,6 +114,12 @@ def remotes_normalise_to_owner_and_name():
         "ssh://git@github.com/SalvadorCardona/trader-ia.git",
     ):
         assert _normalise(url) == "salvadorcardona/trader-ia", url
+        # One reading of a reference, shared: the owner the account is chosen
+        # by is the owner the project index files the clone under.
+        from ticket_runner import git as git_module
+
+        assert git_module.owner(url) == _normalise(url).split("/")[0], url
+    assert _normalise("SalvadorCardona/trader-ia") == "salvadorcardona/trader-ia"
 
 
 class _ProjectClient:

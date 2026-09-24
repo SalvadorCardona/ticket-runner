@@ -39,7 +39,6 @@ was tried and why it failed in a comment.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -77,12 +76,7 @@ class Project:
 
 def _normalise(url: str) -> str:
     """git@github.com:user/repo.git and https://github.com/user/repo → user/repo."""
-    url = url.strip().removesuffix(".git")
-    url = re.sub(r"^[a-z]+://", "", url)
-    url = re.sub(r"^[^@/]+@", "", url)
-    url = url.replace(":", "/", 1) if "@" not in url and ":" in url else url
-    parts = [part for part in url.split("/") if part]
-    return "/".join(parts[-2:]).lower() if len(parts) >= 2 else url.lower()
+    return "/".join(git.reference_parts(url)[-2:]).lower()
 
 
 def _property(page: store.Page, *names: str) -> object:

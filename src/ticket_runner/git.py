@@ -125,16 +125,27 @@ _TOKENS: dict[str, tuple[str, float]] = {}
 FAILED_TOKEN_SECONDS = 60
 
 
+def reference_parts(reference: str) -> list[str]:
+    """A repository reference cut into its path, the host first when it has one.
+
+    The one reading of the shapes the runner holds — the `origin` of a clone
+    (`git@github.com:owner/name.git`), the URL of a pull request, and what a
+    project page declares (`owner/name`) — shared by `owner` and by the project
+    index, so that the two can never disagree about where a name starts.
+    """
+    text = str(reference).strip().removesuffix(".git")
+    text = re.sub(r"^[a-z]+://", "", text)  # https://github.com/owner/name
+    text = re.sub(r"^[^@/]+@", "", text)  # git@github.com:owner/name
+    return [part for part in text.replace(":", "/", 1).split("/") if part]
+
+
 def owner(reference: str) -> str:
     """Who a repository belongs to, from a URL, a remote or `owner/name`.
 
     The three shapes the runner actually holds: the `origin` of a clone, the
     URL of a pull request, and what a project page declares.
     """
-    text = str(reference).strip().removesuffix(".git")
-    text = re.sub(r"^[a-z]+://", "", text)  # https://github.com/owner/name
-    text = re.sub(r"^[^@/]+@", "", text)  # git@github.com:owner/name
-    parts = [part for part in text.replace(":", "/", 1).split("/") if part]
+    parts = reference_parts(reference)
     if len(parts) < 2:
         return ""
     # A host is the part with a dot in it; `owner/name` has none.
