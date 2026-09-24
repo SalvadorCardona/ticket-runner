@@ -6947,8 +6947,11 @@ def a_gh_call_about_a_repository_carries_that_account_and_nothing_else():
         seen.append({"args": list(args), "env": env})
         return _Done()
 
-    original = git_module.subprocess.run
+    # `gh` is looked for before it is asked anything: a machine without it —
+    # a CI runner, most of all — would otherwise skip the very call under test.
+    original, original_which = git_module.subprocess.run, git_module.shutil.which
     git_module.subprocess.run = fake
+    git_module.shutil.which = lambda name, *rest, **kept: f"/usr/bin/{name}"
     try:
         with _git_answering(account_token=lambda account: "gho-secret"):
             git_module.pull_request_state(
@@ -6957,6 +6960,7 @@ def a_gh_call_about_a_repository_carries_that_account_and_nothing_else():
             git_module.pull_request_state("https://github.com/x/y/pull/3", {})
     finally:
         git_module.subprocess.run = original
+        git_module.shutil.which = original_which
 
     assert seen[0]["env"]["GH_TOKEN"] == "gho-secret"
     assert seen[0]["env"]["GITHUB_TOKEN"] == "gho-secret"
