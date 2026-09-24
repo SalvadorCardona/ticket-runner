@@ -1,6 +1,17 @@
 import * as React from "react"
 import { ExternalLink } from "lucide-react"
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { useConsole } from "@/hooks/use-console"
 import { currentLanguage, t, useT } from "@/lib/i18n"
@@ -22,7 +33,7 @@ export const LABEL: Record<string, string> = {
   blocked: "Blocked",
   failed: "Failed",
   done: "Done",
-  other: "Elsewhere",
+  other: "No status",
 }
 
 /** The colour of a column, on the left edge of a card. */
@@ -193,42 +204,111 @@ export function TicketFoot({ ticket }: { ticket: Ticket }) {
   )
 }
 
-/** The gestures a ticket offers where it stands, or nothing at all where it offers none. */
+/* A gesture that costs something once it is made — a pull request merged, a
+ * paid session started — asked for twice: once on the card, once in a dialog
+ * that says what is about to happen. The others are one click, because moving
+ * a card back is one click too. */
+function Confirmed({
+  label,
+  title,
+  body,
+  confirm,
+  onConfirm,
+  className,
+}: {
+  label: string
+  title: string
+  body: string
+  confirm: string
+  onConfirm: () => void
+  className?: string
+}) {
+  const t = useT()
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button variant="outline" size="sm" className={className}>
+          {label}
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription>{body}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t("Cancel")}</AlertDialogCancel>
+          <AlertDialogAction onClick={onConfirm}>{confirm}</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
+/** The gestures a ticket offers where it stands, or nothing at all where it offers none.
+ *
+ * Drawn as buttons — an outline, 32 pixels high — rather than as grey words:
+ * a card's gestures are the one thing on it you act on, and they read as text
+ * you could not click. Where a gesture moves the ticket, it names the column
+ * it moves it to in the board's own word, and the toast that follows says the
+ * same: "hold" used to drop a card into Blocked, off the screen, unsaid.
+ */
 export function TicketActions({ ticket, className }: { ticket: Ticket; className?: string }) {
   const { move, board } = useConsole()
   const t = useT()
-  const quiet = "text-muted-foreground hover:text-foreground"
   // A ticket the runner has in hand is not one you move: drawing an empty row
   // for it would leave a gap on the card where the gestures would have been.
   if (ticket.column === "running") return null
+  const named = (key: string) =>
+    board.columns.find((column) => column.key === key)?.name || t(LABEL[key] ?? key)
   return (
-    <div className={cn("flex flex-wrap items-center gap-x-1 gap-y-1", className)}>
-      {ticket.column !== "ready" ? (
-        <Button variant="ghost" size="xs" className={quiet} onClick={() => move(ticket, "ready")}>
-          {ticket.column === "review" ? t("run again") : t("make ready")}
+    <div className={cn("flex flex-wrap items-center gap-1.5", className)}>
+      {ticket.column === "review" ? (
+        <Confirmed
+          label={t("run again")}
+          title={t("Run “{{title}}” again?", { title: ticket.title })}
+          body={t(
+            "The ticket goes back to {{column}} and the next pass starts a new session on it — a session that is paid for, like the first one.",
+            { column: named("ready") }
+          )}
+          confirm={t("Run it again")}
+          onConfirm={() => void move(ticket, "ready")}
+        />
+      ) : ticket.column !== "ready" ? (
+        <Button variant="outline" size="sm" onClick={() => void move(ticket, "ready")}>
+          {t("make ready")}
         </Button>
       ) : null}
       {/* Validating is the gesture the runner acts on — it merges the pull
           request, or publishes what the ticket holds — where "done" only files
           the ticket away yourself. Offered only on a board that has the column. */}
       {ticket.column === "review" && board.validate ? (
-        <Button
-          variant="ghost"
-          size="xs"
+        <Confirmed
+          label={t("validate")}
           className="text-tr-pink hover:text-tr-pink"
-          onClick={() => move(ticket, "validated")}
-        >
-          {t("validate")}
-        </Button>
+          title={t("Validate “{{title}}”?", { title: ticket.title })}
+          body={
+            ticket.pull_request
+              ? t("The runner merges its pull request on its next pass. A merge is not taken back from here.")
+              : t("The runner publishes what the ticket holds on its next pass.")
+          }
+          confirm={t("Validate")}
+          onConfirm={() => void move(ticket, "validated")}
+        />
       ) : null}
       {ticket.column === "review" ? (
-        <Button variant="ghost" size="xs" className={quiet} onClick={() => move(ticket, "done")}>
+        <Button variant="outline" size="sm" onClick={() => void move(ticket, "done")}>
           {t("done")}
         </Button>
       ) : null}
       {ticket.column === "ready" ? (
-        <Button variant="ghost" size="xs" className={quiet} onClick={() => move(ticket, "blocked")}>
-          {t("hold")}
+        <Button
+          variant="outline"
+          size="sm"
+          title={t("The runner leaves it alone until it is made ready again.")}
+          onClick={() => void move(ticket, "blocked")}
+        >
+          {t("hold → {{column}}", { column: named("blocked") })}
         </Button>
       ) : null}
     </div>

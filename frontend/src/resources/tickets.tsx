@@ -1,10 +1,11 @@
 import * as React from "react"
-import { LayoutGrid } from "lucide-react"
+import { ChevronLeft, ChevronRight, LayoutGrid } from "lucide-react"
 import {
   ActionList,
   BooleanInputController,
   SelectInputController,
   type FormInterface,
+  type InputControllerComponentInterface,
 } from "react-data-form"
 import {
   Link,
@@ -31,9 +32,12 @@ import {
   lasted,
   when,
 } from "@/components/console/ticket-bits"
+import { EmptyState } from "@/components/console/empty-state"
 import { TicketPage } from "@/components/console/ticket-page"
-import { api } from "@/lib/api"
-import { addTicket, boardOnce, currentBoard, patchTicket, subscribeBoard, useBoard } from "@/lib/board-store"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { api, why } from "@/lib/api"
+import { addTicket, boardOnce, currentBoard, moveTicket, subscribeBoard, useBoard } from "@/lib/board-store"
 import { t } from "@/lib/i18n"
 import { SCOPE, layoutOf, useLayoutInTheAddress } from "@/lib/resource-view"
 import type { ColumnKey, Ticket, TicketDetail } from "@/lib/types"
@@ -50,6 +54,10 @@ import { cn } from "@/lib/utils"
  */
 
 export const TICKETS = "tickets"
+
+/** Why the last ticket asked for could not be read, as the server said it. */
+let ticketProblem = ""
+export const lastTicketProblem = () => ticketProblem
 
 /** A ticket as the views hold it: the row, and an IRI so the package can address it. */
 export type TicketItem = Ticket & {
@@ -91,6 +99,47 @@ export function columnName(key: string): string {
 }
 
 /* -- the forms ------------------------------------------------------------ */
+
+/* The title, as a field that knows when it is wrong.
+ *
+ * The package's own text field draws the sentence under a refused field but
+ * never marks the field itself, so a screen reader heard "Title, required" and
+ * nothing more. Same box, with `aria-invalid` while the form holds a violation
+ * for it, and the sentence tied to it. */
+const TitleInputController: InputControllerComponentInterface = ({ formInput, onChange }) => {
+  const invalid = Boolean(formInput.violations?.length)
+  const id = formInput.id ?? "field-title"
+  return (
+    <>
+      <Input
+        id={id}
+        name={formInput.name}
+        defaultValue={String(formInput.value ?? "")}
+        onChange={(event) => onChange({ ...formInput, value: event.target.value, violations: [] })}
+        placeholder={t(formInput.placeholder ?? "")}
+        required
+        autoComplete="off"
+        aria-invalid={invalid || undefined}
+        aria-errormessage={invalid ? `${id}-problem` : undefined}
+      />
+      {invalid ? (
+        <span id={`${id}-problem`} className="sr-only">
+          {formInput.violations?.map((violation) => violation.message).join(" ")}
+        </span>
+      ) : null}
+    </>
+  )
+}
+
+/** A refusal about one field, in the shape the form draws under that field. */
+class FieldProblem extends Error {
+  readonly data: { error: string; violations: { propertyPath: string; message: string }[] }
+
+  constructor(field: string, message: string) {
+    super(message)
+    this.data = { error: message, violations: [{ propertyPath: field, message }] }
+  }
+}
 /* What a new ticket asks for. Drawn by react-data-form, submitted to
  * `createItem`.
  *
@@ -110,7 +159,11 @@ const createForm: FormInterface = {
         return t("What has to be done, in one line. It is what the board shows.")
       },
       required: true,
-      placeholder: "Retirer le bandeau du dashboard",
+      // An example, and a key: the package reads the placeholder through the
+      // dictionary as it draws the field. It used to be French in every
+      // language.
+      placeholder: "Remove the banner from the dashboard",
+      controller: TitleInputController,
     },
     body: {
       label: "The brief",
@@ -249,9 +302,9 @@ function BoardTop() {
  * one is already at the top of the page. */
 function NoTicket() {
   return (
-    <p className="text-muted-foreground rounded-lg border border-dashed px-3 py-6 text-center text-sm">
+    <EmptyState icon={LayoutGrid}>
       {t("Nothing on the board yet — a ticket moved to the ready column is a session that starts.")}
-    </p>
+    </EmptyState>
   )
 }
 
@@ -266,10 +319,38 @@ function heading(key: string, name: string) {
   )
 }
 
-/** The board's columns, in the board's order and words, each a drop target. */
+/** The board's columns, in the board's order and words, each a drop target.
+ *
+ * Seven columns do not fit a laptop, and the board used to show four of them
+ * with nothing to say there were three more. The columns are narrower now, the
+ * strip snaps to a column's edge, and each end that has more beyond it says so
+ * — a fade, and a button that scrolls one screen further. */
 function BoardColumns({ rows = [] }: ListComponentPropsInterface) {
   const board = useBoard()
   const [dragging, setDragging] = React.useState(false)
+  const strip = React.useRef<HTMLDivElement>(null)
+  const [more, setMore] = React.useState({ left: false, right: false })
+
+  const measure = React.useCallback(() => {
+    const element = strip.current
+    if (!element) return
+    const left = element.scrollLeft > 4
+    const right = element.scrollLeft + element.clientWidth < element.scrollWidth - 4
+    setMore((was) => (was.left === left && was.right === right ? was : { left, right }))
+  }, [])
+
+  React.useEffect(() => {
+    const element = strip.current
+    if (!element) return
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    for (const child of Array.from(element.children)) observer.observe(child)
+    return () => observer.disconnect()
+  }, [measure, board.columns.length, rows.length])
+
+  const scroll = (direction: 1 | -1) =>
+    strip.current?.scrollBy({ left: direction * strip.current.clientWidth * 0.8, behavior: "smooth" })
 
   const columns = board.columns.filter(
     (column) =>
@@ -280,20 +361,52 @@ function BoardColumns({ rows = [] }: ListComponentPropsInterface) {
   )
 
   return (
-    <div className="scroll-thin flex items-start gap-3 overflow-x-auto pb-2">
-      {columns.map((column) => (
-        <RowWrapperColumnComponent
-          key={column.key}
-          identifierKey="column"
-          valueIdentifier={{
-            value: column.key,
-            label: heading(column.key, column.name || t(LABEL[column.key] ?? "")),
-          }}
-          isDragging={dragging}
-          handleDragging={setDragging}
-          rows={rows}
-        />
-      ))}
+    <div className="relative">
+      <div
+        ref={strip}
+        onScroll={measure}
+        className="scroll-thin flex snap-x snap-mandatory items-start gap-3 overflow-x-auto scroll-smooth pb-2 [&>*]:w-[14rem] [&>*]:min-w-[14rem] [&>*]:shrink-0 [&>*]:snap-start"
+      >
+        {columns.map((column) => (
+          <RowWrapperColumnComponent
+            key={column.key}
+            identifierKey="column"
+            valueIdentifier={{
+              value: column.key,
+              label: heading(column.key, column.name || t(LABEL[column.key] ?? "")),
+            }}
+            isDragging={dragging}
+            handleDragging={setDragging}
+            rows={rows}
+          />
+        ))}
+      </div>
+      {more.left ? (
+        <div className="from-background pointer-events-none absolute inset-y-0 left-0 flex w-12 items-start bg-gradient-to-r to-transparent pt-1">
+          <Button
+            variant="outline"
+            size="icon-sm"
+            className="pointer-events-auto rounded-full shadow-sm"
+            aria-label={t("Earlier columns")}
+            onClick={() => scroll(-1)}
+          >
+            <ChevronLeft />
+          </Button>
+        </div>
+      ) : null}
+      {more.right ? (
+        <div className="from-background pointer-events-none absolute inset-y-0 right-0 flex w-12 items-start justify-end bg-gradient-to-l to-transparent pt-1">
+          <Button
+            variant="outline"
+            size="icon-sm"
+            className="pointer-events-auto rounded-full shadow-sm"
+            aria-label={t("More columns")}
+            onClick={() => scroll(1)}
+          >
+            <ChevronRight />
+          </Button>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -319,23 +432,33 @@ export const tickets = createViewResource<TicketItem, TicketItem, TicketWrite>(T
       data: createResourceCollection({ id: "/api/board", items: board.tickets.map(item) }),
     } as never
   },
-  getItem: async ({ id }) => ({ data: item(await api.ticket(String(id))) }),
+  getItem: async ({ id }) => {
+    // Kept for the page to say: the package only says *that* a read failed.
+    ticketProblem = ""
+    try {
+      return { data: item(await api.ticket(String(id))) }
+    } catch (error) {
+      ticketProblem = why(error)
+      throw error
+    }
+  },
   // A card dropped in a column is a status change, and nothing else about a
-  // ticket is written from the board.
+  // ticket is written from the board. The same move the buttons on a card
+  // make, put back where it was if the write fails.
   updateItem: async (patch) => {
     const id = String(patch.id)
     const column = patch.column as ColumnKey | undefined
     const before = currentBoard()?.tickets.find((ticket) => ticket.id === id)
-    if (column && before && column !== before.column) {
-      patchTicket(id, { column })
-      await api.setStatus(id, column)
-    }
+    if (column) await moveTicket(id, column)
     const after = currentBoard()?.tickets.find((ticket) => ticket.id === id) ?? before
     return { data: after ? item(after) : (patch as unknown as TicketItem) }
   },
   createItem: async (fresh) => {
+    const title = String(fresh.title ?? "").trim()
+    // Said under the field it is about, not only in a toast in the corner.
+    if (!title) throw new FieldProblem("title", t("A ticket needs a title."))
     const made = await api.createTicket({
-      title: String(fresh.title ?? ""),
+      title,
       body: String(fresh.body ?? ""),
       project: String(fresh.project ?? ""),
       ready: fresh.ready !== false,
