@@ -260,6 +260,26 @@ somebody cuts a release; see `.claude/skills/release/SKILL.md`.
 
 ### Fixed
 
+- **What an audit found, closed.** A `ticket-runner://` link could hand ssh an
+  option (`?host=-oProxyCommand=…`): the host and the session id are now checked
+  and ssh gets the host after `--`. The console no longer offers `run`, `update`
+  or `clean`, and a command that outlives its three minutes takes its whole
+  process group with it. `clean --force` takes the run lock and never acts on a
+  repository that does not list the directory as its worktree. The run lock is
+  never deleted nor emptied before it is held; the state files are written
+  whole; the console's token, the copies of the configuration, the session logs
+  and the history are created private. Notion reads that time out are retried
+  and end as a Notion error, a `429` waits what it is told, and a write that may
+  have landed is never sent twice. A ticket that raises fails on its own instead
+  of ending the pass, and a git command past its timeout is a failed command. A
+  prompt too long for one argument reaches the session on stdin. And `serve`
+  starts on a fresh installation, token or not, as its first connection promised.
+
+- **Telegram and Slack can listen to named people only.** `allowed_users` in
+  `[notify.telegram]` and `[notify.slack]`; empty keeps the old behaviour, and
+  `ticket-runner doctor` warns about a group or a channel where anybody can
+  answer — an answer can wake a ticket.
+
 - **An update puts the console on the code it just installed.** A run is a
   process that ends, so the version that lands between two passes is the version
   the next pass runs. The console is not: it is started once and answers for

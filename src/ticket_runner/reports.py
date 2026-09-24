@@ -383,7 +383,12 @@ class Reports(Base):
                     f"    ✗ {ticket.title} — {detail}, and the failure could not be "
                     f"written: {voice_module.line(unwritten)}"
                 )
-                return {"ticket": ticket.title, "id": ticket.id, "status": "failed", "reason": detail}
+                return {
+                    "ticket": ticket.title,
+                    "id": ticket.id,
+                    "status": "failed",
+                    "reason": detail,
+                }
 
     def _filed(self, job: Job, outcome: session.Outcome, *rest: object) -> str:
         """The machinery of a failed run, put where it does not crowd the report.
