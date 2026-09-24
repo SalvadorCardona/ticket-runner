@@ -70,7 +70,7 @@ export function PageHead({
             </p>
           ) : null}
         </div>
-        {action ? <div className="flex shrink-0 items-center gap-2">{action}</div> : null}
+        {action ? <div className="flex max-w-full min-w-0 shrink-0 items-center gap-2">{action}</div> : null}
       </div>
       {children ? <div className="mt-4 flex flex-wrap items-center gap-2">{children}</div> : null}
     </div>

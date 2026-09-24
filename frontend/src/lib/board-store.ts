@@ -1,6 +1,7 @@
 import * as React from "react"
 
-import type { Board, Ticket } from "./types"
+import { api } from "./api"
+import type { Board, ColumnKey, Ticket } from "./types"
 
 /* The board, as the stream last said it.
  *
@@ -46,6 +47,24 @@ export function addTicket(ticket: Ticket) {
 }
 
 export const currentBoard = (): Board | null => board
+
+/* A card moved to another column: drawn there now, written, and put back where
+ * it was if the write fails. The one way a ticket changes column from the
+ * console — the buttons on a card and a card dropped on the board both come
+ * through here, so neither can leave a card standing in a column Notion never
+ * heard about. Says whether it moved anything. */
+export async function moveTicket(id: string, column: ColumnKey): Promise<boolean> {
+  const before = board?.tickets.find((ticket) => ticket.id === id)
+  if (before && before.column === column) return false
+  if (before) patchTicket(id, { column })
+  try {
+    await api.setStatus(id, column)
+  } catch (error) {
+    if (before) patchTicket(id, { column: before.column, status: before.status })
+    throw error
+  }
+  return true
+}
 
 /** The board, as soon as there is one. */
 export function boardOnce(): Promise<Board> {

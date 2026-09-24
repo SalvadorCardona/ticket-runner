@@ -31,7 +31,11 @@ export function Transcript({
     <MessageScrollerProvider autoScroll defaultScrollPosition="end">
       <MessageScroller className={cn("min-h-0 flex-1", className)}>
         <MessageScrollerViewport className="scroll-thin p-3.5">
-          <MessageScrollerContent className="gap-2">{children}</MessageScrollerContent>
+          {/* A log that grows while you read it: a screen reader is told what
+              arrives, when it is not busy saying something else. */}
+          <MessageScrollerContent className="gap-2" role="log" aria-live="polite">
+            {children}
+          </MessageScrollerContent>
         </MessageScrollerViewport>
         {/* The label said here rather than in `message-scroller.tsx`: that file
             is the component as shadcn writes it, and what it says by default is

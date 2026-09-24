@@ -73,7 +73,21 @@ export function TalkDrawer() {
         <TooltipContent side="left">{t("open {{pane}}", { pane: label })}</TooltipContent>
       </Tooltip>
 
-      <SheetContent side="right" className="w-full gap-0 sm:max-w-lg">
+      <SheetContent
+        side="right"
+        className="w-full gap-0 sm:max-w-lg"
+        closeLabel={t("Close")}
+        // Opened to say something: the cursor goes where the words go, not to
+        // the cross in the corner that the dialog would otherwise pick.
+        onOpenAutoFocus={(event) => {
+          const field = event.currentTarget instanceof HTMLElement
+            ? event.currentTarget.querySelector("textarea")
+            : null
+          if (!field || field.disabled) return
+          event.preventDefault()
+          field.focus()
+        }}
+      >
         {/* The pane under it opens with its own heading — which ticket, or
             which machine you are talking to — so the sheet's is for the
             readers who are told the page rather than shown it. */}

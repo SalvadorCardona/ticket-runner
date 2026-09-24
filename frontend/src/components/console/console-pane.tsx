@@ -6,7 +6,7 @@ import { useConsole } from "@/hooks/use-console"
 import { useT } from "@/lib/i18n"
 
 import { Eyebrow } from "./frame"
-import { Flow } from "./text"
+import { Flow, Rich } from "./text"
 import { Steps } from "./steps"
 import { Line, Transcript } from "./transcript"
 import { Turn } from "./turn"
@@ -21,11 +21,20 @@ export function ConsolePane() {
   const t = useT()
   const [text, setText] = React.useState("")
 
-  const send = () => {
-    if (!text.trim() || busy) return
+  const [sending, setSending] = React.useState(false)
+
+  // The field is emptied once the server has taken the line, not before: a
+  // message refused — the console restarting, a command it will not run — used
+  // to be gone from the field and nowhere else.
+  const send = async () => {
+    if (!text.trim() || busy || sending) return
     const line = text
-    setText("")
-    void submit(line)
+    setSending(true)
+    try {
+      if (await submit(line)) setText((current) => (current === line ? "" : current))
+    } finally {
+      setSending(false)
+    }
   }
 
   const hint = isCommand(text)
@@ -37,15 +46,19 @@ export function ConsolePane() {
       {/* Room at the right for the drawer's own close, which floats over this
           corner: a heading that ran under it would be a heading with a cross
           in the middle of it. */}
-      <div className="border-b py-2.5 pr-10 pl-3.5">
+      <div className="border-b py-2.5 pr-12 pl-3.5">
         <Eyebrow>{t("the workspace")}</Eyebrow>
         <h3 className="mt-1 text-base leading-tight font-semibold tracking-[-0.01em]">
           {t("Talking to your machine")}
         </h3>
         <p className="text-muted-foreground mt-1 text-xs">
-          {t("A sentence reaches your repositories and the board; a line that starts with")}{" "}
-          <code className="bg-muted rounded px-1 py-0.5 font-mono">&gt;</code>{" "}
-          {t("reaches the CLI.")}
+          {/* One sentence, one key: split around the `>` it was two halves
+              that a translation could not reorder. */}
+          <Rich
+            text={t(
+              "A sentence reaches your repositories and the board; a line that starts with `>` reaches the CLI."
+            )}
+          />
         </p>
       </div>
 
@@ -99,7 +112,7 @@ export function ConsolePane() {
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault()
-              send()
+              void send()
             }
           }}
           rows={1}
@@ -111,7 +124,7 @@ export function ConsolePane() {
           placeholder={t("Ask the workspace, or type >status")}
         />
         <div className="flex items-center gap-2">
-          <Button onClick={send} disabled={busy || !text.trim()}>
+          <Button onClick={() => void send()} disabled={busy || sending || !text.trim()}>
             {busy ? t("working…") : t("Send")}
           </Button>
           <Button variant="outline" onClick={resetChat} title={t("start a new conversation")}>

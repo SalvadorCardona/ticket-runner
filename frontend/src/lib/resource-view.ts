@@ -44,8 +44,12 @@ const ticketDialect: ApiDialectInterface = {
   getId: (item) => (item?.id as string | undefined) ?? undefined,
   getIdentifier: (item) => (item?.id as string | undefined) ?? undefined,
   normalizeError(payload, status) {
-    const said = (payload as { error?: string } | undefined)?.error
-    return { status, detail: said }
+    // `violations` is how a form is told which field a refusal is about: the
+    // message is then drawn under that field rather than only in a toast.
+    const said = payload as
+      | { error?: string; violations?: { propertyPath?: string; message?: string }[] }
+      | undefined
+    return { status, detail: said?.error, violations: said?.violations }
   },
   referencesAreIris: false,
 }

@@ -58,7 +58,9 @@
   --secondary: #f1f2ee;
   --secondary-foreground: #14161a;
   --muted: #f1f2ee;
-  --muted-foreground: #6b7280;
+  /* #6b7280 was 4.3:1 on the muted fill and 4.0:1 on a hovered row, under
+     the 4.5:1 an 11px label needs. This one is 4.8:1 on the darkest of them. */
+  --muted-foreground: #5f6573;
   --accent: #eceee8;
   --accent-foreground: #14161a;
   --destructive: #c8332a;
@@ -254,6 +256,21 @@
     white-space: normal;
     text-align: left;
     min-width: 0;
+  }
+
+  /* The package's tables keep every cell on one line, so a ticket's title is
+     as wide as its sentence: at 1440px the row outgrew the pane and pushed the
+     Open button off its right edge, and on a phone the title was the only
+     column on the screen. The first column — the one that is a sentence —
+     wraps instead. And the cell holding a row's buttons is written `flex`,
+     which takes it out of the table's own layout; the buttons are already in
+     a flex box of their own inside it. */
+  [data-slot="table-cell"]:first-child {
+    white-space: normal;
+    min-width: 10rem;
+  }
+  td[data-slot="table-cell"].flex {
+    display: table-cell;
   }
 
   /* Written twice, because it is two features. WebKit and Chrome take the

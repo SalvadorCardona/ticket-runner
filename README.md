@@ -1423,12 +1423,13 @@ Open `http://127.0.0.1:8787` and you get one page, four things:
 
 **The menu** down the left is where the pages live: a name each, and a count beside it
 where something is waiting there — how many tickets are on the board, how many sessions
-are writing right now. Nothing more; a sentence under every name is the page saying, in
-the smaller type, what the page itself says. `⌘B` — `Ctrl-B` — folds it to a rail of
+are writing right now — the sessions the server reads as running from their logs, so the
+count is right after a reload and drops when a session ends. `⌘B` — `Ctrl-B` — folds it to a rail of
 icons, each keeping its name in a tooltip; on a phone it is a drawer, and choosing
 something closes it. The fold is remembered in a cookie, so it opens the way you left it.
-At its foot sit the two things about the console itself: whether the event stream is up,
-and the version this one runs — in amber, with what to type, on the day a newer one is
+At its foot sit the two things about the console itself: whether the event stream is up —
+a stream the server refuses because the session expired sends the page back to the sign-in
+rather than saying *reconnecting…* forever — and the version this one runs — in amber, with what to type, on the day a newer one is
 waiting. Every page has an address — `/?view=console/tickets/list`, `/?page=live` — so a
 reload, a bookmark or a link pasted into a chat lands where you were.
 
@@ -1440,8 +1441,14 @@ you write behind *New ticket* is a page in the same database, with its brief as 
 Notion blocks. What the console adds is the part Notion cannot do — the running session's
 steps, live, read straight from the session log on disk rather than from the `Progress`
 column. A card in review carries a **validate** button, where the board has that column:
-one click and the next pass merges its pull request, or publishes what it holds. The
-*table* tab shows the same tickets as rows, one column per property.
+confirm it and the next pass merges its pull request, or publishes what it holds; *run
+again* asks the same way, since it starts a session that is paid for. A move that Notion
+refuses puts the card back where it was, and a gesture that sends a card off the screen —
+*hold*, into your *Blocked* column — says where it went. A ticket with no status, or one
+your board has not named, is not hidden: it gets a *No status* column of its own while
+there is one. Seven columns do not fit a laptop, so the board scrolls sideways, and each
+edge with more beyond it shows a fade and an arrow. The *table* tab shows the same tickets
+as rows, one column per property.
 
 **A card is a way in.** Click one and the ticket becomes a page: the brief you wrote, the
 report a run appended, the notes in between — the page under the card, as the runner
@@ -1532,7 +1539,9 @@ rather than living on the event stream — a schedule moves four times a day at 
 most, and a tab left open on the board has no business polling that database.
 
 **Settings** is `config.toml` drawn as a page — the same file, the same keys, and every one
-of them, from the Notion token down to what your board calls its *Blocked* column. It is
+of them, from the Notion token down to what your board calls its *Blocked* column. On a
+board kept in Markdown the Notion section comes last, since nothing reads it, and the
+example token the sample file ships with is shown as *not set* rather than as a token. It is
 still a file you can open in an editor: the console rereads it when it changes on disk, and
 what you save here keeps the comments that were around the line.
 
@@ -1561,9 +1570,9 @@ Three things it does that a form usually does not.
   rather than saved and silently changed.
 
 Each section carries the command that checks it — `> doctor` for Notion, `> notify` for
-Telegram and Slack, `> enable` to write a new interval into the systemd timer — because the
-CLI already knows how to say whether a token works, and a settings page does not need a
-second opinion. A setting that needs more than saving says so, once, and only when it moved.
+Telegram and Slack — because the CLI already knows how to say whether a token works, and a
+settings page does not need a second opinion. The commands that change the machine rather
+than read it — `run`, `update`, `enable`… — are the terminal's. A setting that needs more than saving says so, once, and only when it moved.
 
 **In English, or in French.** The console reads the browser before it says anything —
 `Accept-Language` is a setting somebody actually made — and where the browser says nothing
@@ -1572,7 +1581,8 @@ reads French. So there is nothing to choose, and the select at the top of *Setti
 console* is how you disagree with the guess. The choice is one line in
 `localStorage`, like the theme, and it holds for every page of the console: the menu, the
 board's own words, a ticket's page, and the settings tab down to the sentence under each
-field. What is *not* translated is what belongs to somebody else — a ticket's title and the
+field. The pages before the console — the first connection, the sign-in, the token — are
+drawn by the server and read `Accept-Language` the same way. What is *not* translated is what belongs to somebody else — a ticket's title and the
 columns of your board are Notion's, the output of `> status` is the CLI's, and a report a run
 wrote is in the language [`runner.language`](#4-the-rest-of-the-file) asked for.
 
@@ -1580,8 +1590,10 @@ wrote is in the language [`runner.language`](#4-the-rest-of-the-file) asked for.
 
 The page is a **React** application — TypeScript, [Vite](https://vite.dev) and
 [shadcn/ui](https://ui.shadcn.com) on Tailwind — and it lives in `frontend/`. What ships in
-the package is the *build*: `src/ticket_runner/web/static/` holds `index.html` and one
-`assets/console.js` and `assets/console.css`, and those are committed.
+the package is the *build*: `src/ticket_runner/web/static/` holds `index.html` and the
+files under `assets/` — `console.js` and `console.css`, and the chunks loaded only when a
+page asks for them (the Markdown editor is the largest) — and those are committed. Names
+carry no hash of the build's own; a chunk a dependency ships already named keeps its name.
 
 That is the whole arrangement, and it is deliberate. `install.sh` clones this repository
 onto a machine that has `python3` and `git`, and `ticket-runner serve` is `http.server` and

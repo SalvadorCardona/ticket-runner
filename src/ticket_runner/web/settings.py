@@ -579,9 +579,14 @@ def _fallback(config: Config, entry: Field) -> object:
 
 
 def _preview(secret: str) -> str:
-    """Enough of a token to recognise it by, and not enough to use it."""
+    """Enough of a token to recognise it by, and not enough to use it.
+
+    The example value `config.example.toml` ships with is no token at all: it
+    is where one goes. Saying "set · ends …xxxx" about it told somebody with a
+    fresh file that Notion was configured, which `doctor` would then deny.
+    """
     secret = secret.strip()
-    if not secret:
+    if not secret or secret == config_module.PLACEHOLDER or "xxxx" in secret:
         return ""
     return f"…{secret[-4:]}" if len(secret) > 8 else "set"
 
@@ -590,7 +595,15 @@ def describe(config: Config) -> dict:
     """Every setting, as the console draws it. No secret leaves in here."""
     raw = config_module.read_raw(config.path)
     sections = []
-    for section in SECTIONS:
+    # On a board kept in Markdown, Notion is a section about something this
+    # installation never talks to: it goes last rather than first, where it
+    # would be the first thing somebody fills in for nothing.
+    ordered = SECTIONS
+    if not config.storage.notion:
+        ordered = tuple(item for item in SECTIONS if item.key != "notion") + tuple(
+            item for item in SECTIONS if item.key == "notion"
+        )
+    for section in ordered:
         drawn = {
             "key": section.key,
             "title": section.title,
