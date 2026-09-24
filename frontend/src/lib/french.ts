@@ -127,7 +127,7 @@ export const FRENCH: Record<string, string> = {
   Blocked: "Bloqué",
   Failed: "Échoué",
   Done: "Terminé",
-  Elsewhere: "Ailleurs",
+  "No status": "Sans statut",
   "Your board, live. Drop a card in another column and the runner is told.":
     "Votre tableau, en direct. Déposez une carte dans une autre colonne et le runner en est averti.",
   "Nothing on the board yet — a ticket moved to the ready column is a session that starts.":
@@ -187,6 +187,39 @@ export const FRENCH: Record<string, string> = {
   "This ticket could not be read.": "Ce ticket n'a pas pu être lu.",
   "Ticket created": "Ticket créé",
   "could not move “{{title}}”": "impossible de déplacer « {{title}} »",
+  "“{{title}}” moved to {{column}}": "« {{title}} » déplacé dans {{column}}",
+  "hold → {{column}}": "en attente → {{column}}",
+  "The runner leaves it alone until it is made ready again.":
+    "Le runner n'y touche plus tant qu'il n'est pas remis prêt.",
+  "Run “{{title}}” again?": "Relancer « {{title}} » ?",
+  "The ticket goes back to {{column}} and the next pass starts a new session on it — a session that is paid for, like the first one.":
+    "Le ticket retourne dans {{column}} et la prochaine passe lance une nouvelle session dessus — une session payante, comme la première.",
+  "Run it again": "Relancer",
+  "Validate “{{title}}”?": "Valider « {{title}} » ?",
+  "The runner merges its pull request on its next pass. A merge is not taken back from here.":
+    "Le runner fusionne sa pull request à sa prochaine passe. Une fusion ne se défait pas d'ici.",
+  "The runner publishes what the ticket holds on its next pass.":
+    "Le runner publie le contenu du ticket à sa prochaine passe.",
+  Validate: "Valider",
+  "Try again": "Réessayer",
+  "Back to the board": "Retour au tableau",
+  "The server gave no reason.": "Le serveur n'a pas donné de raison.",
+  "A ticket needs a title.": "Un ticket a besoin d'un titre.",
+  "Remove the banner from the dashboard": "Retirer le bandeau du dashboard",
+  "Earlier columns": "Colonnes précédentes",
+  "More columns": "Colonnes suivantes",
+  "The board could not be read again": "Le tableau n'a pas pu être relu",
+  "Map a project to a folder": "Associer un projet à un dossier",
+  "A schedule written here is a ticket that comes back on its own.":
+    "Une récurrence écrite ici est un ticket qui revient tout seul.",
+  Close: "Fermer",
+  Link: "Lien",
+  "timer switched off — ticket-runner enable": "minuterie arrêtée — ticket-runner enable",
+  "timer not installed — ticket-runner enable": "minuterie non installée — ticket-runner enable",
+  "timer masked in systemd": "minuterie masquée dans systemd",
+  "timer on, with no next run": "minuterie active, sans prochaine passe",
+  "no systemd on this machine": "pas de systemd sur cette machine",
+  "timer state unknown": "état de la minuterie inconnu",
 
   /* -- a ticket's terminal -------------------------------------------------- */
   "Talking to": "Discussion avec",
@@ -212,15 +245,14 @@ export const FRENCH: Record<string, string> = {
 
   /* -- the workspace console ------------------------------------------------ */
   "Talking to your machine": "Parler à votre machine",
-  "A sentence reaches your repositories and the board; a line that starts with":
-    "Une phrase atteint vos dépôts et le tableau ; une ligne qui commence par",
-  "reaches the CLI.": "atteint le CLI.",
+  "A sentence reaches your repositories and the board; a line that starts with `>` reaches the CLI.":
+    "Une phrase atteint vos dépôts et le tableau ; une ligne qui commence par `>` atteint le CLI.",
   "a ticket-runner command": "une commande ticket-runner",
   "a sentence talks to your workspace · > runs a ticket-runner command":
     "une phrase parle à votre espace de travail · > lance une commande ticket-runner",
   "Ask the workspace, or type >status": "Demandez à l'espace de travail, ou tapez >status",
-  "Ask me anything about your workspace — I can read your repositories, look at the board and create tickets. Type > followed by a command (>status, >list, >run) to use the CLI directly.":
-    "Demandez-moi ce que vous voulez sur votre espace de travail — je peux lire vos dépôts, regarder le tableau et créer des tickets. Tapez > suivi d'une commande (>status, >list, >run) pour passer directement par le CLI.",
+  "Ask me anything about your workspace — I can read your repositories, look at the board and create tickets. Type > followed by a command (>status, >list, >doctor) to use the CLI directly.":
+    "Demandez-moi ce que vous voulez sur votre espace de travail — je peux lire vos dépôts, regarder le tableau et créer des tickets. Tapez > suivi d'une commande (>status, >list, >doctor) pour passer directement par le CLI.",
   Send: "Envoyer",
   "working…": "en cours…",
   "new conversation": "nouvelle conversation",
@@ -445,7 +477,6 @@ export const FRENCH: Record<string, string> = {
   "Not saved: {{why}}": "Non enregistré : {{why}}",
   "does that token reach your board?": "est-ce que ce jeton atteint votre tableau ?",
   "send yourself a test message": "envoyez-vous un message de test",
-  "apply the interval to the timer": "appliquer l'intervalle à la minuterie",
 
   /* -- the settings page, as `web/settings.py` describes the file ------------- */
   // The server sends one entry per key of `config.toml` — a title, a sentence
@@ -630,6 +661,9 @@ export const FRENCH: Record<string, string> = {
   "A run asks the remote whether the installed code is still the newest.":
     "Une passe demande au dépôt distant si le code installé est encore le plus récent.",
   "Update itself between two runs": "Se mettre à jour entre deux passes",
+  "What it follows": "Ce qu'il suit",
+  "`release`: the newest `vX.Y.Z` tag, and nothing pushed in between. `main`: every commit of the branch it was installed from, as it lands.":
+    "`release` : le dernier tag `vX.Y.Z`, et rien de ce qui est poussé entre deux. `main` : chaque commit de la branche d'installation, dès qu'il arrive.",
   "Ask at most every (seconds)": "Demander au plus toutes les (secondes)",
   "One desktop notification per ticket": "Une notification bureau par ticket",
   "The old switch, kept: “Notify this machine's screen” above defaults to it.":

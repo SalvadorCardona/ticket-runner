@@ -27,11 +27,27 @@ export default defineConfig({
     // One file each, named without a hash: `Cache-Control: no-store` on every
     // response already settles staleness, and a diff that does not rename two
     // build artefacts on every commit is a diff you can read.
+    // Chunks are named without a hash too — a dependency that ships a chunk
+    // already named, like the forms' editor, keeps the name it came with.
     rollupOptions: {
       output: {
         entryFileNames: "assets/console.js",
         chunkFileNames: "assets/[name].js",
         assetFileNames: "assets/console.[ext]",
+        // The libraries every page needs, apart from the console's own code:
+        // one file of 800 kB became three, and a change to the console no
+        // longer rewrites the part of the bundle that did not change. Only
+        // what the first page loads anyway — the lazy Markdown editor stays
+        // lazy, which a catch-all `node_modules` group would undo.
+        codeSplitting: {
+          groups: [
+            { name: "react", test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
+            {
+              name: "ui",
+              test: /node_modules[\\/](@radix-ui|@floating-ui|lucide-react|sonner|date-fns|react-day-picker)[\\/]/,
+            },
+          ],
+        },
       },
     },
   },

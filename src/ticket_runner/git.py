@@ -27,6 +27,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -68,15 +69,36 @@ def run(
         # leave a GITHUB_TOKEN inherited from elsewhere to answer for the tools
         # that read it instead.
         environment = {**(environment or os.environ), "GH_TOKEN": token, "GITHUB_TOKEN": token}
-    process = subprocess.run(
-        args,
-        cwd=str(cwd) if cwd else None,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env=environment,
-    )
+    try:
+        process = subprocess.run(
+            args,
+            cwd=str(cwd) if cwd else None,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=environment,
+        )
+    except subprocess.TimeoutExpired as error:
+        # An answer like any other, and the one `timeout` itself gives: every
+        # caller already knows what to do with a command that failed, and none
+        # of them was written to catch this — a fetch that hung on a dead remote
+        # used to take the whole pass down with it.
+        said = _decoded(error.stderr) or _decoded(error.stdout)
+        why = f"{' '.join(args[:3])}: timed out after {timeout}s"
+        return Result(TIMED_OUT, _decoded(error.stdout), f"{why}\n{said}" if said else why)
     return Result(process.returncode, process.stdout.strip(), process.stderr.strip())
+
+
+# What `timeout(1)` answers for a command it had to stop, and what `run` answers
+# for one that outlived its own.
+TIMED_OUT = 124
+
+
+def _decoded(output: str | bytes | None) -> str:
+    """What a stopped command had said, whichever type `subprocess` kept it as."""
+    if isinstance(output, bytes):
+        return output.decode(errors="replace").strip()
+    return (output or "").strip()
 
 
 def git(
@@ -96,8 +118,25 @@ Accounts = dict[str, str]
 
 # Asked of `gh` once per account and kept: a token is not something that changes
 # under a run, and a board with forty tickets would otherwise spawn forty `gh
-# auth token` on the way to the same answer.
-_TOKENS: dict[str, str] = {}
+# auth token` on the way to the same answer. A refusal is kept too, but only for
+# a minute: the console lives for weeks, and a `gh auth login` typed after one
+# failed lookup has to be heard without anybody restarting it.
+_TOKENS: dict[str, tuple[str, float]] = {}
+FAILED_TOKEN_SECONDS = 60
+
+
+def reference_parts(reference: str) -> list[str]:
+    """A repository reference cut into its path, the host first when it has one.
+
+    The one reading of the shapes the runner holds — the `origin` of a clone
+    (`git@github.com:owner/name.git`), the URL of a pull request, and what a
+    project page declares (`owner/name`) — shared by `owner` and by the project
+    index, so that the two can never disagree about where a name starts.
+    """
+    text = str(reference).strip().removesuffix(".git")
+    text = re.sub(r"^[a-z]+://", "", text)  # https://github.com/owner/name
+    text = re.sub(r"^[^@/]+@", "", text)  # git@github.com:owner/name
+    return [part for part in text.replace(":", "/", 1).split("/") if part]
 
 
 def owner(reference: str) -> str:
@@ -106,10 +145,7 @@ def owner(reference: str) -> str:
     The three shapes the runner actually holds: the `origin` of a clone, the
     URL of a pull request, and what a project page declares.
     """
-    text = str(reference).strip().removesuffix(".git")
-    text = re.sub(r"^[a-z]+://", "", text)  # https://github.com/owner/name
-    text = re.sub(r"^[^@/]+@", "", text)  # git@github.com:owner/name
-    parts = [part for part in text.replace(":", "/", 1).split("/") if part]
+    parts = reference_parts(reference)
     if len(parts) < 2:
         return ""
     # A host is the part with a dot in it; `owner/name` has none.
@@ -118,14 +154,17 @@ def owner(reference: str) -> str:
 
 def account_token(account: str) -> str:
     """The token `gh` holds for that account, or nothing — see `token_for`."""
-    if account not in _TOKENS:
-        result = (
-            run(["gh", "auth", "token", "--user", account], timeout=60)
-            if shutil.which("gh")
-            else Result(1, "", "gh not found")
-        )
-        _TOKENS[account] = result.out if result.ok else ""
-    return _TOKENS[account]
+    held = _TOKENS.get(account)
+    if held and (held[0] or time.monotonic() < held[1]):
+        return held[0]
+    result = (
+        run(["gh", "auth", "token", "--user", account], timeout=60)
+        if shutil.which("gh")
+        else Result(1, "", "gh not found")
+    )
+    token = result.out if result.ok else ""
+    _TOKENS[account] = (token, time.monotonic() + FAILED_TOKEN_SECONDS)
+    return token
 
 
 def token_for(reference: str, accounts: Accounts | None) -> str:
@@ -365,6 +404,41 @@ def _make_room(repo: Path, path: Path, base: str) -> None:
             "  ticket-runner clean --force   removes it, and says so when it would not"
         )
     remove_worktree(repo, path)
+
+
+def repository_of(worktree: Path) -> Path | None:
+    """The repository `worktree` is a linked worktree of — or None.
+
+    Asked by `clean`, of every directory the runner left under its state
+    directory, and the answer decides which repository has a worktree removed
+    and a branch deleted. So nothing outside that directory is ever allowed to
+    answer: a scratch directory is no repository at all, and `git rev-parse`
+    run inside it would climb to whatever encloses it — the home directory
+    under dotfiles, a repository the state directory happens to sit in — and
+    `clean` would then go and prune *that*.
+
+    Three things have to hold. The directory carries a `.git` *file*, which is
+    what a linked worktree has and a scratch directory (or a clone somebody
+    made inside one) does not; git is not allowed past the directory's parent;
+    and the repository it names lists this very directory among its worktrees.
+    """
+    if not (worktree / ".git").is_file():
+        return None
+    common = git(
+        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        worktree,
+        environment={"GIT_CEILING_DIRECTORIES": str(worktree.parent)},
+    )
+    if not common.ok or not common.out:
+        return None
+    repo = Path(common.out).parent
+    listed = git(["worktree", "list", "--porcelain"], repo)
+    if not listed.ok:
+        return None
+    for line in listed.out.splitlines():
+        if line.startswith("worktree ") and _same(line.split(" ", 1)[1], worktree):
+            return repo
+    return None
 
 
 def remove_worktree(repo: Path, path: Path) -> None:

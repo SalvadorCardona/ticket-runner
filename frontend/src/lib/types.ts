@@ -125,6 +125,8 @@ export interface Schedules {
   database: boolean
   /** What that page is called, for the sentence that says it is missing. */
   page: string
+  /** `storage.mode`: which board these came off. */
+  storage?: string
   schedules: Schedule[]
 }
 
@@ -138,6 +140,8 @@ export interface RunnerState {
   timer: string
   running: boolean
   lock: string
+  /** The sessions in flight, read from their logs by the server. */
+  sessions: Running[]
   /** When the credits come back, in seconds since the epoch — 0 while there are some. */
   credits: number
   /** The same moment, as a clock reads it. */
@@ -180,7 +184,26 @@ export interface Talk {
   messages: Message[]
 }
 
+/** A session in flight: the ticket it belongs to (its short id), and its log. */
+export interface Running {
+  source: string
+  log: string
+}
+
+/** One session log on disk, as `/api/logs` lists it. */
+export interface LogEntry {
+  name: string
+  ticket: string
+  at: number
+  size: number
+}
+
 /* -- what the stream carries ------------------------------------------------ */
+
+/** The sessions running now — a state, replayed to every tab that connects. */
+export interface SessionsEvent {
+  sessions: Running[]
+}
 
 export interface StepEvent extends Step {
   source: string

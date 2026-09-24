@@ -100,11 +100,13 @@ Run them from `main`, up to date, with a clean tree.
 - **`publish` says the tag and `__version__` disagree.** The tag went on a
   commit from before the bump. Move the tag, not the version.
 
-## What a release does *not* change
+## What a release sets off
 
-The runner's self-update follows the branch it was installed from, commit by
-commit, not tags — see `src/ticket_runner/update.py`. An installation on `main`
-therefore picks up work as it is merged and does not wait for a release. Tags
-are for people: the changelog somebody reads, and `TR_REF=v0.2.0` for an
-installation that wants to sit still. Do not change the updater to follow tags
-as part of a release; that is a separate decision, and a large one.
+The runner's self-update follows the newest `vX.Y.Z` tag by default
+(`runner.update_channel = "release"` — see `src/ticket_runner/update.py`), so
+pushing the tag **is** shipping it: every installation on the release channel
+moves to it within its update interval. That is one more reason to stop before
+the tag and ask. A pre-release tag (`v1.0.0-rc1`) is not picked up; only
+`vX.Y.Z` is. Installations that chose `update_channel = "main"` follow every
+commit and do not wait for a release, and `TR_REF=v0.2.0` still pins one that
+wants to sit still.

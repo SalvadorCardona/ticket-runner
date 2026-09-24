@@ -677,13 +677,22 @@ def command_doctor(args: argparse.Namespace) -> int:
 
     title("Version")
     print(f"  {DIM}ticket-runner {__version__} — releases: CHANGELOG.md{RESET}")
-    status = update_module.check()
+    channel = configuration.runner.update_channel
+    status = update_module.check(channel=channel)
     if status.reason:
         warn(status.reason)
     elif status.stale:
-        warn(f"{status.current[:8]} installed, {status.latest[:8]} available")
+        available = f"{status.tag} ({status.latest[:8]})" if status.tag else status.latest[:8]
+        warn(f"{status.current[:8]} installed, {available} available")
     else:
-        ok(f"newest version installed ({status.current[:8]})")
+        newest = f"{status.tag}, " if status.tag else ""
+        ok(f"newest version installed ({newest}{status.current[:8]})")
+    following = (
+        "every commit of the branch it was installed from"
+        if channel == "main"
+        else "the newest release tag (vX.Y.Z), never a commit in between"
+    )
+    print(f"  {DIM}runner.update_channel = \"{channel}\" — follows {following}{RESET}")
     if configuration.runner.auto_update:
         every = configuration.runner.update_interval_seconds
         print(f"  {DIM}checked by a run every {every}s (runner.auto_update){RESET}")
@@ -710,6 +719,7 @@ def command_doctor(args: argparse.Namespace) -> int:
         except channels.ChannelError as error:
             bad(f"{channel.name} — {error}")
             problems += 1
+        _doctor_answerers(channel, settings)
     if live:
         moments = ", ".join(settings.events) or "nothing"
         print(f"  {DIM}sent on: {moments}{RESET}")
@@ -938,6 +948,32 @@ def command_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
+def _doctor_answerers(channel: channels.Channel, settings: config_module.Notify) -> None:
+    """Who may answer on this channel — said, because an answer can run code.
+
+    An answer becomes a comment, a comment wakes a ticket, and a ticket runs a
+    session with `bypassPermissions`. Nobody named is anybody who can write
+    there: fine in a private chat, a door left open in a group or a channel.
+    """
+    if not settings.replies:
+        return
+    table = f"notify.{channel.name}"
+    if channel.allowed:
+        ok(
+            f"{channel.name} — answers read from {len(channel.allowed)} user(s) only "
+            f"({table}.allowed_users)"
+        )
+        return
+    chat = str(settings.telegram.get("chat", "")) if channel.name == "telegram" else ""
+    if channel.name == "telegram" and chat and not chat.startswith("-"):
+        print(f"  {DIM}telegram — a private chat: only you write in it{RESET}")
+        return
+    warn(
+        f"{channel.name} — anybody who can write there can answer, and an answer can wake "
+        f"a ticket: {table}.allowed_users narrows it to named people"
+    )
+
+
 def _doctor_schedules(
     client: store.Store,
     configuration: config_module.Config,
@@ -1144,33 +1180,18 @@ def _branch_kept(
     return ""
 
 
-def command_clean(args: argparse.Namespace) -> int:
-    """Remove what failures left behind: worktrees, branches and scratch dirs."""
-    state_root = config_module.state_dir()
-    directories = [
-        directory
-        for parent in ("worktrees", "scratch")
-        if (state_root / parent).exists()
-        for directory in sorted((state_root / parent).iterdir())
-    ]
-    if not directories:
-        print("Nothing left behind.")
-        return 0
-    title(f"{len(directories)} directory(ies) kept")
-    for directory in directories:
-        branch = git.git(["rev-parse", "--abbrev-ref", "HEAD"], directory).out
-        print(f"  {directory}  {DIM}{branch or 'no repository'}{RESET}")
-    if not args.force:
-        print(f"\n{DIM}ticket-runner clean --force to remove them{RESET}")
-        return 0
+def _sweep(directories: list[Path]) -> None:
+    """Remove what `clean --force` was asked to, the run lock held."""
     try:
         configuration = config_module.load()
         configured_base, accounts = configuration.runner.base_branch, configuration.github
     except config_module.ConfigError:
         configured_base, accounts = "", {}
     for directory in directories:
-        origin = git.git(["rev-parse", "--path-format=absolute", "--git-common-dir"], directory).out
-        repo = Path(origin).parent if origin else None
+        # Only a repository that lists this directory as one of its worktrees
+        # is touched — see `git.repository_of`. Anything else is a directory,
+        # and goes as one.
+        repo = git.repository_of(directory)
         if not (repo and repo.exists()):
             shutil.rmtree(directory, ignore_errors=True)
             print(f"  removed {directory}")
@@ -1202,42 +1223,76 @@ def command_clean(args: argparse.Namespace) -> int:
             print(f"  removed branch {branch}")
         else:
             warn(f"branch {branch} kept — {dropped.err or dropped.out}")
-    removed = state.prune_logs(args.days)
-    if removed:
-        print(f"  removed {removed} log file(s) older than {args.days} days")
-    # The scratch directory a conversation runs in, for a ticket with no
-    # repository. Kept while the runner still remembers the page — that is what
-    # makes the next question land in the same Claude session.
-    talks = conversation.clean_talks(
-        {short_id(page) for page in conversation.Ledger.load().known_pages()}
-    )
-    if talks:
-        print(f"  removed {talks} conversation directory(ies)")
+
+
+def command_clean(args: argparse.Namespace) -> int:
+    """Remove what failures left behind: worktrees, branches and scratch dirs."""
+    state_root = config_module.state_dir()
+    directories = [
+        directory
+        for parent in ("worktrees", "scratch")
+        if (state_root / parent).exists()
+        for directory in sorted((state_root / parent).iterdir())
+    ]
+    if not directories:
+        print("Nothing left behind.")
+        return 0
+    title(f"{len(directories)} directory(ies) kept")
+    for directory in directories:
+        repo = git.repository_of(directory)
+        branch = git.git(["rev-parse", "--abbrev-ref", "HEAD"], directory).out if repo else ""
+        print(f"  {directory}  {DIM}{branch or 'no repository'}{RESET}")
+    if not args.force:
+        print(f"\n{DIM}ticket-runner clean --force to remove them{RESET}")
+        return 0
+    # Under the run lock, or not at all: a worktree kept by a failure and the
+    # worktree a session is working in right now sit side by side, and nothing
+    # on disk tells them apart. A run in progress is the one moment `clean`
+    # must not choose between them.
+    try:
+        with state.lock():
+            _sweep(directories)
+            removed = state.prune_logs(args.days)
+            if removed:
+                print(f"  removed {removed} log file(s) older than {args.days} days")
+            # The scratch directory a conversation runs in, for a ticket with no
+            # repository. Kept while the runner still remembers the page — that
+            # is what makes the next question land in the same Claude session.
+            talks = conversation.clean_talks(
+                {short_id(page) for page in conversation.Ledger.load().known_pages()}
+            )
+            if talks:
+                print(f"  removed {talks} conversation directory(ies)")
+    except state.Busy:
+        bad("a run is in progress, and some of these are the worktrees it works in")
+        print(f"  {DIM}try again once it has finished — ticket-runner status says when{RESET}")
+        return 1
     return 0
 
 
 def command_update(args: argparse.Namespace) -> int:
     """What a run does once an hour, on demand and out loud."""
-    status = update_module.check()
+    try:
+        settings = config_module.load().runner
+    except config_module.ConfigError:
+        settings = config_module.Runner()
+    status = update_module.check(channel=settings.update_channel)
     if status.reason:
         bad(status.reason)
         return 1
     if not status.stale:
-        ok(f"already on the newest version ({status.current[:8]})")
+        newest = f"{status.tag}, " if status.tag else ""
+        ok(f"already on the newest version ({newest}{status.current[:8]})")
         return 0
-    print(f"  {status.current[:8]} → {status.latest[:8]}")
+    print(f"  {update_module.describe(status)}")
     if args.check:
         print(f"  {DIM}ticket-runner update to apply it{RESET}")
         return 0
-    try:
-        interval = config_module.load().runner.interval_seconds
-    except config_module.ConfigError:
-        interval = config_module.Runner().interval_seconds
-    error = update_module.apply(status, interval)
+    error = update_module.apply(status, settings.interval_seconds)
     if error:
         bad(error)
         return 1
-    ok(f"updated to {status.latest[:8]}")
+    ok(f"updated to {status.tag or status.latest[:8]}")
     return 0
 
 
@@ -1254,7 +1309,16 @@ def command_serve(args: argparse.Namespace) -> int:
     """The web console: the board, this CLI and a chat, in one page."""
     from . import web
 
-    configuration = load_config()
+    # Loaded, not required to be usable: the console is where an installation
+    # becomes usable — its first connection asks for the Notion token and the
+    # page — so refusing to start without them made that page unreachable, and
+    # the systemd unit restart forever on a fresh install. A file that is
+    # missing or does not parse still stops it: there is nothing to edit then.
+    try:
+        configuration = config_module.load()
+    except config_module.ConfigError as error:
+        print(f"{RED}error:{RESET} {error}", file=sys.stderr)
+        return 2
     if args.print_token:
         print(web.token(configuration))
         return 0

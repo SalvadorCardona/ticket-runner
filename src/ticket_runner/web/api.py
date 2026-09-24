@@ -129,17 +129,22 @@ class Api:
 
         order = {key: index for index, key in enumerate(COLUMNS)}
         tickets.sort(key=lambda item: (order.get(item["column"], len(COLUMNS)), item["title"].lower()))
-        return {
-            "tickets": tickets,
-            "validate": offers,
-            "columns": [
-                {"key": key, "name": settings.state(key)}
-                for key in COLUMNS
-                # A board whose `blocked` and `failed` are one column must not
-                # be drawn twice under two headings.
-                if settings.state(key) not in [settings.state(other) for other in COLUMNS[: COLUMNS.index(key)]]
-            ],
-        }
+        columns = [
+            {"key": key, "name": settings.state(key)}
+            for key in COLUMNS
+            # A board whose `blocked` and `failed` are one column must not
+            # be drawn twice under two headings.
+            if settings.state(key) not in [settings.state(other) for other in COLUMNS[: COLUMNS.index(key)]]
+        ]
+        # A ticket with no status, or with one nobody configured, is a ticket
+        # somebody wrote and the runner will never claim. Dropping it from the
+        # board because it fits no heading would be hiding exactly the card
+        # that needs a look — so it gets a column of its own, and only while
+        # something is in it. No name: the board has none for it, and the
+        # console says "No status" in whichever language it is in.
+        if any(item["column"] == "other" for item in tickets):
+            columns.append({"key": "other", "name": ""})
+        return {"tickets": tickets, "validate": offers, "columns": columns}
 
     def _ticket(self, page: store.Page, names: dict[str, str], projects: dict, host: str) -> dict:
         """One page of the tickets database, as a card reads it."""
@@ -459,6 +464,9 @@ class Api:
             "enabled": self.config.runner.schedule,
             "database": database,
             "page": self.config.notion.page("schedules"),
+            # Which board: "a row in the database" is Notion's sentence, and a
+            # Markdown board has files.
+            "storage": self.config.storage.mode,
             "schedules": [self._schedule(row, projects) for row in rows],
         }
 
@@ -523,6 +531,9 @@ class Api:
             "timer": systemd.read().label,
             "running": bool(held),
             "lock": held,
+            # The sessions in flight, read from their logs: what a page that has
+            # just been reloaded counts before the stream has said a word.
+            "sessions": live.active(held=lambda: held),
             "credits": waiting,
             "credits_at": credits.when(waiting) if waiting else "",
             "workspace_root": str(configuration.runner.workspace_root),

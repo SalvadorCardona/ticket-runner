@@ -28,6 +28,7 @@ from __future__ import annotations
 import errno
 import hashlib
 import hmac
+import html
 import json
 import mimetypes
 import queue
@@ -43,7 +44,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse
 
 from .. import config as config_module
-from .. import store
+from .. import store, voice
 from ..config import Config, state_dir
 from . import setup
 from .api import Api
@@ -85,8 +86,9 @@ def token(config: Config) -> str:
     except OSError:
         pass
     fresh = secrets.token_urlsafe(24)
-    path.write_text(fresh + "\n", encoding="utf-8")
-    path.chmod(0o600)
+    from ..disk import write_private  # 0600 from its first byte, not after a chmod
+
+    write_private(path, fresh + "\n")
     return fresh
 
 
@@ -188,6 +190,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         for name, value in (extra or {}).items():
             self.send_header(name, value)
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
@@ -302,14 +306,14 @@ class Handler(BaseHTTPRequestHandler):
         # unclaimed has a password waiting to be set, and whoever opened it with
         # its token would otherwise never be shown where.
         if route == "/setup" and claimable(self.api.config, self.entry):
-            return self._send(200, SETUP.encode(), "text/html; charset=utf-8")
+            return self._send(200, setup_page(self._language()).encode(), "text/html; charset=utf-8")
 
         if route == "/":
             return self._static("index.html")
         if route.startswith("/static/"):
             return self._static(route[len("/static/") :])
         if route == "/api/events":
-            return self._stream()
+            return self._stream((query.get("after") or [""])[0])
 
         try:
             if route == "/api/state":
@@ -354,6 +358,7 @@ class Handler(BaseHTTPRequestHandler):
         route = parsed.path.rstrip("/") or "/"
 
         if not self._host_is_ours():
+            self.close_connection = True
             return self._fail(421, "this console is not served under that name")
         # Two writes cannot be authorised beforehand, because they are what
         # produces the authorisation: signing in, and — on a console nobody has
@@ -363,11 +368,16 @@ class Handler(BaseHTTPRequestHandler):
         signing_in = route == "/api/login"
         opening = signing_in or route == "/api/setup"
         if not opening and not self._authorised(parse_qs(parsed.query)):
+            # The body is left unread, so the connection cannot be reused: the
+            # next request on it would begin with this one's `{}` — which is how
+            # a signed-out browser reloading the page got a 501 for "{}GET".
+            self.close_connection = True
             return self._fail(401, "token missing or wrong")
         # A cookie alone is not consent: a page you have open elsewhere can post
         # a form to this port with your cookie attached, but it cannot set a
         # header of its own without a preflight this server never answers.
         if self.headers.get(GUARD_HEADER) != "1":
+            self.close_connection = True
             return self._fail(403, "this request did not come from the console")
 
         payload = self._body()
@@ -498,16 +508,37 @@ class Handler(BaseHTTPRequestHandler):
     def _unauthorised(self, route: str) -> None:
         if route.startswith("/api/"):
             return self._fail(401, "token missing or wrong")
+        language = self._language()
         if claimable(self.api.config, self.entry):
-            page = SETUP
+            page = setup_page(language)
+        elif self.entry:
+            page = sign_in_page(language)
         else:
-            page = SIGN_IN if self.entry else GATE
+            page = gate_page(language, self._token_whereabouts())
         self._send(401, page.encode(), "text/html; charset=utf-8")
 
-    def _stream(self) -> None:
-        """One Server-Sent Events connection, for as long as the tab is open."""
+    def _language(self) -> str:
+        return language_of(self.headers.get("Accept-Language") or "")
+
+    def _token_whereabouts(self) -> str:
+        """Where this console's token can be read, on this machine, as HTML."""
+        configuration = self.api.config
+        if configuration.web.token:
+            return _words(self._language())(
+                "<code>web.token</code> of <code>{path}</code>"
+            ).format(path=html.escape(str(configuration.path)))
+        return f"<code>{html.escape(str(state_dir() / 'web' / 'token'))}</code>"
+
+    def _stream(self, since: str = "") -> None:
+        """One Server-Sent Events connection, for as long as the tab is open.
+
+        Where to resume from comes as the header a browser sends when it
+        reconnects on its own, or as `?after=` from a console that had to open
+        the stream again itself — a refused stream is never retried by the
+        browser, and a new `EventSource` cannot set a header.
+        """
         try:
-            after = int(self.headers.get("Last-Event-ID") or 0)
+            after = int(self.headers.get("Last-Event-ID") or since or 0)
         except ValueError:
             after = 0
         channel = self.api.hub.subscribe(after)
@@ -547,23 +578,123 @@ class Handler(BaseHTTPRequestHandler):
         self.do_GET()
 
 
+# -- the three pages a browser sees before it is in ---------------------------
+
+# Accent and ladder are the console's own (see `frontend/src/index.css`): the
+# lime on near-black it is drawn in, and its light translation for a browser
+# that asked for one. The door and the room behind it are the same colour.
 _STYLE = """<style>
- body{background:#0f1115;color:#e7e9ee;font:15px/1.6 ui-sans-serif,system-ui,sans-serif;
+ :root{--bg:#0e0f13;--card:#16181e;--field:#1a1d24;--line:#262a34;--fg:#f1f2f4;--muted:#8d95a5;
+       --accent:#d5f95a;--on-accent:#14180b;--bad:#f2685f;--good:#b8f24a;color-scheme:dark}
+ @media (prefers-color-scheme: light){
+  :root{--bg:#fbfbf9;--card:#fff;--field:#f4f5f1;--line:#e4e5e0;--fg:#14161a;--muted:#5f6573;
+        --accent:#46600f;--on-accent:#f4ffe0;--bad:#c8332a;--good:#4d7a10;color-scheme:light}
+ }
+ body{background:var(--bg);color:var(--fg);font:15px/1.6 "DM Sans",ui-sans-serif,system-ui,sans-serif;
       display:grid;place-items:center;min-height:100vh;margin:0}
- form{width:min(28rem,90vw);background:#171a21;border:1px solid #262b36;border-radius:14px;padding:1.6rem}
- h1{font-size:1.1rem;margin:0 0 .4rem} p{color:#98a2b3;margin:.2rem 0 1.2rem;font-size:.9rem}
- input{width:100%;box-sizing:border-box;background:#0f1115;border:1px solid #2c3240;color:inherit;
+ form{box-sizing:border-box;width:min(28rem,92vw);background:var(--card);border:1px solid var(--line);border-radius:14px;padding:1.6rem}
+ h1{font-size:1.1rem;margin:0 0 .4rem} p{color:var(--muted);margin:.2rem 0 1.2rem;font-size:.9rem}
+ label{display:block;font-size:.85rem;font-weight:600;margin:.8rem 0 .3rem}
+ input{width:100%;box-sizing:border-box;background:var(--field);border:1px solid var(--line);color:inherit;
        border-radius:9px;padding:.7rem .8rem;font:inherit}
- input+input{margin-top:.6rem}
- button{margin-top:.9rem;width:100%;background:#3b82f6;color:#fff;border:0;border-radius:9px;
+ input:focus-visible,textarea:focus-visible,button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+ button{margin-top:1.1rem;width:100%;background:var(--accent);color:var(--on-accent);border:0;border-radius:9px;
         padding:.7rem;font:inherit;font-weight:600;cursor:pointer}
- code{background:#0f1115;padding:.15rem .4rem;border-radius:6px;color:#c8cedb}
- .said{color:#f97066;margin:.9rem 0 0;min-height:1.2em}
+ code{background:var(--field);padding:.15rem .4rem;border-radius:6px;color:var(--fg);overflow-wrap:anywhere}
+ .said{color:var(--bad);margin:.9rem 0 0;min-height:1.2em}
 </style>
 """
 
+# What these pages say, in the two languages the console speaks. The key is
+# the English, as it is in `frontend/src/lib/french.ts`: a sentence nobody
+# translated is drawn as it was written rather than as a name.
+_FRENCH = {
+    "token": "jeton",
+    "sign in": "connexion",
+    "first connection": "première connexion",
+    "Token": "Jeton",
+    "Email": "E-mail",
+    "Password": "Mot de passe",
+    "Open the console": "Ouvrir la console",
+    "Sign in to open the console.": "Connectez-vous pour ouvrir la console.",
+    "wrong email or password": "e-mail ou mot de passe incorrect",
+    "This console needs its token. <code>ticket-runner serve --print-token</code> prints it, "
+    "and it is written in {where}.":
+        "Cette console demande son jeton. <code>ticket-runner serve --print-token</code> "
+        "l'affiche, et il est écrit dans {where}.",
+    "<code>web.token</code> of <code>{path}</code>": "le <code>web.token</code> de <code>{path}</code>",
+    "Nobody has claimed this console yet. What you fill in here is written into "
+    "your <code>config.toml</code>, and the first two lines are how you open it "
+    "from now on — this page does not come back.":
+        "Personne n'a encore pris cette console. Ce que vous remplissez ici est écrit "
+        "dans votre <code>config.toml</code>, et les deux premières lignes sont ce qui "
+        "l'ouvrira désormais — cette page ne reviendra pas.",
+    "You": "Vous",
+    "The email and the password the console will ask for instead of its token.":
+        "L'e-mail et le mot de passe que la console demandera à la place de son jeton.",
+    "The same password again": "Le même mot de passe, encore",
+    "— or leave it for later": "— ou plus tard",
+    "Create an internal integration on <code>notion.so/my-integrations</code>, share one "
+    "page with it — the <code>···</code> menu → <em>Connections</em> — and paste the two "
+    "here. The board, its five databases and their columns are built under that page.":
+        "Créez une intégration interne sur <code>notion.so/my-integrations</code>, partagez "
+        "une page avec elle — menu <code>···</code> → <em>Connexions</em> — et collez les deux "
+        "ici. Le tableau, ses cinq bases et leurs colonnes sont construits sous cette page.",
+    "Integration token": "Jeton d'intégration",
+    "Link of the page you shared": "Lien de la page partagée",
+    "Your rules": "Vos règles",
+    "— read into every ticket": "— lues dans chaque ticket",
+    "Who you are, what the stack is, how you like things written. It reaches every "
+    "session before the project's brief and before the ticket itself, which is what "
+    "makes an answer sound like you. One screen: you pay for it on every ticket. "
+    "What you write here <em>replaces</em> the Context page; left empty, it is left alone.":
+        "Qui vous êtes, quelle est la stack, comment vous aimez qu'on écrive. Chaque "
+        "session le lit avant le brief du projet et avant le ticket lui-même : c'est ce "
+        "qui fait qu'une réponse sonne comme vous. Un écran au plus : vous le payez à "
+        "chaque ticket. Ce que vous écrivez ici <em>remplace</em> la page Context ; vide, "
+        "elle n'est pas touchée.",
+    "Rules": "Règles",
+    "I am …, I work on …, never …": "Je suis …, je travaille sur …, jamais …",
+    "— optional": "— facultatif",
+    "Where a blocked ticket asks its question, and what you answer lands on the ticket. "
+    "@BotFather → <code>/newbot</code>, then say anything to your new bot: the chat id is "
+    "read back from it, so leave it empty unless you know it.":
+        "Là où un ticket bloqué pose sa question, et ce que vous répondez arrive sur le "
+        "ticket. @BotFather → <code>/newbot</code>, puis écrivez n'importe quoi à votre "
+        "nouveau bot : l'identifiant de discussion est relu depuis lui, laissez-le vide "
+        "sauf si vous le connaissez.",
+    "Bot token": "Jeton du bot",
+    "Chat id": "Identifiant de discussion",
+    "found on its own": "trouvé tout seul",
+    "Set it up": "Tout configurer",
+    "Setting it up…": "Configuration…",
+    "that did not work": "ça n'a pas marché",
+    "Set up — one thing did not work": "Configuré — une chose n'a pas marché",
+    "Open the console →": "Ouvrir la console →",
+}
 
-def _page(title: str, body: str, style: str = "") -> str:
+
+def language_of(header: str) -> str:
+    """The language a browser reads, from its `Accept-Language`.
+
+    The console decides the same way — the browser's own list, in its order —
+    and these pages have to agree with it: a sign-in in English opening onto a
+    board in French reads as two products. The first tag that is one of the two
+    spoken here wins; `voice.understood` reads it, as it reads the file's.
+    """
+    for part in (header or "").split(","):
+        tag = part.split(";")[0].strip()
+        if tag.split("-")[0].lower() in voice.LANGUAGES:
+            return voice.understood(tag)
+    return voice.DEFAULT
+
+
+def _words(language: str):
+    table = _FRENCH if language == "fr" else {}
+    return lambda text: table.get(text, text)
+
+
+def _page(title: str, body: str, style: str = "", language: str = "en") -> str:
     """The way in, drawn by this server rather than by the bundle.
 
     A browser that has not got in cannot load the console, so these three pages
@@ -571,58 +702,79 @@ def _page(title: str, body: str, style: str = "") -> str:
     here, they reach for nothing that is not on this machine.
     """
     return (
-        '<!doctype html>\n<meta charset="utf-8">'
+        f'<!doctype html>\n<html lang="{language}">\n<meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">\n'
-        f"<title>ticket-runner — {title}</title>\n" + _STYLE + style + body
+        f"<title>{html.escape(title)} · ticket-runner</title>\n" + _STYLE + style + body
     )
 
 
-GATE = _page(
-    "token",
-    """<form onsubmit="location='/?token='+encodeURIComponent(this.t.value.trim());return false">
+def gate_page(language: str = "en", where: str = "") -> str:
+    """Asked for the token — and told where to find it, as this machine has it.
+
+    `where` is the real place: the `web.token` line of the file in use when the
+    token was chosen there, or the file it was drawn into — under
+    `$XDG_STATE_HOME` when that is set, which a path printed as a constant got
+    wrong on every machine that sets it.
+    """
+    say = _words(language)
+    where = where or f"<code>{html.escape(str(state_dir() / 'web' / 'token'))}</code>"
+    return _page(
+        say("token"),
+        f"""<form onsubmit="location='/?token='+encodeURIComponent(this.t.value.trim());return false">
   <h1>ticket-runner</h1>
-  <p>This console needs its token. <code>ticket-runner serve</code> prints it,
-     and it is kept in <code>~/.local/state/ticket-runner/web/token</code>.</p>
-  <input name="t" autofocus placeholder="token" autocomplete="off" spellcheck="false">
-  <button type="submit">Open the console</button>
+  <p>{say("This console needs its token. <code>ticket-runner serve --print-token</code> prints it, "
+          "and it is written in {where}.").format(where=where)}</p>
+  <label for="t">{say("Token")}</label>
+  <input id="t" name="t" autofocus autocomplete="off" spellcheck="false">
+  <button type="submit">{say("Open the console")}</button>
 </form>
 """,
-)
+        language=language,
+    )
 
-# The same door, with a lock somebody can remember. It posts rather than
-# navigates — a form that navigated could not set the header that tells a
-# request from the console apart from a request from a page you had open.
-SIGN_IN = _page(
-    "sign in",
-    """<form onsubmit="enter(this);return false">
+
+def sign_in_page(language: str = "en") -> str:
+    """The same door, with a lock somebody can remember.
+
+    It posts rather than navigates — a form that navigated could not set the
+    header that tells a request from the console apart from a request from a
+    page you had open.
+    """
+    say = _words(language)
+    return _page(
+        say("sign in"),
+        f"""<form onsubmit="enter(this);return false">
   <h1>ticket-runner</h1>
-  <p>Sign in to open the console.</p>
-  <input name="email" type="email" autofocus placeholder="email" autocomplete="username"
-         spellcheck="false">
-  <input name="password" type="password" placeholder="password" autocomplete="current-password">
-  <button type="submit">Open the console</button>
-  <p class="said" id="said"></p>
+  <p>{say("Sign in to open the console.")}</p>
+  <label for="email">{say("Email")}</label>
+  <input id="email" name="email" type="email" autofocus autocomplete="username" spellcheck="false">
+  <label for="password">{say("Password")}</label>
+  <input id="password" name="password" type="password" autocomplete="current-password">
+  <button type="submit">{say("Open the console")}</button>
+  <p class="said" id="said" role="alert"></p>
 </form>
 <script>
-async function enter(form){
+const WRONG = {json.dumps(say("wrong email or password"), ensure_ascii=False)};
+async function enter(form){{
   const said = document.getElementById('said');
   said.textContent = '';
-  try {
-    const answer = await fetch('/api/login', {
+  try {{
+    const answer = await fetch('/api/login', {{
       method: 'POST',
-      headers: {'Content-Type': 'application/json', 'X-Ticket-Runner': '1'},
-      body: JSON.stringify({email: form.email.value, password: form.password.value}),
-    });
-    if (answer.ok) { location = '/'; return; }
-    const body = await answer.json().catch(() => ({}));
-    said.textContent = body.error || 'wrong email or password';
-  } catch (error) {
+      headers: {{'Content-Type': 'application/json', '{GUARD_HEADER}': '1'}},
+      body: JSON.stringify({{email: form.email.value, password: form.password.value}}),
+    }});
+    if (answer.ok) {{ location = '/'; return; }}
+    const body = await answer.json().catch(() => ({{}}));
+    said.textContent = answer.status === 401 ? WRONG : (body.error || WRONG);
+  }} catch (error) {{
     said.textContent = String(error);
-  }
-}
+  }}
+}}
 </script>
 """,
-)
+        language=language,
+    )
 
 
 # The first connection. One page, in the order somebody would say it: who opens
@@ -633,128 +785,149 @@ async function enter(form){
 _SETUP_STYLE = """<style>
  body{place-items:start center;padding:3rem 0}
  form{width:min(36rem,92vw)}
- fieldset{border:1px solid #262b36;border-radius:11px;padding:.9rem 1rem 1.1rem;margin:0 0 1rem}
- legend{color:#e7e9ee;font-weight:600;padding:0 .4rem}
- legend span{color:#6b7484;font-weight:400}
- fieldset p{margin:0 0 .8rem}
- textarea{width:100%;box-sizing:border-box;background:#0f1115;border:1px solid #2c3240;color:inherit;
+ fieldset{border:1px solid var(--line);border-radius:11px;padding:.9rem 1rem 1.1rem;margin:0 0 1rem}
+ legend{color:var(--fg);font-weight:600;padding:0 .4rem}
+ legend span{color:var(--muted);font-weight:400}
+ fieldset p{margin:0 0 .4rem}
+ fieldset label:first-of-type{margin-top:.4rem}
+ label small{color:var(--muted);font-weight:400}
+ textarea{width:100%;box-sizing:border-box;background:var(--field);border:1px solid var(--line);color:inherit;
           border-radius:9px;padding:.7rem .8rem;font:inherit;min-height:7rem;resize:vertical}
- input+input,textarea+input,input+textarea{margin-top:.6rem}
- button[disabled]{background:#2c3240;cursor:progress}
- ul{margin:1rem 0 0;padding-left:1.1rem;color:#98a2b3;font-size:.9rem}
- li b{color:#7dd3a8;font-weight:600}
- a{color:#3b82f6}
+ button[disabled]{background:var(--line);color:var(--muted);cursor:progress}
+ ul{margin:1rem 0 0;padding-left:1.1rem;color:var(--muted);font-size:.9rem}
+ li b{color:var(--good);font-weight:600}
+ a{color:var(--accent)}
 </style>
 """
 
-SETUP = _page(
-    "first connection",
-    """<form onsubmit="start(this);return false">
+
+def setup_page(language: str = "en") -> str:
+    say = _words(language)
+    words = json.dumps(
+        {
+            key: say(key)
+            for key in ("Set it up", "Setting it up…", "that did not work", "Set up — one thing did not work")
+        },
+        ensure_ascii=False,
+    )
+    return _page(
+        say("first connection"),
+        f"""<form onsubmit="start(this);return false">
   <h1>ticket-runner</h1>
-  <p>Nobody has claimed this console yet. What you fill in here is written into
-     your <code>config.toml</code>, and the first two lines are how you open it
-     from now on — this page does not come back.</p>
+  <p>{say("Nobody has claimed this console yet. What you fill in here is written into "
+          "your <code>config.toml</code>, and the first two lines are how you open it "
+          "from now on — this page does not come back.")}</p>
 
   <fieldset>
-    <legend>You</legend>
-    <p>The email and the password the console will ask for instead of its token.</p>
-    <input name="email" type="email" autofocus placeholder="email" autocomplete="username"
-           spellcheck="false">
-    <input name="password" type="password" placeholder="password"
-           autocomplete="new-password">
-    <input name="confirm" type="password" placeholder="the same password again"
-           autocomplete="new-password">
+    <legend>{say("You")}</legend>
+    <p>{say("The email and the password the console will ask for instead of its token.")}</p>
+    <label for="email">{say("Email")}</label>
+    <input id="email" name="email" type="email" autofocus autocomplete="username" spellcheck="false">
+    <label for="password">{say("Password")}</label>
+    <input id="password" name="password" type="password" autocomplete="new-password">
+    <label for="confirm">{say("The same password again")}</label>
+    <input id="confirm" name="confirm" type="password" autocomplete="new-password">
   </fieldset>
 
   <fieldset>
-    <legend>Notion <span>— or leave it for later</span></legend>
-    <p>Create an internal integration on <code>notion.so/my-integrations</code>, share one
-       page with it — the <code>···</code> menu → <em>Connections</em> — and paste the two
-       here. The board, its five databases and their columns are built under that page.</p>
-    <input name="notion_token" placeholder="ntn_… — the integration token"
+    <legend>Notion <span>{say("— or leave it for later")}</span></legend>
+    <p>{say("Create an internal integration on <code>notion.so/my-integrations</code>, share one "
+             "page with it — the <code>···</code> menu → <em>Connections</em> — and paste the two "
+             "here. The board, its five databases and their columns are built under that page.")}</p>
+    <label for="notion_token">{say("Integration token")}</label>
+    <input id="notion_token" name="notion_token" placeholder="ntn_…" autocomplete="off" spellcheck="false">
+    <label for="notion_page">{say("Link of the page you shared")}</label>
+    <input id="notion_page" name="notion_page" placeholder="https://www.notion.so/…"
            autocomplete="off" spellcheck="false">
-    <input name="notion_page" placeholder="the link of the page you shared"
-           autocomplete="off" spellcheck="false">
   </fieldset>
 
   <fieldset>
-    <legend>Your rules <span>— read into every ticket</span></legend>
-    <p>Who you are, what the stack is, how you like things written. It reaches every
-       session before the project's brief and before the ticket itself, which is what
-       makes an answer sound like you. One screen: you pay for it on every ticket.
-       What you write here <em>replaces</em> the Context page; left empty, it is left
-       alone.</p>
-    <textarea name="rules" placeholder="I am …, I work on …, never …"></textarea>
+    <legend>{say("Your rules")} <span>{say("— read into every ticket")}</span></legend>
+    <p>{say("Who you are, what the stack is, how you like things written. It reaches every "
+            "session before the project's brief and before the ticket itself, which is what "
+            "makes an answer sound like you. One screen: you pay for it on every ticket. "
+            "What you write here <em>replaces</em> the Context page; left empty, it is left alone.")}</p>
+    <label for="rules">{say("Rules")}</label>
+    <textarea id="rules" name="rules" placeholder="{html.escape(say("I am …, I work on …, never …"))}"></textarea>
   </fieldset>
 
   <fieldset>
-    <legend>Telegram <span>— optional</span></legend>
-    <p>Where a blocked ticket asks its question, and what you answer lands on the ticket.
-       @BotFather → <code>/newbot</code>, then say anything to your new bot: the chat id is
-       read back from it, so leave it empty unless you know it.</p>
-    <input name="telegram_token" placeholder="the bot token" autocomplete="off"
-           spellcheck="false">
-    <input name="telegram_chat" placeholder="chat id — found on its own" autocomplete="off"
-           spellcheck="false">
+    <legend>Telegram <span>{say("— optional")}</span></legend>
+    <p>{say("Where a blocked ticket asks its question, and what you answer lands on the ticket. "
+            "@BotFather → <code>/newbot</code>, then say anything to your new bot: the chat id is "
+            "read back from it, so leave it empty unless you know it.")}</p>
+    <label for="telegram_token">{say("Bot token")}</label>
+    <input id="telegram_token" name="telegram_token" autocomplete="off" spellcheck="false">
+    <label for="telegram_chat">{say("Chat id")} <small>— {say("found on its own")}</small></label>
+    <input id="telegram_chat" name="telegram_chat" autocomplete="off" spellcheck="false">
   </fieldset>
 
-  <button type="submit">Set it up</button>
-  <p class="said" id="said"></p>
+  <button type="submit">{say("Set it up")}</button>
+  <p class="said" id="said" role="alert"></p>
   <ul id="steps"></ul>
-  <p id="after" hidden><a href="/">Open the console →</a></p>
+  <p id="after" hidden><a href="/">{say("Open the console →")}</a></p>
 </form>
 <script>
-async function start(form){
+const WORDS = {words};
+async function start(form){{
   const said = document.getElementById('said');
   const steps = document.getElementById('steps');
   const after = document.getElementById('after');
   const button = form.querySelector('button');
   said.textContent = '';
   steps.textContent = '';
-  const body = {};
+  const body = {{}};
   for (const field of form.elements) if (field.name) body[field.name] = field.value;
   button.disabled = true;
-  button.textContent = 'Setting it up…';
-  try {
-    const answer = await fetch('/api/setup', {
+  button.textContent = WORDS['Setting it up…'];
+  try {{
+    const answer = await fetch('/api/setup', {{
       method: 'POST',
-      headers: {'Content-Type': 'application/json', 'X-Ticket-Runner': '1'},
+      headers: {{'Content-Type': 'application/json', '{GUARD_HEADER}': '1'}},
       body: JSON.stringify(body),
-    });
-    const payload = await answer.json().catch(() => ({}));
-    if (!answer.ok) {
-      said.textContent = payload.error || 'that did not work';
+    }});
+    const payload = await answer.json().catch(() => ({{}}));
+    if (!answer.ok) {{
+      said.textContent = payload.error || WORDS['that did not work'];
       button.disabled = false;
-      button.textContent = 'Set it up';
+      button.textContent = WORDS['Set it up'];
       return;
-    }
-    for (const step of payload.steps || []) {
+    }}
+    for (const step of payload.steps || []) {{
       const line = document.createElement('li');
       const verb = document.createElement('b');
       verb.textContent = step[0] + ' ';
       line.appendChild(verb);
       line.appendChild(document.createTextNode(step[1]));
       steps.appendChild(line);
-    }
+    }}
     /* A step that failed is said, and the console is opened all the same: the
        sign-in is already yours, and the rest is the Settings tab's to finish. */
-    if (payload.problem) {
+    if (payload.problem) {{
       said.textContent = payload.problem;
-      button.textContent = 'Set up — one thing did not work';
+      button.textContent = WORDS['Set up — one thing did not work'];
       after.hidden = false;
       return;
-    }
+    }}
     location = '/';
-  } catch (error) {
+  }} catch (error) {{
     said.textContent = String(error);
     button.disabled = false;
-    button.textContent = 'Set it up';
-  }
-}
+    button.textContent = WORDS['Set it up'];
+  }}
+}}
 </script>
 """,
-    _SETUP_STYLE,
-)
+        _SETUP_STYLE,
+        language,
+    )
+
+
+# The English pages, as they stand: what a test reads, and what a browser that
+# says nothing about its language is given.
+GATE = gate_page()
+SIGN_IN = sign_in_page()
+SETUP = setup_page()
 
 
 def serve(

@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, quote, urlparse
 
-from . import credits
+from . import credits, disk
 
 
 @dataclass
@@ -64,6 +64,15 @@ _LOST = re.compile(
     r"no conversation found|session .{0,80}not found|could not (?:be )?(?:find|found|resume)",
     re.IGNORECASE,
 )
+
+
+# Past this, the prompt goes to the session on its standard input rather than
+# as its last argument. Linux refuses any single argument over 128 KiB
+# (MAX_ARG_STRLEN) with E2BIG, before the session exists — and a ticket with a
+# long brief, a long discussion and the standing context gets there. `--print`
+# reads its prompt from stdin when it is given none, so the long ones take that
+# road; the short ones keep the argument, which is what every session did.
+ARGUMENT_LIMIT = 100_000  # bytes, well under the kernel's 131072
 
 
 def available() -> str:
@@ -129,7 +138,9 @@ def run(
     ]
     if model:
         command += ["--model", model]
-    command.append(prompt)
+    piped = len(prompt.encode("utf-8")) > ARGUMENT_LIMIT
+    if not piped:
+        command.append(prompt)
 
     # What the caller adds comes last: an OpenRouter key configured for the
     # runner is meant to win over one that happens to be in this shell. See
@@ -143,7 +154,9 @@ def run(
     log.parent.mkdir(parents=True, exist_ok=True)
     stderr_path = log.with_suffix(".err")
 
-    with log.open("w", encoding="utf-8") as journal, stderr_path.open("w") as errors:
+    # Private from their first byte: a transcript is the brief, the code and
+    # whatever a command printed on the way, secrets included when one was.
+    with disk.open_private(log) as journal, disk.open_private(stderr_path) as errors:
         process = subprocess.Popen(
             command,
             cwd=str(cwd),
@@ -153,7 +166,17 @@ def run(
             bufsize=1,
             env=inherited,
             start_new_session=True,  # its own process group, so we can kill it all
+            # Only a piped prompt changes what the session reads: every other
+            # one inherits stdin, exactly as before.
+            stdin=subprocess.PIPE if piped else None,
         )
+        if piped:
+            # From a thread: a prompt larger than the pipe's buffer would block
+            # this write until the session reads it, while the session may be
+            # waiting for us to read what it has already written.
+            threading.Thread(
+                target=_feed, args=(process, prompt), name="tr-prompt", daemon=True
+            ).start()
 
         timed_out = threading.Event()
 
@@ -327,8 +350,25 @@ def deep_link(session_id: str, cwd: Path | str | None = None, host: str = "") ->
     return f"{link}?{'&'.join(query)}" if query else link
 
 
-def open_link(uri: str) -> int:
-    """Handle a ticket-runner:// URI by opening a terminal on that session."""
+# What a session identifier and an ssh destination may be made of, and nothing
+# more. A link is something anybody can put in a Notion cell or a web page, and
+# clicking it hands both words to a command line: `host=-oProxyCommand=…` is an
+# ssh *option*, not a machine, and runs whatever it says before any connection
+# is attempted. So the two are checked against their shape rather than escaped
+# — a word that cannot begin with a dash cannot become an option. Claude Code
+# names its sessions with UUIDs, and `new_id` draws them the same way.
+_SESSION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,127}$")
+_HOST = re.compile(r"^[A-Za-z0-9_.@:\[\]-]{1,255}$")
+
+
+def resume_command(uri: str) -> tuple[str, list[str]]:
+    """The directory and the command a ticket-runner:// link means.
+
+    Kept apart from `open_link` so that what a link is allowed to run can be
+    checked without a terminal opening. Raises ValueError for anything that is
+    not a link this module wrote: an unknown action, an identifier that is not
+    one, a host that is not a host.
+    """
     parsed = urlparse(uri)
     if parsed.scheme != SCHEME:
         raise ValueError(f"not a {SCHEME}:// link: {uri}")
@@ -338,25 +378,39 @@ def open_link(uri: str) -> int:
     session_id = parsed.path.strip("/").split("/")[-1]
     if not session_id:
         raise ValueError("no session identifier in the link")
+    if not _SESSION_ID.match(session_id):
+        raise ValueError(
+            f"“{session_id}” is not a session identifier — letters, digits and dashes, "
+            "not starting with a dash"
+        )
     query = parse_qs(parsed.query)
     cwd = (query.get("cwd") or [str(Path.home())])[0]
     host = (query.get("host") or [""])[0]
 
     if host:
+        if host.startswith("-") or not _HOST.match(host):
+            raise ValueError(
+                f"“{host}” is not an ssh destination — user@host, with letters, digits "
+                "and . _ : @ [ ] - only, and never a leading dash"
+            )
         # The session lives on another machine, so resuming means going there.
         # No local claude is needed — only ssh, and an account that has one.
         if not shutil.which("ssh"):
             raise FileNotFoundError(f"ssh not found — cannot reach {host}")
         remote = f"cd {shlex.quote(cwd)} 2>/dev/null; claude --resume {shlex.quote(session_id)}"
-        command = ["ssh", "-t", host, remote]
+        # `--` before the destination: whatever it is, ssh reads it as one.
+        return str(Path.home()), ["ssh", "-t", "--", host, remote]
+    if not Path(cwd).is_dir():
         cwd = str(Path.home())
-    else:
-        if not Path(cwd).is_dir():
-            cwd = str(Path.home())
-        binary = available()
-        if not binary:
-            raise FileNotFoundError("claude not found in PATH")
-        command = [binary, "--resume", session_id]
+    binary = available()
+    if not binary:
+        raise FileNotFoundError("claude not found in PATH")
+    return cwd, [binary, "--resume", session_id]
+
+
+def open_link(uri: str) -> int:
+    """Handle a ticket-runner:// URI by opening a terminal on that session."""
+    cwd, command = resume_command(uri)
 
     preferred = os.environ.get("TICKET_RUNNER_TERMINAL", "")
     candidates = list(TERMINALS)
@@ -370,6 +424,15 @@ def open_link(uri: str) -> int:
     raise FileNotFoundError(
         "no terminal emulator found — set TICKET_RUNNER_TERMINAL to the one you use"
     )
+
+
+def _feed(process: subprocess.Popen, prompt: str) -> None:
+    """Hand the prompt to the session on stdin, then close it: that is the end."""
+    try:
+        process.stdin.write(prompt)  # type: ignore[union-attr]
+        process.stdin.close()  # type: ignore[union-attr]
+    except (BrokenPipeError, OSError, ValueError):
+        pass  # the session died first; what it said on the way out is the story
 
 
 def _verdict(answer: str) -> str:

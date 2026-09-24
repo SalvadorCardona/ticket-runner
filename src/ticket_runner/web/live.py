@@ -19,12 +19,13 @@ from __future__ import annotations
 
 import json
 import queue
+import re
 import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import BinaryIO, Callable, Iterator
 
 from .. import progress, state
 
@@ -35,6 +36,15 @@ BACKLOG = 300
 # A log stops being live this long after its last write. Past that the session is
 # over — the runner has moved on and nothing more will be appended.
 IDLE_SECONDS = 180
+
+# What is kept as a *state* rather than as an event (see `Hub`): a browser that
+# connects wants the board as it is and the sessions running now, not the last
+# twenty versions of either.
+STATES = ("board", "state", "sessions")
+
+# How much of a log is read at a time, from its end, to find its last line —
+# which is enough, nearly always, to find it in one read.
+ENDING_BYTES = 64 * 1024
 
 
 @dataclass
@@ -69,7 +79,7 @@ class Hub:
         with self._lock:
             self._sequence += 1
             event = Event(kind, dict(payload), id=self._sequence)
-            if kind in ("board", "state"):
+            if kind in STATES:
                 self._latest[kind] = event
             else:
                 self._backlog.append(event)
@@ -121,31 +131,42 @@ class Tail:
     is what puts a session already in flight on the screen.
     """
 
-    def __init__(self, hub: Hub, directory: Path | None = None) -> None:
+    def __init__(
+        self,
+        hub: Hub,
+        directory: Path | None = None,
+        held: Callable[[], str] | None = None,
+    ) -> None:
         self.hub = hub
         self.directory = directory or state.logs_dir()
+        self.held = held or state.running
         self._offsets: dict[str, int] = {}
         self._seen: set[str] = set()
+        # The sessions last announced, so that a pass which changes nothing
+        # says nothing. `None` until the first pass, which always speaks: a
+        # browser connecting must be told "none" as much as "these two".
+        self._running: list[dict] | None = None
 
     def pass_once(self) -> int:
         published = 0
-        for path in self._live_logs():
+        for path in _live_logs(self.directory):
             published += self._read(path)
+        self._announce()
         return published
 
-    def _live_logs(self) -> Iterator[Path]:
-        cutoff = time.time() - IDLE_SECONDS
-        try:
-            paths = sorted(self.directory.glob("*.jsonl"))
-        except OSError:
+    def _announce(self) -> None:
+        """Say which sessions are running, whenever that changes.
+
+        A `step` says a session is alive; nothing in the log says, as a step,
+        that it is over — the last line is the answer, and after it there is
+        silence. Without this, a console counts every session it ever saw as
+        running until the tab is closed, and a tab opened later counts none.
+        """
+        running = active(self.directory, self.held)
+        if running == self._running:
             return
-        for path in paths:
-            try:
-                if path.stat().st_mtime < cutoff:
-                    continue
-            except OSError:
-                continue
-            yield path
+        self._running = running
+        self.hub.publish("sessions", sessions=running)
 
     def _read(self, path: Path) -> int:
         key = path.name
@@ -181,6 +202,90 @@ class Tail:
         return published
 
 
+def _live_logs(directory: Path) -> Iterator[Path]:
+    """The logs written to recently enough to belong to a session in flight."""
+    cutoff = time.time() - IDLE_SECONDS
+    try:
+        paths = sorted(directory.glob("*.jsonl"))
+    except OSError:
+        return
+    for path in paths:
+        try:
+            if path.stat().st_mtime < cutoff:
+                continue
+        except OSError:
+            continue
+        yield path
+
+
+def answered(path: Path) -> bool:
+    """Has this session said its last word? — a `result` line, at the end.
+
+    Read from the end of the file rather than followed: the question is asked
+    of every recent log on every pass, and by a page reload that has not seen
+    any of them go by.
+    """
+    try:
+        with path.open("rb") as handle:
+            last = _last_line(handle)
+    except OSError:
+        return False
+    try:
+        return json.loads(last).get("type") == "result"
+    except (ValueError, AttributeError):
+        # Still being written: the type is the first thing on the line, and
+        # the opening of it is enough to tell.
+        return re.search(rb'^\s*\{\s*"type"\s*:\s*"result"', last[:256]) is not None
+
+
+def _last_line(handle: BinaryIO) -> bytes:
+    """The last line of a file, read backwards a block at a time.
+
+    Blocks rather than a fixed tail: the final `result` line carries the whole
+    answer, and a tail shorter than it would cut off the one part that says
+    what the line is.
+    """
+    handle.seek(0, 2)
+    position = handle.tell()
+    tail = b""
+    while position > 0:
+        step = min(ENDING_BYTES, position)
+        position -= step
+        handle.seek(position)
+        tail = handle.read(step) + tail
+        body = tail.rstrip(b"\r\n")
+        cut = body.rfind(b"\n")
+        if cut >= 0:
+            return body[cut + 1 :]
+    return tail.rstrip(b"\r\n")
+
+
+def active(directory: Path | None = None, held: Callable[[], str] | None = None) -> list[dict]:
+    """The sessions running now, newest first, as `[{source, log}]`.
+
+    Three things have to agree. The log was written in the last few minutes; its
+    last line is not the session's answer; and a run holds the lock — a runner
+    killed mid-session leaves a log that looks alive for `IDLE_SECONDS`, and the
+    lock is what the kernel drops the moment the process goes.
+    """
+    directory = directory or state.logs_dir()
+    if not (held or state.running)():
+        return []
+    found: list[tuple[float, dict]] = []
+    for path in _live_logs(directory):
+        if answered(path):
+            continue
+        try:
+            written = path.stat().st_mtime
+        except OSError:
+            continue
+        found.append((written, {"source": _ticket(path.name), "log": path.name}))
+    # Ordered by the last write, but not carrying it: it moves with every line,
+    # and a list that changed each second would be announced each second.
+    found.sort(key=lambda pair: pair[0], reverse=True)
+    return [entry for _, entry in found]
+
+
 def steps(line: str) -> list[progress.Step]:
     try:
         event = json.loads(line)
@@ -209,11 +314,12 @@ class Watch:
         *,
         interval: int = 15,
         directory: Path | None = None,
+        held: Callable[[], str] | None = None,
     ) -> None:
         self.hub = hub
         self.board = board
         self.interval = max(5, interval)
-        self.tail = Tail(hub, directory)
+        self.tail = Tail(hub, directory, held)
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._lock = threading.Lock()

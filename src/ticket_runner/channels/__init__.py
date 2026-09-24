@@ -39,7 +39,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .. import conversation
+from .. import conversation, disk
 from ..config import Notify, state_dir
 
 # How many questions a channel remembers, so that a reply arriving tomorrow
@@ -206,9 +206,7 @@ def _remember(name: str, changes: dict) -> None:
     everything = _memory()
     everything[name] = {**everything.get(name, {}), **changes}
     try:
-        memory_path().write_text(
-            json.dumps(everything, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        disk.write_atomic(memory_path(), json.dumps(everything, ensure_ascii=False, indent=2))
     except OSError:
         pass
 
@@ -224,6 +222,9 @@ class Channel:
     """
 
     name = ""
+    # Who may answer, by the service's own user id. Empty is anybody who can
+    # write where the runner reads — see `allowed_users`.
+    allowed: frozenset[str] = frozenset()
     # May a message that threads nothing and names nothing answer the last
     # question asked? True where everything written is addressed to the runner
     # — a private Telegram chat — and false in a room shared with other people.
@@ -355,6 +356,17 @@ class Channel:
 # -- the ones there are ------------------------------------------------------
 
 
+def allowed_users(raw: object) -> frozenset[str]:
+    """Who may answer, from `allowed_users` — commas, spaces or a TOML list.
+
+    Empty means anybody who can write where the runner reads, which is the old
+    behaviour and still the default: see the README's paragraph on who can run
+    commands on the machine, and what `doctor` says about it.
+    """
+    text = ",".join(str(item) for item in raw) if isinstance(raw, (list, tuple)) else str(raw or "")
+    return frozenset(word for word in re.split(r"[,\s]+", text) if word)
+
+
 def open(settings: Notify) -> list[Channel]:  # noqa: A001 — it opens channels
     """Every channel the configuration names, ready to talk. Never raises."""
     from . import slack as slack_module
@@ -363,10 +375,20 @@ def open(settings: Notify) -> list[Channel]:  # noqa: A001 — it opens channels
     live: list[Channel] = []
     if settings.telegram.get("token") and settings.telegram.get("chat"):
         live.append(
-            telegram_module.Telegram(settings.telegram["token"], str(settings.telegram["chat"]))
+            telegram_module.Telegram(
+                settings.telegram["token"],
+                str(settings.telegram["chat"]),
+                allowed_users(settings.telegram.get("allowed_users")),
+            )
         )
     if settings.slack.get("token") and settings.slack.get("channel"):
-        live.append(slack_module.Slack(settings.slack["token"], str(settings.slack["channel"])))
+        live.append(
+            slack_module.Slack(
+                settings.slack["token"],
+                str(settings.slack["channel"]),
+                allowed_users(settings.slack.get("allowed_users")),
+            )
+        )
     return live
 
 

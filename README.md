@@ -157,13 +157,22 @@ launcher and the systemd units included — before claiming a single ticket. The
 therefore lands between two sessions, never inside one, and the new code takes over on the
 next pass.
 
+What it asks about is **the newest release** — the highest `vX.Y.Z` tag on the remote —
+and not the tip of `main`. A commit merged into `main` is not something every installation
+should be running an hour later; a release is somebody having said *this one*. No release
+tagged yet means no update at all, and the run says so rather than falling back on `main`;
+an installation already ahead of the newest tag is left where it is rather than taken back.
+`runner.update_channel = "main"` is the other answer, for whoever wants every commit as it
+lands.
+
 ```sh
 ticket-runner update --check   # what is available, changing nothing
 ticket-runner update           # apply it now
 ```
 
 `runner.auto_update = false` turns the automatic half off; `runner.update_interval_seconds`
-changes the hour. An installation made from a local copy (`TR_SRC=.`) has no remote to
+changes the hour; `runner.update_channel` chooses between releases and `main` —
+`ticket-runner doctor` says which one is followed. An installation made from a local copy (`TR_SRC=.`) has no remote to
 compare itself against: it says so once per check and carries on.
 
 > **Requirements** — Linux with systemd in the user session, `python3` >= 3.11 (no
@@ -184,7 +193,14 @@ compare itself against: it says so once per check and carries on.
 
 Everything lives in **`~/.config/ticket-runner/config.toml`**, created by the installer
 with mode `600` — it holds your Notion token. `ticket-runner config` opens it in
-`$EDITOR`.
+`$EDITOR`. The copies the console makes when it saves (`config.toml.bak`, and the scratch
+copy it checks before swapping it in) are created `600` too, as are the console's token,
+the session logs — under a `logs/` directory only your account can enter — and
+`history.jsonl`: each is created with that mode rather than tightened after the write, so
+there is no moment in which the umask decides who reads them. What the runner keeps
+between two runs (`claims.json`, the reconciliation stamps, the channels' cursors) is
+written to a copy and renamed over the old file, so a run killed mid-write leaves the old
+file whole rather than an empty one.
 
 ### 1. Create a Notion integration
 
@@ -308,6 +324,7 @@ for reading rather than for filling in.
 | `runner.keep_worktree_on_failure` | `true` | keep enough around to understand a failure |
 | `runner.notify` | `true` | one desktop notification per finished ticket, clicked to open its Notion page — `[notify]` carries it to your phone |
 | `runner.auto_update` | `true` | a run keeps the installation on the latest version |
+| `runner.update_channel` | `"release"` | what "latest" means: the newest `vX.Y.Z` tag, or `"main"` for every commit. No tag, no update; anything unknown reads as `"release"` |
 | `runner.update_interval_seconds` | `3600` | how often a run asks; one minute is the floor |
 | `runner.log_retention_days` | `14` | drop older session logs; `0` keeps everything |
 | `runner.attach_sessions` | `true` | file each session under its project, so `claude --resume` there lists it |
@@ -1314,7 +1331,18 @@ channel that installs on a laptop behind a NAT.
 
 Only that chat is ever read. A bot token is a public address — anyone who guesses the
 bot's name can write to it — so a message from any other chat is dropped before it can
-become a comment on your board.
+become a comment on your board. In a **group**, though, everybody in it writes in that
+chat: name who may answer with their Telegram user ids —
+
+```toml
+[notify.telegram]
+allowed_users = [123456789]
+```
+
+— and everybody else's messages are read past. Empty is the old behaviour, and it is
+fine in a private chat, where only you write; see
+[who can write a ticket](#who-can-write-a-ticket-can-run-commands-on-that-machine) for
+why it is not in a group.
 
 ### Slack — where the team already is
 
@@ -1330,6 +1358,9 @@ conversations in it, and a colleague's "ok" is not an approval of anything.
 3. *Install to Workspace*, copy the `xoxb-` token into `[notify.slack] token`;
 4. `/invite @your-bot` in the channel — the step everyone forgets — and put the channel ID
    (`···` → *View channel details*, at the bottom) in `channel`.
+5. `allowed_users = ["U0123ABCD"]` — the member ids of the people whose answers count
+   (profile → `···` → *Copy member ID*). Empty, anybody in the channel can answer, and
+   `ticket-runner doctor` says so.
 
 ### What gets sent, and what does not
 
@@ -1392,12 +1423,13 @@ Open `http://127.0.0.1:8787` and you get one page, four things:
 
 **The menu** down the left is where the pages live: a name each, and a count beside it
 where something is waiting there — how many tickets are on the board, how many sessions
-are writing right now. Nothing more; a sentence under every name is the page saying, in
-the smaller type, what the page itself says. `⌘B` — `Ctrl-B` — folds it to a rail of
+are writing right now — the sessions the server reads as running from their logs, so the
+count is right after a reload and drops when a session ends. `⌘B` — `Ctrl-B` — folds it to a rail of
 icons, each keeping its name in a tooltip; on a phone it is a drawer, and choosing
 something closes it. The fold is remembered in a cookie, so it opens the way you left it.
-At its foot sit the two things about the console itself: whether the event stream is up,
-and the version this one runs — in amber, with what to type, on the day a newer one is
+At its foot sit the two things about the console itself: whether the event stream is up —
+a stream the server refuses because the session expired sends the page back to the sign-in
+rather than saying *reconnecting…* forever — and the version this one runs — in amber, with what to type, on the day a newer one is
 waiting. Every page has an address — `/?view=console/tickets/list`, `/?page=live` — so a
 reload, a bookmark or a link pasted into a chat lands where you were.
 
@@ -1409,8 +1441,14 @@ you write behind *New ticket* is a page in the same database, with its brief as 
 Notion blocks. What the console adds is the part Notion cannot do — the running session's
 steps, live, read straight from the session log on disk rather than from the `Progress`
 column. A card in review carries a **validate** button, where the board has that column:
-one click and the next pass merges its pull request, or publishes what it holds. The
-*table* tab shows the same tickets as rows, one column per property.
+confirm it and the next pass merges its pull request, or publishes what it holds; *run
+again* asks the same way, since it starts a session that is paid for. A move that Notion
+refuses puts the card back where it was, and a gesture that sends a card off the screen —
+*hold*, into your *Blocked* column — says where it went. A ticket with no status, or one
+your board has not named, is not hidden: it gets a *No status* column of its own while
+there is one. Seven columns do not fit a laptop, so the board scrolls sideways, and each
+edge with more beyond it shows a fade and an arrow. The *table* tab shows the same tickets
+as rows, one column per property.
 
 **A card is a way in.** Click one and the ticket becomes a page: the brief you wrote, the
 report a run appended, the notes in between — the page under the card, as the runner
@@ -1436,10 +1474,17 @@ over the page, another closes it, and no page is given up for it. It is one fiel
 gestures, and they are not made to look alike.
 
 - A line starting with `>` is a **`ticket-runner` subcommand** — `>status`, `>list`,
-  `>run`, `>doctor`, `>logs 1a2b3c4d`. The CLI is already the considered surface of this
+  `>doctor`, `>logs 1a2b3c4d`. The CLI is already the considered surface of this
   tool, so the console does not invent a second one; the command runs as a subprocess with
   no shell, and its output streams into the page. There is no shell in the browser, on
   purpose: it would add every risk and no capability the chat does not already have.
+  What it offers is a list written down — `doctor`, `history`, `list`, `logs`, `notify`,
+  `projects`, `schedules`, `status`, `sync` — and not the whole parser: `run` starts
+  sessions that outlive a typed command, `update` replaces the code the console runs on,
+  and `clean` deletes worktrees a session may be standing in, so those three (with `init`,
+  `enable`, `disable`, `config`, `open` and `serve`) are for a terminal. A command gets
+  three minutes, and at the end of them its whole process group is stopped, not only the
+  process the console started.
 - Anything else is a **message to your workspace**. One long Claude Code session, started
   in `workspace_root`, carried on from turn to turn — with your repositories under its
   feet and `ticket-runner` on its PATH. *"Create a ticket for the SQLite migration on
@@ -1494,7 +1539,9 @@ rather than living on the event stream — a schedule moves four times a day at 
 most, and a tab left open on the board has no business polling that database.
 
 **Settings** is `config.toml` drawn as a page — the same file, the same keys, and every one
-of them, from the Notion token down to what your board calls its *Blocked* column. It is
+of them, from the Notion token down to what your board calls its *Blocked* column. On a
+board kept in Markdown the Notion section comes last, since nothing reads it, and the
+example token the sample file ships with is shown as *not set* rather than as a token. It is
 still a file you can open in an editor: the console rereads it when it changes on disk, and
 what you save here keeps the comments that were around the line.
 
@@ -1523,9 +1570,9 @@ Three things it does that a form usually does not.
   rather than saved and silently changed.
 
 Each section carries the command that checks it — `> doctor` for Notion, `> notify` for
-Telegram and Slack, `> enable` to write a new interval into the systemd timer — because the
-CLI already knows how to say whether a token works, and a settings page does not need a
-second opinion. A setting that needs more than saving says so, once, and only when it moved.
+Telegram and Slack — because the CLI already knows how to say whether a token works, and a
+settings page does not need a second opinion. The commands that change the machine rather
+than read it — `run`, `update`, `enable`… — are the terminal's. A setting that needs more than saving says so, once, and only when it moved.
 
 **In English, or in French.** The console reads the browser before it says anything —
 `Accept-Language` is a setting somebody actually made — and where the browser says nothing
@@ -1534,7 +1581,8 @@ reads French. So there is nothing to choose, and the select at the top of *Setti
 console* is how you disagree with the guess. The choice is one line in
 `localStorage`, like the theme, and it holds for every page of the console: the menu, the
 board's own words, a ticket's page, and the settings tab down to the sentence under each
-field. What is *not* translated is what belongs to somebody else — a ticket's title and the
+field. The pages before the console — the first connection, the sign-in, the token — are
+drawn by the server and read `Accept-Language` the same way. What is *not* translated is what belongs to somebody else — a ticket's title and the
 columns of your board are Notion's, the output of `> status` is the CLI's, and a report a run
 wrote is in the language [`runner.language`](#4-the-rest-of-the-file) asked for.
 
@@ -1542,8 +1590,10 @@ wrote is in the language [`runner.language`](#4-the-rest-of-the-file) asked for.
 
 The page is a **React** application — TypeScript, [Vite](https://vite.dev) and
 [shadcn/ui](https://ui.shadcn.com) on Tailwind — and it lives in `frontend/`. What ships in
-the package is the *build*: `src/ticket_runner/web/static/` holds `index.html` and one
-`assets/console.js` and `assets/console.css`, and those are committed.
+the package is the *build*: `src/ticket_runner/web/static/` holds `index.html` and the
+files under `assets/` — `console.js` and `console.css`, and the chunks loaded only when a
+page asks for them (the Markdown editor is the largest) — and those are committed. Names
+carry no hash of the build's own; a chunk a dependency ships already named keeps its name.
 
 That is the whole arrangement, and it is deliberate. `install.sh` clones this repository
 onto a machine that has `python3` and `git`, and `ticket-runner serve` is `http.server` and
@@ -1703,6 +1753,12 @@ door, and `http://127.0.0.1:8787` is the whole of the address:
 └──────────────────────────────────────────────────┘
 ```
 
+`serve` starts on the file `install.sh` leaves, Notion token or not — this page is where
+the token gets filled in, so the console only refuses a configuration that is missing or
+does not parse. Until a token is there, the board and the other Notion-backed panes say so
+without sending the example's placeholder to Notion, and `ticket-runner run`, which is
+what the timer calls, keeps refusing with the list of what is missing.
+
 One press does the whole installation, in that order:
 
 - the **email and password** are written into `[web]`, and the browser is signed in with
@@ -1820,6 +1876,14 @@ those are kept, named, and given the reason. That ticket stays blocked until you
 look at it — which is the point, since a commit that failed to push is sometimes
 the only copy there is — and the line printed under it is the command that drops
 the branch once you have what you need.
+
+`clean --force` takes the run lock, and refuses while a run holds it: a worktree kept by a
+failure and the worktree a session is working in right now sit side by side, and nothing
+on disk tells them apart. And it only ever acts on a repository that claims the directory:
+a directory counts as a worktree when it carries git's `.git` *file* and the repository
+that file names lists it among its worktrees. Anything else — a scratch directory, a clone
+a session made inside one — is removed as a directory, and git is never asked from inside
+it, where it would have climbed to whatever repository the state directory sits in.
 
 ---
 
@@ -1976,6 +2040,8 @@ than the one this guards against.
 | a ticket ran, but its comment says a declaration is wrong | the repository was found by a fallback: a `Path` pointing nowhere, or a `Repository` GitHub has since renamed. Correct the project page — `ticket-runner projects` shows it with a `!` until you do |
 | a ticket became a document when you wanted code | its project names no repository. Give the project page a `Path` or a `Repository` |
 | “nothing to work from” | the ticket has neither a title nor a description — a page left on the bare template counts as empty |
+| a report says Notion “may have applied” a write | the answer to a comment, a new page or appended blocks timed out *after* it was sent — or Notion answered 5xx. It is not sent again, because a duplicate is worse than a gap: look at the ticket, the write is usually there. Reads and property updates are retried up to four times, and a `429` waits what its `Retry-After` asks, up to a minute |
+| a ticket failed with “the runner itself broke” | something raised while that ticket was being handled — a board that stopped answering, a bug. The comment carries what was raised, and the other tickets of the pass ran on. A git or `gh` command that outlives its timeout is not one of those any more: it answers as a failed command (code 124), which every step already knows how to report |
 | a ticket sat in *In progress* forever | it no longer can: the next run puts back any ticket this host claimed while no run was alive |
 | the timer is on and nothing moves | the subscription's window is spent — `ticket-runner status` says until when. Tickets are where they were, and the first run after that takes them again |
 | a ticket ran before and its branch is still there | it is picked up, not refused: the branch is checked out again and rebased onto the base branch, and the session continues from what it already holds. The ticket's comment says so, and says when the rebase conflicted. `ticket-runner clean --force` is what starts it over instead |
@@ -2033,6 +2099,12 @@ transcript there, so a link opening a local terminal would find nothing. Set
 session_host = "salva@vps.example.com"
 ```
 
+A link is something anybody can paste into a cell, so the handler reads it as data and
+nothing else: the destination must look like one — letters, digits and `. _ : @ [ ] -`,
+never a leading dash — the session identifier must be letters, digits and dashes, and ssh
+is given the destination after `--`. A link that does not fit is refused with the reason
+rather than opened, which is what keeps `?host=-oProxyCommand=…` from being an option.
+
 **Desktop notifications are pointless there.** They fail quietly, so nothing breaks, but
 set `notify = false` to stop trying. This is where
 [Telegram or Slack](#being-told-and-answering-with-one-word) stops being a convenience and
@@ -2064,6 +2136,15 @@ database someone else can edit — it is a different proposition. What makes it 
   comments of a ticket reach the prompt too, and since answering a ticket the runner has
   already handled starts a run of its own, that includes **comment-only** collaborators:
   on a shared board, they are the same permission.
+
+The same holds of the **messaging channels**, one step removed: an answer typed in
+Telegram or Slack becomes a comment on the ticket, and a comment wakes it. With
+`allowed_users` empty — the default, and the old behaviour — anybody who can write where
+the runner reads can do that: only you in a private Telegram chat, but every member of a
+Telegram group or of the Slack channel. On anything shared, fill in
+`[notify.telegram] allowed_users` and `[notify.slack] allowed_users` with the ids of the
+people you would let run a command on that machine; `ticket-runner doctor` warns about a
+channel that answers to anybody.
 
 Setting `permission_mode = "acceptEdits"` narrows it further, at the cost of sessions that
 stall the first time one needs to run the test suite. It is the right setting for a shared
@@ -2105,10 +2186,14 @@ Notion lives, so that is the one seam in the code: `TICKET_RUNNER_NOTION_API`, r
 each request and unset in every installation.
 
 `.github/workflows/ci.yml` runs both suites on every pull request and on every push to
-`main` — the runner opens its own PRs, and none of them was checked before merge until
-this ran. A second job builds and lints `frontend/` the same way, but only when
-`frontend/**` changed. `.github/workflows/release.yml` is separate: it re-runs the suite
-once more, at the tagged commit, when a version is published.
+`main`, on Python 3.11 — the oldest the runner promises — and 3.13 — the runner opens its
+own PRs, and none of them was checked before merge until this ran. A second job builds and
+lints `frontend/` the same way, but only when `frontend/**` changed, and then fails if
+`src/ticket_runner/web/static` is not exactly what that build produces: the console is
+served from the committed build, so a change to the console without its build is a change
+nobody receives. The workflow only ever reads the repository (`permissions: contents:
+read`). `.github/workflows/release.yml` is separate: it re-runs both suites once more, at
+the tagged commit, when a version is published.
 
 ---
 
@@ -2122,10 +2207,11 @@ read from an installed runner's point of view: **major** when your installation 
 hand to keep working, **minor** when the runner gained something, **patch** when it
 stopped getting something wrong.
 
-**A release does not change how the runner updates itself.** It follows the branch it was
-installed from, commit by commit — an installation on `main` picks up work as it is
-merged, and never waits for a version. Tags are for people: the changelog you read before
-merging an update, and
+**A release is what an installation updates to.** By default the runner follows the
+newest `vX.Y.Z` tag and nothing pushed in between, so tagging a version *is* shipping it to
+every installation within the hour — and merging into `main` is not. An installation that
+would rather have every commit as it is merged says `runner.update_channel = "main"`. Tags
+are also for people: the changelog you read before an update lands, and
 
 ```sh
 TR_REF=v0.1.0 sh install.sh
@@ -2148,7 +2234,7 @@ git commit -am "release: 0.2.0"
 git tag -a v0.2.0 -m "ticket-runner 0.2.0" && git push origin v0.2.0
 ```
 
-The tag push is the whole request. `.github/workflows/release.yml` re-runs the suite at
+The tag push is the whole request. `.github/workflows/release.yml` re-runs both suites at
 that commit and creates the GitHub release with the `## [0.2.0]` section as its body — so
 the release notes cannot say something the repository does not.
 

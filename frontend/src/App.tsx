@@ -80,6 +80,14 @@ function Console() {
               ? [t("workspace"), t("board"), `#${ticket?.short ?? String(ticketId).slice(-8)}`]
               : [t("workspace"), t("board")]
 
+  // The tab says where you are too: seven tabs of "ticket-runner" is a row of
+  // tabs you open one by one to find the board.
+  const here = crumbs[crumbs.length - 1] ?? ""
+  React.useEffect(() => {
+    const said = here.charAt(0).toUpperCase() + here.slice(1)
+    document.title = said ? `${said} · ticket-runner` : "ticket-runner"
+  }, [here])
+
   // Each pane keeps its place while another is shown, so a transcript
   // half-read and a text half-typed survive a trip through the menu.
   const cell = (name: "live" | "context", child: React.ReactNode) => {

@@ -4,8 +4,10 @@ They are not the same gesture and they are not made to look the same.
 
 - A line starting with `>` is a **`ticket-runner` subcommand**. The CLI is
   already the safe, considered surface of this tool; the console does not invent
-  a second one. It is run as a subprocess with no shell — there is nothing to
-  quote wrong, and nothing to inject into.
+  a second one — it offers the part of it that reads and reports (`OFFERED`),
+  and none of what starts sessions or rewrites the installation. It is run as a
+  subprocess with no shell — there is nothing to quote wrong, and nothing to
+  inject into.
 - Anything else is a **message to the workspace**: one long Claude Code session,
   started in `workspace_root`, that carries on from turn to turn. It has the
   `ticket-runner` command in its PATH and your repositories under its feet, so
@@ -22,6 +24,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import signal
 import subprocess
 import sys
 import threading
@@ -31,22 +34,51 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from .. import openrouter, progress, session
+from .. import disk, openrouter, progress, session
 from ..config import Config, state_dir
 
-# Commands the console will not run, and why. None is dangerous — each is
-# useless from a browser and would hang the request forever: `config` and `open`
-# wait on the server's own screen, `serve` is this process, and `disable` stops
-# it halfway through answering.
+# The verbs the console runs, written down one by one rather than read off the
+# parser. Deriving them was the convenient answer and the wrong one: every verb
+# added to the CLI became something a browser could start, including the ones
+# that start Claude sessions (`run`), rewrite the installation (`update`) or
+# delete worktrees a session is standing in (`clean`). A command typed here is
+# bounded by `COMMAND_TIMEOUT` and runs as whoever the console runs as; what is
+# listed is what fits both — it reads, it reconciles, it says something, and it
+# is done in seconds.
+OFFERED = (
+    "doctor",
+    "history",
+    "list",
+    "logs",
+    "notify",
+    "projects",
+    "schedules",
+    "status",
+    "sync",
+)
+
+# Commands the console will not run, and why — so that a refusal explains
+# itself instead of reading as a typo.
 REFUSED = {
     "config": "opens an editor on the server — the Settings tab is that file, in this page",
     "open": "opens a terminal on the server's desktop, which is not where you are",
     "serve": "is what you are already talking to",
     "disable": "stops the console you are typing in — do it from a terminal",
+    "enable": "rewrites and starts the systemd units — do it from a terminal",
+    "run": (
+        "starts Claude sessions that outlive a command typed here — make the ticket "
+        "ready and the timer runs it, or type `ticket-runner run` in a terminal"
+    ),
+    "update": "replaces the code this console is running — do it from a terminal",
+    "clean": "deletes worktrees a session may be standing in — do it from a terminal",
+    "init": "builds a whole Notion workspace — do it from a terminal, or the first connection",
 }
 
 # A command is not a session: nothing in the CLI legitimately takes minutes.
 COMMAND_TIMEOUT = 180
+
+# How long a command is given to stop on SIGTERM before its group is killed.
+GRACE_SECONDS = 5
 
 
 def web_dir() -> Path:
@@ -110,8 +142,7 @@ class Chat:
             "messages": [message.as_dict() for message in self.messages[-200:]],
         }
         try:
-            self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-            self.path.chmod(0o600)
+            disk.write_atomic(self.path, json.dumps(payload, ensure_ascii=False, indent=2))
         except OSError:
             pass
 
@@ -227,10 +258,12 @@ class Commands:
 
     def __init__(self, publish: Callable[..., None], allowed: tuple[str, ...]) -> None:
         self.publish = publish
-        # What the CLI offers, less what makes no sense from a browser. Offering
-        # a verb in the error message and then refusing it would be a small lie
-        # told to somebody who is already lost.
-        self.allowed = tuple(verb for verb in allowed if verb not in REFUSED)
+        # What the CLI offers *and* the console lists: a verb the parser lost is
+        # not offered, and a verb the parser gained is not offered until it is
+        # written into `OFFERED`. Offering a verb in the error message and then
+        # refusing it would be a small lie told to somebody already lost.
+        self.allowed = tuple(verb for verb in allowed if verb in OFFERED and verb not in REFUSED)
+        self.timeout = COMMAND_TIMEOUT
         self._lock = threading.Lock()
         self._busy = False
 
@@ -291,6 +324,16 @@ class Commands:
             # `logs` writes its header to stderr either way.
             "NO_COLOR": "1",
         }
+        self._stream(command, environment)
+
+    def _stream(self, command: list[str], environment: dict[str, str] | None = None) -> None:
+        """Run one command, publish what it says, and bound it — all of it.
+
+        The command runs in a process group of its own, and the timeout ends
+        the *group*: killing only the process we started used to leave whatever
+        it had started in turn — a Claude session, most of all — running with
+        nobody left to read it or to stop it.
+        """
         code = -1
         try:
             process = subprocess.Popen(
@@ -301,7 +344,7 @@ class Commands:
                 text=True,
                 bufsize=1,
                 env=environment,
-                start_new_session=True,
+                start_new_session=True,  # its own group: see `_end`
             )
         except OSError as error:
             self.publish("command", stage="line", text=f"could not start: {error}")
@@ -310,7 +353,9 @@ class Commands:
             self.publish("command", stage="ended", code=code)
             return
 
-        watchdog = threading.Timer(COMMAND_TIMEOUT, process.kill)
+        expired = threading.Event()
+        watchdog = threading.Timer(self.timeout, _end, args=(process, expired))
+        watchdog.daemon = True
         watchdog.start()
         try:
             for line in process.stdout:  # type: ignore[union-attr]
@@ -320,4 +365,30 @@ class Commands:
             watchdog.cancel()
             with self._lock:
                 self._busy = False
+        if expired.is_set():
+            self.publish(
+                "command", stage="line", text=f"stopped after {self.timeout}s — too long for here"
+            )
         self.publish("command", stage="ended", code=code)
+
+
+def _end(process: subprocess.Popen, expired: threading.Event) -> None:
+    """Stop a command's whole process group: asked first, then made to.
+
+    The group, and not the process: with `start_new_session` its id is the
+    leader's pid, and it outlives the leader for as long as anything it started
+    is still alive — which is exactly what has to go.
+    """
+    expired.set()
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        return
+    try:
+        process.wait(timeout=GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass

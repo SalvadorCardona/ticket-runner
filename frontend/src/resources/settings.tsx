@@ -231,7 +231,7 @@ function SettingsHead() {
         blurb={t(
           "A field left blank says nothing, and the runner’s own default answers — shown greyed beside it. Your tokens stay on the machine: they are never sent to this page."
         )}
-        action={<span className="text-muted-foreground font-mono text-xs">{drawn.path}</span>}
+        action={<span className="text-muted-foreground font-mono text-xs break-all">{drawn.path}</span>}
       />
       {drawn.problem ? (
         <Alert variant="destructive" className="mb-3">

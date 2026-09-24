@@ -114,6 +114,12 @@ def remotes_normalise_to_owner_and_name():
         "ssh://git@github.com/SalvadorCardona/trader-ia.git",
     ):
         assert _normalise(url) == "salvadorcardona/trader-ia", url
+        # One reading of a reference, shared: the owner the account is chosen
+        # by is the owner the project index files the clone under.
+        from ticket_runner import git as git_module
+
+        assert git_module.owner(url) == _normalise(url).split("/")[0], url
+    assert _normalise("SalvadorCardona/trader-ia") == "salvadorcardona/trader-ia"
 
 
 class _ProjectClient:
@@ -1881,7 +1887,263 @@ def a_deep_link_survives_a_round_trip():
     assert session.deep_link("abc") == "ticket-runner://session/abc"
 
 
+@case
+def a_prompt_too_long_for_an_argument_reaches_the_session_on_stdin():
+    """Linux refuses one argument over 128 KiB before the process exists, and a
+    ticket with a long brief, its discussion and the standing context gets
+    there. Past `ARGUMENT_LIMIT` the prompt is piped; below it nothing changes."""
+    with tempfile.TemporaryDirectory() as directory:
+        home = Path(directory)
+        seen = home / "seen.json"
+        (home / "claude").write_text(
+            "#!" + sys.executable + "\n"
+            "import json, sys\n"
+            "args = sys.argv[1:]\n"
+            "last = args[-1]\n"
+            "argued = not last.startswith('-') and last not in ('bypassPermissions', 'stream-json')\n"
+            "prompt = last if argued else sys.stdin.read()\n"
+            f"open({str(seen)!r}, 'w').write(json.dumps({{'argued': argued, 'size': len(prompt)}}))\n"
+            "print(json.dumps({'type': 'result', 'result': 'RESULT: ok', 'session_id': 's'}))\n"
+        )
+        (home / "claude").chmod(0o755)
+        previous = os.environ["PATH"]
+        os.environ["PATH"] = f"{home}{os.pathsep}{previous}"
+        try:
+            outcome = session.run(
+                "x" * (session.ARGUMENT_LIMIT * 3), cwd=home, log=home / "long.jsonl",
+                timeout_minutes=1,
+            )
+            long = json.loads(seen.read_text())
+            session.run("a short brief", cwd=home, log=home / "short.jsonl", timeout_minutes=1)
+            short = json.loads(seen.read_text())
+        finally:
+            os.environ["PATH"] = previous
+    assert outcome.ok, outcome.error
+    assert long == {"argued": False, "size": session.ARGUMENT_LIMIT * 3}, long
+    assert short == {"argued": True, "size": len("a short brief")}, short
+
+
+@case
+def a_link_cannot_slip_an_option_into_ssh_or_claude():
+    """A link is something anybody can paste into a cell, and a click runs it.
+
+    `host=-oProxyCommand=…` is not a machine, it is an ssh option that runs a
+    command before any connection is tried — and an identifier starting with a
+    dash would be an option to `claude` just the same. Both are refused before
+    anything is looked up, and the destination ssh is given comes after `--`.
+    """
+    identifier = "0486a9fd-44f6-4fff-9dee-9e58bc4062ba"
+    for uri in (
+        f"ticket-runner://session/{identifier}?host=-oProxyCommand=touch%20/tmp/owned",
+        f"ticket-runner://session/{identifier}?host=me%40box%20-oProxyCommand=x",
+        f"ticket-runner://session/{identifier}?host=me;id",
+        "ticket-runner://session/--dangerously-skip-permissions",
+        "ticket-runner://session/abc$(id)",
+    ):
+        try:
+            session.resume_command(uri)
+        except ValueError as error:
+            assert str(error), uri
+        else:
+            raise AssertionError(f"accepted: {uri}")
+
+    original = shutil.which
+    session.shutil.which = lambda name, *rest, **kept: f"/usr/bin/{name}"
+    try:
+        cwd, command = session.resume_command(
+            session.deep_link(identifier, "/srv/work/app", "salva@vps.example.org")
+        )
+        _, bracketed = session.resume_command(
+            f"ticket-runner://session/{identifier}?host=me%40%5B::1%5D"
+        )
+    finally:
+        session.shutil.which = original
+    assert command[:4] == ["ssh", "-t", "--", "salva@vps.example.org"], command
+    assert command[4].endswith(f"claude --resume {identifier}"), command
+    assert bracketed[3] == "me@[::1]", bracketed
+
+
 # -- Notion encoding ---------------------------------------------------------
+
+
+@contextmanager
+def _notion_answering(*answers):
+    """Notion's transport replaced by a script: each call takes the next answer.
+
+    An answer is a dict (the JSON Notion returns) or an exception to raise, the
+    way `urlopen` raises it. Yields the calls made, as (method, path), and the
+    pauses taken between them — none of which are slept for real.
+    """
+    import urllib.error
+    import urllib.request
+
+    calls: list[tuple[str, str]] = []
+    pauses: list[float] = []
+    queue = list(answers)
+
+    class _Response:
+        def __init__(self, body: dict) -> None:
+            self._body = json.dumps(body).encode()
+
+        def read(self) -> bytes:
+            return self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc) -> None:
+            return None
+
+    def urlopen(request, timeout=None):
+        calls.append((request.get_method(), request.full_url.split("/v1", 1)[-1]))
+        answer = queue.pop(0)
+        if isinstance(answer, BaseException):
+            raise answer
+        return _Response(answer)
+
+    original_open, original_sleep = urllib.request.urlopen, notion.time.sleep
+    notion.urllib.request.urlopen = urlopen
+    notion.time.sleep = pauses.append
+    try:
+        yield calls, pauses
+    finally:
+        notion.urllib.request.urlopen = original_open
+        notion.time.sleep = original_sleep
+
+
+def _http_error(code: int, retry_after: str = ""):
+    import email.message
+    import urllib.error
+
+    headers = email.message.Message()
+    if retry_after:
+        headers["Retry-After"] = retry_after
+    body = io.BytesIO(json.dumps({"message": f"status {code}"}).encode())
+    return urllib.error.HTTPError("https://api.notion.com/v1/x", code, "no", headers, body)
+
+
+@case
+def the_console_starts_on_the_file_install_sh_leaves():
+    """`serve` used to require a usable configuration, and exit 2 without a
+    Notion token — so the console whose first connection *asks* for that token
+    could not be reached, and its unit restarted in a loop on a fresh install.
+
+    It starts now; the board it cannot read yet says why without asking Notion,
+    and `run` — the timer's command — still refuses, out loud.
+    """
+    example = Path(__file__).resolve().parents[1] / "config.example.toml"
+    with _state_home(), tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "config.toml"
+        shutil.copy(example, path)
+        previous = os.environ.get("TICKET_RUNNER_CONFIG")
+        os.environ["TICKET_RUNNER_CONFIG"] = str(path)
+        printed, errors = io.StringIO(), io.StringIO()
+        try:
+            with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(errors):
+                assert cli_main(["serve", "--print-token"]) == 0, errors.getvalue()
+                try:
+                    cli_main(["run"])
+                except SystemExit as stopped:
+                    assert stopped.code == 2
+                else:
+                    raise AssertionError("run went ahead with no Notion token")
+        finally:
+            if previous is None:
+                os.environ.pop("TICKET_RUNNER_CONFIG", None)
+            else:
+                os.environ["TICKET_RUNNER_CONFIG"] = previous
+        assert printed.getvalue().strip(), "a token to open the console with"
+        assert "notion.token" in errors.getvalue()
+
+    import urllib.request
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("the placeholder token was sent to Notion")
+
+    original = urllib.request.urlopen
+    notion.urllib.request.urlopen = refuse
+    try:
+        for token in ("", C.PLACEHOLDER):
+            try:
+                notion.Client(token)._request("POST", "/databases/d/query", {})
+            except notion.NotionError as error:
+                assert "no Notion token yet" in str(error)
+            else:
+                raise AssertionError("a board with no token was read")
+    finally:
+        notion.urllib.request.urlopen = original
+
+
+@case
+def a_read_that_times_out_is_asked_again_and_says_notion_when_it_gives_up():
+    """A timeout or a reset while reading used to escape as a bare OSError.
+
+    Nothing catches an OSError around a Notion call — `StoreError` is what the
+    runner is written to survive — so one slow answer took the whole pass down.
+    """
+    import urllib.error
+
+    client = notion.Client("ntn_x")
+    with _notion_answering(TimeoutError("timed out"), ConnectionResetError(104, "reset"),
+                           {"object": "page", "id": "p"}) as (calls, pauses):
+        assert client._request("GET", "/pages/p") == {"object": "page", "id": "p"}
+    assert len(calls) == 3 and len(pauses) == 2, (calls, pauses)
+
+    with _notion_answering(*[TimeoutError("timed out")] * notion.MAX_ATTEMPTS) as (calls, _):
+        try:
+            client._request("POST", "/databases/d/query", {})
+        except notion.NotionError as error:
+            assert "gave up" in str(error), error
+        else:
+            raise AssertionError("a Notion that never answers was taken for an answer")
+    assert len(calls) == notion.MAX_ATTEMPTS, "a query is a read, and is retried"
+
+    refused = urllib.error.URLError(ConnectionRefusedError(111, "refused"))
+    with _notion_answering(refused, {"results": []}) as (calls, _):
+        assert client._request("GET", "/users/me") == {"results": []}
+
+
+@case
+def a_comment_is_never_posted_twice_on_the_strength_of_a_silence():
+    """A write that may have landed is not sent again: a duplicate comment is
+    worse than an error. Only what Notion refused outright — a 429, or a
+    connection that never carried the request — is safe to send twice."""
+    import urllib.error
+
+    client = notion.Client("ntn_x")
+    for silence in (TimeoutError("timed out"), ConnectionResetError(104, "reset"), _http_error(502)):
+        with _notion_answering(silence, {"object": "comment"}) as (calls, _):
+            try:
+                client._request("POST", "/comments", {"rich_text": []})
+            except notion.NotionError:
+                pass
+            else:
+                raise AssertionError(f"{silence!r} was retried on a write")
+        assert calls == [("POST", "/comments")], (silence, calls)
+
+    refused = urllib.error.URLError(ConnectionRefusedError(111, "refused"))
+    with _notion_answering(refused, {"object": "comment"}) as (calls, _):
+        assert client._request("POST", "/comments", {}) == {"object": "comment"}
+    assert len(calls) == 2, "never sent is safe to send"
+
+    with _notion_answering(_http_error(429, retry_after="7"), {"object": "comment"}) as (calls, pauses):
+        assert client._request("POST", "/comments", {}) == {"object": "comment"}
+    assert len(calls) == 2 and pauses == [7.0], (calls, pauses)
+
+    with _notion_answering(_http_error(429, retry_after="86400"), {}) as (_, pauses):
+        client._request("GET", "/users/me")
+    assert pauses == [notion.LONGEST_WAIT], "a day is not a pause, it is a refusal"
+
+    with _notion_answering(TimeoutError("timed out"), {}) as (calls, _):
+        try:
+            client._request("PATCH", "/blocks/b/children", {"children": []})
+        except notion.NotionError:
+            pass
+    assert len(calls) == 1, "appending blocks twice is two copies of them"
+
+    with _notion_answering(_http_error(503), {"id": "p"}) as (calls, _):
+        client._request("PATCH", "/pages/p", {"properties": {}})
+    assert len(calls) == 2, "setting a value twice is setting it once"
 
 
 @case
@@ -2479,6 +2741,81 @@ def a_stamp_that_cannot_be_read_makes_the_check_due():
         assert update.due(3600)
 
 
+@contextmanager
+def _installation():
+    """A remote and an installation cloned from it, as `install.sh` leaves one.
+
+    Yields `commit(message, tag="")`, which lands a commit on the remote's
+    `main` — tagged when asked — and the installation's directory.
+    """
+    quiet = {"capture_output": True, "check": True}
+    who = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"]
+    with tempfile.TemporaryDirectory() as directory:
+        remote, work, app = (Path(directory) / name for name in ("remote.git", "work", "app"))
+        subprocess.run(["git", "init", "--quiet", "--bare", "-b", "main", str(remote)], **quiet)
+        subprocess.run(["git", "clone", "--quiet", str(remote), str(work)], **quiet)
+
+        def commit(message: str, tag: str = "") -> str:
+            subprocess.run(["git", *who, "-C", str(work), "commit", "--quiet", "--allow-empty",
+                            "-m", message], **quiet)
+            if tag:
+                subprocess.run(["git", *who, "-C", str(work), "tag", "-a", tag, "-m", tag], **quiet)
+            subprocess.run(["git", "-C", str(work), "push", "--quiet", "--follow-tags", "origin",
+                            "HEAD:main"], **quiet)
+            return subprocess.run(["git", "-C", str(work), "rev-parse", "HEAD"],
+                                  capture_output=True, text=True, check=True).stdout.strip()
+
+        first = commit("one")
+        subprocess.run(["git", "clone", "--quiet", str(remote), str(app)], **quiet)
+        yield commit, app, first
+
+
+@case
+def an_installation_follows_releases_and_not_every_commit_of_main():
+    """Every commit pushed to `main` used to run on every installation within
+    the hour. The default now follows the newest `vX.Y.Z` tag — and with none,
+    updates nothing and says why rather than falling back on `main`."""
+    with _state_home(), _installation() as (commit, app, first):
+        commit("two, merged but not released")
+        status = update.check(app, "release")
+        assert not status.stale, "no release, no update"
+        assert "no release" in status.reason, status.reason
+
+        released = commit("three", tag="v0.2.0")
+        commit("four, not released yet")
+        commit("a pre-release", tag="v0.3.0-rc1")
+        status = update.check(app, "release")
+        assert status.stale and status.latest == released and status.tag == "v0.2.0", status
+        assert status.current == first
+
+        followed = update.check(app, "main")
+        assert followed.stale and followed.latest not in (released, first), "main is every commit"
+        assert not followed.tag
+
+        # Already past the release — a clone of main switched to the release
+        # channel — is not taken back to it.
+        subprocess.run(["git", "-C", str(app), "reset", "--quiet", "--hard", followed.latest],
+                       capture_output=True, check=True)
+        ahead = update.check(app, "release")
+        assert not ahead.stale and not ahead.reason, ahead
+
+    assert update.newest_release(["v0.9.0", "v0.10.0", "v0.10.0-rc2", "vnext", "v1"]) == "v0.10.0"
+    assert update.newest_release([]) == ""
+
+
+@case
+def the_update_channel_is_release_unless_the_file_says_main():
+    assert C.Runner().update_channel == "release"
+    assert _config("[runner]\n").runner.update_channel == "release"
+    assert _config('[runner]\nupdate_channel = "main"\n').runner.update_channel == "main"
+    assert _config('[runner]\nupdate_channel = "Main"\n').runner.update_channel == "main"
+    assert _config('[runner]\nupdate_channel = "nightly"\n').runner.update_channel == "release", (
+        "a typo must not put an installation on every commit"
+    )
+    example = (Path(__file__).resolve().parents[1] / "config.example.toml").read_text()
+    assert 'update_channel = "release"' in example
+
+
 @case
 def a_copy_is_told_apart_from_a_clone_before_anything_is_fetched():
     """An install made with TR_SRC has no remote: a reason, not a failure."""
@@ -2552,6 +2889,123 @@ def a_lock_left_by_a_dead_run_is_not_a_run():
         with state.lock():
             assert state.running().startswith(str(os.getpid())), "a held lock is one"
         assert state.running() == ""
+
+
+@case
+def a_run_turned_away_leaves_the_lock_and_its_holder_alone():
+    """The lock file is one inode for good, and its PID survives a refusal.
+
+    Unlinking it on release let a run waiting on the old inode and a run that
+    created a new one both hold "the" lock. And `open("w")` emptied the file
+    before asking for the lock — so a run turned away as busy had erased the
+    name of the run that turned it away.
+    """
+    with _state_home() as state_home:
+        path = state_home / "run.lock"
+        with state.lock():
+            inode = path.stat().st_ino
+            try:
+                with state.lock():
+                    raise AssertionError("two runs held the lock at once")
+            except state.Busy:
+                pass
+            assert path.read_text().startswith(f"{os.getpid()} "), "the holder is still named"
+            assert state.running().startswith(str(os.getpid()))
+        assert path.exists(), "the lock file is never removed"
+        assert path.stat().st_ino == inode, "and never replaced"
+        assert path.read_text() == "", "nobody is named once the lock is let go of"
+        assert path.stat().st_mode & 0o777 == 0o600
+        with state.lock():
+            assert path.stat().st_ino == inode
+            assert path.read_text().count("\n") == 1, "one holder, written once"
+
+
+@case
+def a_copy_of_a_secret_is_private_before_it_holds_anything():
+    """The console's token, and the copies a save makes of the configuration.
+
+    Written with the umask and tightened with `chmod` afterwards, each was
+    readable by the group for the moment in between — the configuration holds
+    the Notion token, the bot tokens and the console's password.
+    """
+    from ticket_runner import disk
+    from ticket_runner.web import server as web_server
+
+    created: list[tuple[str, int]] = []
+    original = disk.os.open
+
+    def spying(path, flags, mode=0o777, *rest, **kept):
+        if flags & os.O_CREAT:
+            created.append((str(path), mode))
+        return original(path, flags, mode, *rest, **kept)
+
+    previous = os.umask(0o022)
+    disk.os.open = spying
+    try:
+        with _state_home():
+            path = Path(tempfile.mkdtemp()) / "config.toml"
+            path.write_text('[notion]\ntoken = "ntn_real"\ntickets_database = "abc"\n')
+            path.chmod(0o600)
+            C.edit(path, [("runner", "model", "opus")])
+            secret = web_server.token(C.load(path))
+            kept = web_server.token_path()
+            assert kept.read_text().strip() == secret
+            assert kept.stat().st_mode & 0o777 == 0o600
+            backup = path.parent / "config.toml.bak"
+            assert backup.stat().st_mode & 0o777 == 0o600
+            assert path.stat().st_mode & 0o777 == 0o600
+    finally:
+        disk.os.open = original
+        os.umask(previous)
+    names = {Path(name).name: mode for name, mode in created}
+    assert names.get("token") == 0o600, names
+    assert names.get("config.toml.bak") == 0o600, names
+    assert any(name.startswith(".config.toml.saving") and mode == 0o600 for name, mode in names.items()), names
+
+
+@case
+def a_claim_is_written_whole_or_not_at_all():
+    """A crash halfway through a write must leave the claims as they were.
+
+    An empty `claims.json` reads as "no claim", and a validated ticket without
+    its claim comes back from a crash as work to redo.
+    """
+    from ticket_runner import disk
+
+    with _state_home():
+        state.claim("a" * 32, "Validated")
+        before = state.claims_path().read_text()
+
+        def crash(descriptor):
+            raise OSError("disk full")
+
+        original = disk.os.fsync
+        disk.os.fsync = crash
+        try:
+            state.claim("b" * 32, "Ready")
+        finally:
+            disk.os.fsync = original
+        assert state.claims_path().read_text() == before, "the old claims are intact"
+        assert state.claims() == {"a" * 32: "Validated"}
+        leftovers = [p.name for p in state.claims_path().parent.iterdir() if p.name.endswith(".tmp")]
+        assert not leftovers, leftovers
+        state.claim("b" * 32, "Ready")
+        assert state.claims() == {"a" * 32: "Validated", "b" * 32: "Ready"}
+        assert state.claims_path().stat().st_mode & 0o777 == 0o600
+
+
+@case
+def what_a_session_said_is_kept_for_this_account_only():
+    """Transcripts and the history carry briefs, code and whatever was printed."""
+    with _state_home():
+        previous = os.umask(0o022)
+        try:
+            state.record({"ticket": "t", "status": "done"})
+            logs = state.logs_dir()
+        finally:
+            os.umask(previous)
+        assert state.history_path().stat().st_mode & 0o777 == 0o600
+        assert logs.stat().st_mode & 0o777 == 0o700
 
 
 @case
@@ -2994,6 +3448,83 @@ def the_reserve_is_read_again_at_every_free_place_not_once_a_pass():
     assert finished.is_set()
     assert [result["status"] for result in results] == ["done", "waiting"]
     assert results[1]["id"] == "p2", "the one it did not start says so on the board"
+
+
+@case
+def a_ticket_that_raises_fails_alone_and_the_pass_goes_on():
+    """An exception out of one ticket used to come back out of `future.result()`
+    and end the pass: the other sessions ran on unreported, and the ticket that
+    raised sat in progress until a later sweep put it back — to raise again."""
+    with _state_home(), _usage(_windows(10)):
+        runner = _reserving([_ready("p-1"), _ready("p-2")])
+        runner.prepare = lambda ticket: ticket_module.Job(
+            ticket, projects.Project(name="", path=None), branch="", base="",
+            workdir=Path(tempfile.mkdtemp()) / "doc",
+        )
+
+        def execute(job):
+            if job.ticket.id == "p1":
+                raise subprocess.TimeoutExpired(["git", "push"], 300)
+            return {"ticket": job.ticket.title, "id": job.ticket.id, "status": "done"}
+
+        runner.execute = execute
+        results = runner._work(runner.queue()[0], None, refill=False)
+        history = state.history()
+
+    by_id = {result["id"]: result for result in results}
+    assert by_id["p2"]["status"] == "done", "the other ticket ran to its end"
+    assert by_id["p1"]["status"] == "failed", results
+    assert any("TimeoutExpired" in text for text in runner.client.comments_written), (
+        runner.client.comments_written
+    )
+    assert [page for page, values in runner.client.written if values.get("Status") == "Failed"] == [
+        "p-1"
+    ], runner.client.written
+    assert {entry["id"] for entry in history} == {"p1", "p2"}, "both are in the history"
+
+
+@case
+def a_git_command_that_hangs_is_a_failure_git_callers_already_read():
+    """`subprocess.TimeoutExpired` was caught nowhere: a fetch on a remote that
+    stopped answering raised through every caller up to the pass itself."""
+    from ticket_runner import git as git_module
+
+    result = git_module.run([sys.executable, "-c", "import time; print('begun', flush=True); time.sleep(30)"], timeout=1)
+    assert not result.ok and result.code == git_module.TIMED_OUT, result
+    assert "timed out after 1s" in result.err, result.err
+
+
+@case
+def an_account_gh_did_not_know_is_asked_again_once_it_might():
+    """A token found is kept; a refusal is kept for a minute and no more — the
+    console lives for weeks, and a `gh auth login` typed after one failed lookup
+    has to be heard without a restart."""
+    from ticket_runner import git as git_module
+
+    answers = [git_module.Result(1, "", "not logged in"), git_module.Result(0, "gho-new", "")]
+    asked: list[list[str]] = []
+
+    def run(args, *rest, **kept):
+        asked.append(args)
+        return answers.pop(0)
+
+    held = dict(git_module._TOKENS)
+    git_module._TOKENS.clear()
+    original_which = shutil.which
+    git_module.shutil.which = lambda name, *rest, **kept: f"/usr/bin/{name}"
+    try:
+        with _git_answering(run=run):
+            assert git_module.account_token("someone") == ""
+            assert git_module.account_token("someone") == "", "within the minute: not asked again"
+            assert len(asked) == 1
+            git_module._TOKENS["someone"] = ("", time.monotonic() - 1)  # the minute is over
+            assert git_module.account_token("someone") == "gho-new"
+            assert git_module.account_token("someone") == "gho-new"
+            assert len(asked) == 2, "a token found is kept"
+    finally:
+        git_module.shutil.which = original_which
+        git_module._TOKENS.clear()
+        git_module._TOKENS.update(held)
 
 
 @case
@@ -4528,7 +5059,7 @@ def a_typed_command_is_split_without_a_shell():
     assert commands.parse(">status") == ["status"]
     assert commands.parse("history -n 5") == ["history", "-n", "5"]
     # A quoted argument stays one argument, accents and spaces included.
-    assert commands.parse('run --ticket "à faire"') == ["run", "--ticket", "à faire"]
+    assert commands.parse('logs "à faire"') == ["logs", "à faire"]
 
 
 @case
@@ -4558,7 +5089,61 @@ def the_commands_that_would_hang_a_browser_are_not_offered():
             assert verb in str(error)
         else:
             raise AssertionError(f"{verb} should have been refused")
-    assert "run" in commands.allowed and "status" in commands.allowed
+    assert "status" in commands.allowed
+
+
+@case
+def the_console_runs_what_it_lists_and_nothing_the_cli_grows_later():
+    """A list written down, not the parser read back.
+
+    Deriving the verbs from the parser made every new command something a
+    browser could start. `run` starts Claude sessions that outlive the command's
+    timeout, `update` swaps the code the console runs on, `clean` deletes the
+    worktree a session is standing in: none of them is typed into a web page.
+    """
+    commands = web_console.Commands(lambda *a, **k: None, subcommands())
+    assert set(commands.allowed) <= set(web_console.OFFERED)
+    assert set(commands.allowed) <= set(subcommands()), "never a verb the CLI does not have"
+    for verb in ("run", "update", "clean", "init", "enable"):
+        assert verb not in commands.allowed, verb
+        try:
+            commands.parse(f"{verb} --force")
+        except ValueError as error:
+            assert verb in str(error), error
+        else:
+            raise AssertionError(f"{verb} should have been refused")
+    grown = web_console.Commands(lambda *a, **k: None, (*subcommands(), "wipe"))
+    assert "wipe" not in grown.allowed, "a verb added to the CLI is not offered by itself"
+
+
+@case
+def a_command_that_runs_too_long_takes_what_it_started_with_it():
+    """The timeout ends the command's process group, not only its leader.
+
+    `process.kill` used to stop the Python the console started and leave its
+    children — a Claude session, from `run` — running unowned. The shell below
+    starts a child of its own and waits on it; both have to be gone.
+    """
+    events: list[tuple[str, dict]] = []
+    commands = web_console.Commands(lambda kind, **said: events.append((kind, said)), ())
+    commands.timeout = 1
+    with tempfile.TemporaryDirectory() as directory:
+        marker = Path(directory) / "child"
+        script = f"sleep 60 & echo $! > {marker}; echo started; wait"
+        started = time.monotonic()
+        commands._stream(["sh", "-c", script])
+        took = time.monotonic() - started
+        child = int(marker.read_text().strip())
+
+    assert took < 30, f"the watchdog did not end the command ({took:.0f}s)"
+    assert events[-1] == ("command", {"stage": "ended", "code": events[-1][1]["code"]})
+    assert events[-1][1]["code"] != 0
+    assert any("stopped after" in said.get("text", "") for _, said in events), events
+    try:
+        stat = Path(f"/proc/{child}/stat").read_text()
+    except OSError:
+        return  # gone entirely
+    assert stat.split(")")[-1].split()[0] in ("Z", "X"), f"the child is still running: {stat}"
 
 
 @case
@@ -5147,6 +5732,232 @@ def a_relation_is_written_as_notion_spells_it():
 
 
 
+class _ColumnsClient(_TalkClient):
+    """A tickets database: three rows, one of them under no known heading."""
+
+    def __init__(self, statuses: list[str]) -> None:
+        super().__init__([])
+        self._statuses = statuses
+
+    def forget_database(self, database: str) -> None:
+        pass
+
+    def query(self, database: str, *args, **kwargs) -> list[notion.Page]:
+        return [
+            notion.Page(
+                id=f"{index:08d}-0000-0000-0000-000000000000",
+                url="",
+                title=f"ticket {index}",
+                properties={"Status": {"type": "status", "status": {"name": status} if status else None}},
+                raw={"created_time": "2026-09-01T09:00:00.000Z"},
+            )
+            for index, status in enumerate(self._statuses)
+        ]
+
+    def options(self, database: str, prop: str) -> list[str]:
+        return ["Ready", "In progress", "In review", "Blocked", "Failed", "Done"]
+
+
+@case
+def a_ticket_under_no_known_status_is_drawn_in_a_column_of_its_own():
+    """The board used to say "other" on the card and then draw no such column.
+
+    A ticket written without a status, or under one nobody configured, is the
+    card that needs a look — it is never claimed — and a console that left it
+    off the board was hiding exactly that one. The column carries no name: the
+    board has none for it, and the console says it in its own language.
+    """
+    api = _bare_api(_ColumnsClient(["Ready", "", "Parked"]))
+    api._runner._workspace = type("W", (), {"projects": "", "tickets": "db"})()
+    api._schema_at = time.time()
+    board = api.board()
+    keys = [column["key"] for column in board["columns"]]
+    assert keys[-1] == "other", keys
+    assert board["columns"][-1]["name"] == "", "the console names it, not the board"
+    assert [item["column"] for item in board["tickets"]] == ["ready", "other", "other"]
+
+    tidy = _bare_api(_ColumnsClient(["Ready", "Done"]))
+    tidy._runner._workspace = type("W", (), {"projects": "", "tickets": "db"})()
+    tidy._schema_at = time.time()
+    assert "other" not in [column["key"] for column in tidy.board()["columns"]], (
+        "an empty column of nothing is drawn only when something is in it"
+    )
+
+
+def _session_line(kind: str = "assistant") -> str:
+    if kind == "result":
+        return json.dumps({"type": "result", "result": "done", "session_id": "s"}) + "\n"
+    return json.dumps(
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "reading"}]}}
+    ) + "\n"
+
+
+@case
+def a_session_is_running_until_its_log_says_its_last_word():
+    """A step says a session is alive; only the `result` line says it is over.
+
+    Counted from the logs rather than from the steps a browser happened to see:
+    a console reloaded mid-run counted nothing, and one left open counted every
+    session it had ever seen as still writing.
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        working = folder / "20260830-120000-1a2b3c4d.jsonl"
+        working.write_text(_session_line(), encoding="utf-8")
+        finished = folder / "20260830-110000-9f8e7d6c.jsonl"
+        finished.write_text(_session_line() + _session_line("result"), encoding="utf-8")
+
+        running = web_live.active(folder, held=lambda: "4242 now")
+        assert running == [{"source": "1a2b3c4d", "log": working.name}], running
+        assert web_live.active(folder, held=lambda: "") == [], (
+            "no run holds the lock: a log that still looks fresh is a run that died"
+        )
+
+        # An answer longer than what is read of the end is still recognised.
+        huge = folder / "20260830-130000-00aa11bb.jsonl"
+        huge.write_text(
+            _session_line()
+            + json.dumps({"type": "result", "result": "x" * (web_live.ENDING_BYTES + 10)})
+            + "\n",
+            encoding="utf-8",
+        )
+        assert web_live.answered(huge)
+
+
+@case
+def the_sessions_running_are_announced_when_they_change_and_kept_for_the_next_tab():
+    hub = web_live.Hub()
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        log = folder / "20260830-120000-1a2b3c4d.jsonl"
+        log.write_text(_session_line(), encoding="utf-8")
+        tail = web_live.Tail(hub, folder, held=lambda: "4242")
+        said = []
+        publish = hub.publish
+
+        def listening(kind: str, **payload: object) -> None:
+            said.append((kind, payload))
+            publish(kind, **payload)
+
+        hub.publish = listening  # type: ignore[method-assign]
+        tail.pass_once()
+        tail.pass_once()
+        announced = [payload for kind, payload in said if kind == "sessions"]
+        assert announced == [{"sessions": [{"source": "1a2b3c4d", "log": log.name}]}], (
+            "said once, and not again while nothing changed"
+        )
+
+        # A tab opened now is told what is running before anything else moves.
+        fresh = hub.subscribe()
+        kinds = [fresh.get_nowait().kind for _ in range(fresh.qsize())]
+        assert kinds == ["sessions"], kinds
+
+        with log.open("a", encoding="utf-8") as handle:
+            handle.write(_session_line("result"))
+        tail.pass_once()
+        announced = [payload for kind, payload in said if kind == "sessions"]
+        assert announced[-1] == {"sessions": []}, "the end of a session is news too"
+
+
+@case
+def the_pages_before_the_console_speak_the_browsers_language():
+    """The sign-in, the gate and the first connection, as the console would say them.
+
+    Same rule as the console: the browser's own list decides. And every field
+    has a label that names it, rather than a greyed example that vanishes the
+    moment somebody starts typing.
+    """
+    from ticket_runner.web import server as web_server
+
+    assert web_server.language_of("fr-FR,fr;q=0.9,en;q=0.8") == "fr"
+    assert web_server.language_of("de-DE,en-GB;q=0.7") == "en"
+    assert web_server.language_of("") == "en"
+
+    for build in (web_server.sign_in_page, web_server.setup_page, web_server.gate_page):
+        french = build("fr")
+        assert '<html lang="fr">' in french
+        assert "Ouvrir la console" in french or "Tout configurer" in french
+        assert web_server.GUARD_HEADER in french or build is web_server.gate_page
+        for field in re.findall(r'<(?:input|textarea)[^>]*\bid="([^"]+)"', french):
+            assert f'<label for="{field}"' in french, f"{field} has no label"
+        assert "#3b82f6" not in french, "the door is drawn in the console's lime, not a blue"
+    assert '<html lang="en">' in web_server.SIGN_IN
+
+
+@case
+def the_gate_says_where_this_machines_token_actually_is():
+    """`~/.local/state/…` printed as a constant was wrong wherever XDG_STATE_HOME is set."""
+    from ticket_runner.web import server as web_server
+
+    previous = os.environ.get("XDG_STATE_HOME")
+    os.environ["XDG_STATE_HOME"] = "/srv/elsewhere"
+    try:
+        page = web_server.gate_page("en")
+    finally:
+        if previous is None:
+            os.environ.pop("XDG_STATE_HOME", None)
+        else:
+            os.environ["XDG_STATE_HOME"] = previous
+    assert "/srv/elsewhere/ticket-runner/web/token" in page
+    assert "~/.local/state" not in page
+
+
+@case
+def a_write_refused_before_its_body_is_read_closes_the_connection():
+    """A POST turned away unread must not leave its body on a reused connection.
+
+    The browser reuses a keep-alive connection: the `{}` of a refused
+    `/api/refresh` was read as the start of the next request, and a signed-out
+    page that reloaded itself got "501 Unsupported method ('{}GET')" instead of
+    the sign-in.
+    """
+    import socket as sockets
+
+    from ticket_runner.web import server as web_server
+
+    api = _bare_api(_TalkClient([]))
+    console = web_server.Console(("127.0.0.1", 0), web_server.Handler, api, "tok")
+    thread = threading.Thread(target=console.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = console.server_address[1]
+        with sockets.create_connection(("127.0.0.1", port), timeout=5) as connection:
+            connection.sendall(
+                b"POST /api/refresh HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Ticket-Runner: 1\r\n"
+                b"Content-Type: application/json\r\nContent-Length: 2\r\n\r\n{}"
+                b"GET /api/state HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+            )
+            answer = b""
+            while chunk := connection.recv(65536):
+                answer += chunk
+    finally:
+        console.shutdown()
+        console.server_close()
+    said = answer.decode("utf-8", "replace")
+    assert said.startswith("HTTP/1.1 401"), said[:80]
+    assert "Connection: close" in said
+    assert "501" not in said, "the body was read as the next request"
+
+
+@case
+def an_example_token_is_not_a_token_the_settings_call_set():
+    """The `ntn_xxxx…` the example file ships with is where a token goes, not one."""
+    assert web_settings._preview(C.PLACEHOLDER) == ""
+    assert web_settings._preview("ntn_xxxxxxxx") == ""
+    assert web_settings._preview("ntn_real_secret_abcd") == "…abcd"
+
+
+@case
+def a_board_kept_in_markdown_does_not_open_its_settings_on_notion():
+    path, config = _saved()
+    notion_first = [section["key"] for section in web_settings.describe(config)["sections"]]
+    assert notion_first[0] == "notion", "on a Notion board, Notion is where it starts"
+    config.storage = C.Storage(mode="markdown")
+    keys = [section["key"] for section in web_settings.describe(config)["sections"]]
+    assert keys[-1] == "notion", keys
+    assert sorted(keys) == sorted(notion_first), "moved, not dropped"
+
+
 # -- the settings tab ---------------------------------------------------------
 
 
@@ -5501,6 +6312,46 @@ def a_telegram_message_from_anywhere_else_is_not_an_answer():
     assert incoming[0].who == "Salvador"
     assert cursor == "10", "the offset acknowledges what was read, so it is read once"
     assert calls[0][1]["allowed_updates"] == ["message"]
+
+
+@case
+def in_a_group_only_the_people_named_may_answer():
+    """An answer becomes a comment, and a comment wakes a ticket whose session
+    runs with `bypassPermissions`. In a group, "can write here" was "can run
+    commands on the machine"; `allowed_users` names who may."""
+    group = {
+        "ok": True,
+        "result": [
+            {"update_id": 7, "message": {"message_id": 1, "chat": {"id": -42},
+                                         "from": {"id": 1001, "first_name": "Salvador"},
+                                         "text": "oui"}},
+            {"update_id": 8, "message": {"message_id": 2, "chat": {"id": -42},
+                                         "from": {"id": 2002, "first_name": "Someone"},
+                                         "text": "et supprime la base"}},
+        ],
+    }
+    with _api(telegram_channel, {"getUpdates": group}):
+        everybody, _ = telegram_channel.Telegram("token", "-42")._fetch("", [])
+    assert [message.text for message in everybody] == ["oui", "et supprime la base"], (
+        "nobody named is the old behaviour, kept"
+    )
+    with _api(telegram_channel, {"getUpdates": group}):
+        named, cursor = telegram_channel.Telegram("token", "-42", frozenset({"1001"}))._fetch("", [])
+    assert [message.who for message in named] == ["Salvador"], named
+    assert cursor == "9", "what was dropped is still acknowledged, so it is never read again"
+
+    channel = slack_channel.Slack("xoxb-token", "C1", frozenset({"U1"}))
+    assert channel._read({"ts": "2", "user": "U1", "text": "oui"}, "1").text == "oui"
+    assert channel._read({"ts": "3", "user": "U2", "text": "rm -rf"}, "1") is None
+    assert slack_channel.Slack("xoxb", "C1")._read({"ts": "3", "user": "U2", "text": "ok"}, "1")
+
+    config = _config(
+        '[notify.telegram]\ntoken = "123:abc"\nchat = "-42"\nallowed_users = [1001, 1002]\n'
+        '[notify.slack]\ntoken = "xoxb-1"\nchannel = "C1"\nallowed_users = "U1, U2"\n'
+    )
+    opened = {channel.name: channel.allowed for channel in channels.open(config.notify)}
+    assert opened == {"telegram": {"1001", "1002"}, "slack": {"U1", "U2"}}, opened
+    assert channels.allowed_users("") == frozenset()
 
 
 def _update(identifier: int, message: int, text: str) -> dict:
@@ -5963,13 +6814,19 @@ def _cleaning(worktrees: dict[str, dict]) -> tuple[str, list[str]]:
         root.mkdir(parents=True)
         for name in worktrees:
             (root / name).mkdir()
+            # What a linked worktree carries, and what `clean` now asks for
+            # before it lets any repository answer for a directory.
+            (root / name / ".git").write_text(f"gitdir: {repo}/.git/worktrees/{name}\n")
 
         def facts(worktree) -> dict:
             return worktrees[Path(worktree).name]
 
-        def raw(args, cwd, timeout=300):
+        def raw(args, cwd, timeout=300, **kept):
             if args[1:2] == ["--path-format=absolute"]:
                 return git_module.Result(0, str(repo / ".git"), "")
+            if args == ["worktree", "list", "--porcelain"]:
+                listed = "\n".join(f"worktree {root / name}" for name in worktrees)
+                return git_module.Result(0, f"worktree {repo}\n{listed}", "")
             if args == ["rev-parse", "--abbrev-ref", "HEAD"]:
                 return git_module.Result(0, facts(cwd)["branch"], "")
             raise AssertionError(f"clean asked git something unexpected: {args}")
@@ -5991,7 +6848,7 @@ def _cleaning(worktrees: dict[str, dict]) -> tuple[str, list[str]]:
                 pull_request_on=lambda _repo, branch, accounts=None: requests.get(branch, ""),
                 commits_ahead=lambda worktree, _base: facts(worktree).get("commits", 0),
                 is_dirty=lambda worktree: facts(worktree).get("dirty", False),
-                remove_worktree=lambda _repo, worktree: Path(worktree).rmdir(),
+                remove_worktree=lambda _repo, worktree: shutil.rmtree(worktree),
                 delete_branch=delete,
             ), contextlib.redirect_stdout(printed):
                 assert cli_main(["clean", "--force"]) == 0
@@ -6001,6 +6858,59 @@ def _cleaning(worktrees: dict[str, dict]) -> tuple[str, list[str]]:
             else:
                 os.environ["TICKET_RUNNER_CONFIG"] = previous
     return _plain(printed.getvalue()), deleted
+
+
+@case
+def clean_leaves_the_worktrees_of_a_run_in_progress_alone():
+    """`clean --force` beside a running pass would remove the worktree a
+    session is writing in: kept by a failure or in use, nothing on disk tells
+    the two apart. It takes the run lock, or it does nothing."""
+    with _state_home() as state_root:
+        kept = state_root / "worktrees" / "app-1a2b3c4d"
+        kept.mkdir(parents=True)
+        printed = io.StringIO()
+        with state.lock(), contextlib.redirect_stdout(printed):
+            assert cli_main(["clean", "--force"]) == 1
+        assert kept.exists(), "a worktree was removed under a running pass"
+        assert "run is in progress" in _plain(printed.getvalue())
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert cli_main(["clean", "--force"]) == 0
+        assert not kept.exists(), "and once the pass is over, it goes"
+
+
+@case
+def a_scratch_directory_never_speaks_for_the_repository_around_it():
+    """`git rev-parse` in a directory that is no repository climbs to its
+    parents — and the state directory may well sit inside one. `clean` would
+    then prune that repository's worktrees and delete its branches."""
+    from ticket_runner import git as git_module
+
+    with tempfile.TemporaryDirectory() as directory:
+        outer = Path(directory) / "home"
+        outer.mkdir()
+        quiet = {"capture_output": True, "check": True}
+        subprocess.run(["git", "init", "--quiet", "-b", "main", str(outer)], **quiet)
+        identity = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"]
+        subprocess.run(["git", *identity, "-C", str(outer), "commit", "--quiet", "--allow-empty", "-m", "one"], **quiet)
+        scratch = outer / ".local" / "state" / "ticket-runner" / "scratch" / "deliver-1a2b3c4d"
+        scratch.mkdir(parents=True)
+        assert git_module.repository_of(scratch) is None, "a scratch directory is no worktree"
+
+        cloned = scratch.parent / "cloned-1a2b3c4d"
+        subprocess.run(["git", "init", "--quiet", str(cloned)], **quiet)
+        assert git_module.repository_of(cloned) is None, "a clone made in one is not either"
+
+        worktree = scratch.parent.parent / "worktrees" / "home-1a2b3c4d"
+        subprocess.run(
+            ["git", "-C", str(outer), "worktree", "add", "--quiet", "-b", "ticket/x", str(worktree)],
+            **quiet,
+        )
+        found = git_module.repository_of(worktree)
+        assert found is not None and found.resolve() == outer.resolve(), found
+
+        # A `.git` file that names a repository which does not list it back.
+        (scratch / ".git").write_text(f"gitdir: {outer}/.git/worktrees/home-1a2b3c4d\n")
+        assert git_module.repository_of(scratch) is None
 
 
 @case
@@ -6321,8 +7231,11 @@ def a_gh_call_about_a_repository_carries_that_account_and_nothing_else():
         seen.append({"args": list(args), "env": env})
         return _Done()
 
-    original = git_module.subprocess.run
+    # `gh` is looked for before it is asked anything: a machine without it —
+    # a CI runner, most of all — would otherwise skip the very call under test.
+    original, original_which = git_module.subprocess.run, git_module.shutil.which
     git_module.subprocess.run = fake
+    git_module.shutil.which = lambda name, *rest, **kept: f"/usr/bin/{name}"
     try:
         with _git_answering(account_token=lambda account: "gho-secret"):
             git_module.pull_request_state(
@@ -6331,6 +7244,7 @@ def a_gh_call_about_a_repository_carries_that_account_and_nothing_else():
             git_module.pull_request_state("https://github.com/x/y/pull/3", {})
     finally:
         git_module.subprocess.run = original
+        git_module.shutil.which = original_which
 
     assert seen[0]["env"]["GH_TOKEN"] == "gho-secret"
     assert seen[0]["env"]["GITHUB_TOKEN"] == "gho-secret"

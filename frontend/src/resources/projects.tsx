@@ -12,14 +12,17 @@ import {
   type RowComponentPropsInterface,
 } from "react-resource-view"
 
+import { EmptyState } from "@/components/console/empty-state"
 import { Eyebrow, Fact, Facts } from "@/components/console/frame"
 import { MarkdownInputController } from "@/components/console/markdown-editor"
 import { ProjectPage } from "@/components/console/project-page"
 import { Chip } from "@/components/console/ticket-bits"
+import { buttonVariants } from "@/components/ui/button"
 import { api } from "@/lib/api"
 import { t } from "@/lib/i18n"
 import { SCOPE, layoutOf, useLayoutInTheAddress } from "@/lib/resource-view"
 import type { Project, Projects } from "@/lib/types"
+import { settingsHref } from "@/resources/settings"
 
 /* The projects, declared once for react-resource-view.
  *
@@ -313,12 +316,22 @@ function ProjectsFoot() {
   )
 }
 
-/** The list's own empty line: a board with no projects is not a broken board. */
+/** The list's own empty line: a board with no projects is not a broken board.
+ *
+ * With the one gesture this console has for it: a project is a page on the
+ * board, or a name mapped to a path in the settings — and the second is here. */
 function NoProject() {
   return (
-    <p className="text-muted-foreground rounded-lg border border-dashed px-3 py-6 text-center text-sm">
+    <EmptyState
+      icon={FolderGit2}
+      action={
+        <Link to={settingsHref("projects")} className={buttonVariants({ variant: "outline", size: "sm" })}>
+          {t("Map a project to a folder")}
+        </Link>
+      }
+    >
       {t("No project yet — a ticket without one comes back as a document.")}
-    </p>
+    </EmptyState>
   )
 }
 

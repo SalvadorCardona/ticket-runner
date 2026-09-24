@@ -48,10 +48,12 @@ npm run dev     # serveur de dev avec hot reload, proxy /api vers un console dé
 
 `.github/workflows/ci.yml` tourne sur chaque pull request et sur chaque push
 vers `main` : le job cœur relance `python3 tests/run.py` puis
-`python3 tests/functional.py`, sans installer quoi que ce soit ; le job frontend
-ne se déclenche que si `frontend/**` a changé, et y fait `npm ci`,
-`npm run lint`, `npm run build`. `release.yml` reste séparé et ne se déclenche
-que sur un tag.
+`python3 tests/functional.py` sous Python 3.11 et 3.13, sans installer quoi que
+ce soit ; le job frontend ne se déclenche que si `frontend/**` a changé, et y
+fait `npm ci`, `npm run lint`, `npm run build`, puis échoue si
+`src/ticket_runner/web/static` diffère de ce que le build vient d'écrire.
+`release.yml` reste séparé, ne se déclenche que sur un tag, et relance les deux
+suites.
 
 ## Arborescence utile
 

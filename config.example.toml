@@ -422,6 +422,15 @@ schedule = true
 # from a local copy (TR_SRC=.) has no remote to compare itself against, and says
 # so once instead of updating.
 auto_update = true
+
+# What "the newest" means.
+#   "release"  the newest release tag (vX.Y.Z) and nothing in between: a commit
+#              pushed to main is not something every installation runs until it
+#              is released. No tag yet means no update, and the run says so. An
+#              installation already ahead of the newest tag is never taken back.
+#   "main"     every commit of the branch it was installed from, within the hour.
+# Anything else reads as "release". `ticket-runner doctor` says which is in use.
+update_channel = "release"
 update_interval_seconds = 3600   # one hour; a minute is the floor
 
 # Drop session logs older than this. 0 keeps everything. The Notion comment
@@ -507,6 +516,12 @@ events = ["blocked", "failed", "done"]
 [notify.telegram]
 token = ""
 chat = ""
+# Who may answer, by Telegram user id (the numbers, not the @names). Empty:
+# anybody who can write in `chat` — only you in a private chat, but every member
+# in a group, and an answer becomes a comment that can wake a ticket whose
+# session runs with bypassPermissions. `ticket-runner doctor` warns about a
+# group with nobody named here.
+# allowed_users = [123456789]
 
 # Slack — the same conversation, where the team already is. A question is posted
 # to the channel and answered in its thread, so two tickets can wait at once —
@@ -521,6 +536,11 @@ chat = ""
 [notify.slack]
 token = ""
 channel = ""
+# Who may answer, by Slack member id (profile → ··· → Copy member ID, "U…").
+# Empty: anybody in the channel — and an answer becomes a comment that can wake
+# a ticket whose session runs with bypassPermissions. `ticket-runner doctor`
+# warns while it is empty.
+# allowed_users = ["U0123ABCD"]
 
 # ---------------------------------------------------------------------------
 # The web console — ticket-runner serve

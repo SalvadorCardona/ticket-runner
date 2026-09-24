@@ -21,8 +21,9 @@ from __future__ import annotations
 import re
 import time
 from pathlib import Path
+from typing import Callable
 
-from . import channels, conversation, credits, session, store
+from . import channels, conversation, credits, session, state, store
 from . import voice as voice_module
 from .base import Base
 from .ticket import Job, Ticket
@@ -353,6 +354,41 @@ class Reports(Base):
             ),
         )
         return {"ticket": ticket.title, "id": ticket.id, "status": outcome, "reason": reason}
+
+    def _guarded(
+        self, ticket: Ticket, work: Callable[..., dict | None], *arguments: object
+    ) -> dict | None:
+        """Run one ticket's work so that whatever it raises is that ticket's alone.
+
+        A pass runs several tickets at once, and an exception from any of them
+        used to come back out of `future.result()` and end the pass: the other
+        sessions ran on with nobody left to report them, and the ticket that
+        raised stayed "in progress" until a later run swept it back to ready —
+        to fail the same way again. Here it fails *as a ticket*, on the board and
+        in the history, with what it raised.
+
+        And if even that cannot be written — Notion is the thing that is down —
+        the pass is still not the one to pay: the result is recorded here, and
+        the next run's sweep finds the ticket where it was left.
+        """
+        try:
+            return work(*arguments)
+        except Exception as error:  # noqa: BLE001 — the point is to catch it all
+            detail = f"{type(error).__name__}: {voice_module.line(error)}"
+            state.release(ticket.id)
+            try:
+                return self._fail(ticket, self.voice.say("crashed"), detail)
+            except Exception as unwritten:  # noqa: BLE001
+                self.say(
+                    f"    ✗ {ticket.title} — {detail}, and the failure could not be "
+                    f"written: {voice_module.line(unwritten)}"
+                )
+                return {
+                    "ticket": ticket.title,
+                    "id": ticket.id,
+                    "status": "failed",
+                    "reason": detail,
+                }
 
     def _filed(self, job: Job, outcome: session.Outcome, *rest: object) -> str:
         """The machinery of a failed run, put where it does not crowd the report.

@@ -64,7 +64,9 @@ const inputName = (name: string) => name.replaceAll(".", "-")
 const CHECKS: Record<string, [string, string]> = {
   notion: ["doctor", "does that token reach your board?"],
   notify: ["notify", "send yourself a test message"],
-  runner: ["enable", "apply the interval to the timer"],
+  // No `> enable` under the run's section any more: the console no longer runs
+  // the commands that change the machine (`enable`, `run`, `update`…), and a
+  // button that could only be refused is not a check.
 }
 
 function same(left: unknown, right: unknown): boolean {
@@ -295,7 +297,10 @@ export function written(
  *
  * It is the form's own submit action rather than a footer drawn beside it, so
  * the count it shows is read off the form the package is holding rather than
- * off a second copy kept in a parent. */
+ * off a second copy kept in a parent.
+ *
+ * The room at its right end is the discussion's bubble, which floats over the
+ * bottom corner of every page: without it, Save sat under the bubble. */
 function SaveBar({ sectionKey }: { sectionKey: string }) {
   const { form, onSubmit, updateData, isLoading } = useFormContext()
   const { runCommand } = useConsole()
@@ -307,7 +312,7 @@ function SaveBar({ sectionKey }: { sectionKey: string }) {
   const check = CHECKS[sectionKey]
 
   return (
-    <div className="bg-card sticky bottom-0 col-span-full mt-5 flex flex-wrap items-center gap-2 border-t py-2.5">
+    <div className="bg-card sticky bottom-0 col-span-full mt-5 flex flex-wrap items-center gap-2 border-t py-2.5 pr-16">
       <span className="text-muted-foreground text-xs">
         {changed === 0
           ? t("nothing typed here")

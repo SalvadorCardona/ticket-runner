@@ -7,6 +7,7 @@ import {
   type ViewResourceInterface,
 } from "react-resource-view"
 
+import { EmptyState } from "@/components/console/empty-state"
 import { api } from "@/lib/api"
 import { t } from "@/lib/i18n"
 import { SCOPE } from "@/lib/resource-view"
@@ -174,9 +175,7 @@ function form(words: Words): FormInterface {
 function nothingHere(sentence: string) {
   return function Nothing() {
     return (
-      <p className="text-muted-foreground rounded-lg border border-dashed px-3 py-6 text-center text-sm">
-        {t(sentence)}
-      </p>
+      <EmptyState className="py-6">{t(sentence)}</EmptyState>
     )
   }
 }

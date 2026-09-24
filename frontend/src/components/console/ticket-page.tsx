@@ -1,14 +1,16 @@
 import * as React from "react"
-import { ArrowLeft } from "lucide-react"
+import { ArrowLeft, RotateCw, TriangleAlert } from "lucide-react"
 import { Link, useCurrentViewResourceContext } from "react-resource-view"
 
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useConsole } from "@/hooks/use-console"
 import { useT } from "@/lib/i18n"
 import type { TicketDetail } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { boardHref } from "@/resources/tickets"
+import { boardHref, lastTicketProblem } from "@/resources/tickets"
 
+import { EmptyState } from "./empty-state"
 import { Eyebrow, Fact, Facts } from "./frame"
 import { Markdown } from "./markdown"
 import {
@@ -141,7 +143,7 @@ export function TicketPage() {
                     — and the other half of the answer to "why has nothing
                     happened": nobody claimed it. */}
                 <Fact label={t("taken by")}>
-                  <span className="font-mono text-xs" title={ticket.runner || undefined}>
+                  <span className={ticket.runner ? "font-mono text-xs" : undefined} title={ticket.runner || undefined}>
                     {ticket.runner || "—"}
                   </span>
                 </Fact>
@@ -161,7 +163,26 @@ export function TicketPage() {
               </div>
             </>
           ) : context.error ? (
-            <p className="text-destructive text-sm">{t("This ticket could not be read.")}</p>
+            // Why, as the server said it, and the two ways on from here: a
+            // board that did not answer often answers the second time.
+            <EmptyState
+              icon={TriangleAlert}
+              title={t("This ticket could not be read.")}
+              action={
+                <>
+                  <Button variant="outline" size="sm" onClick={() => context.fetchData()}>
+                    <RotateCw />
+                    {t("Try again")}
+                  </Button>
+                  <Link to={back} className={buttonVariants({ variant: "ghost", size: "sm" })}>
+                    <ArrowLeft />
+                    {t("Back to the board")}
+                  </Link>
+                </>
+              }
+            >
+              {lastTicketProblem() || t("The server gave no reason.")}
+            </EmptyState>
           ) : (
             <div className="flex flex-col gap-2">
               <Skeleton className="h-8 w-2/3" />

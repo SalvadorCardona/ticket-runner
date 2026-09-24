@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-from . import store
+from . import disk, store
 from .config import state_dir
 
 # What to call it when you want its attention. Configurable — `notion.mention` —
@@ -294,10 +294,7 @@ class Ledger:
             "at": self.at,
         }
         try:
-            self.path.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            self.path.chmod(0o600)
+            disk.write_atomic(self.path, json.dumps(payload, ensure_ascii=False, indent=2))
         except OSError:
             pass
 

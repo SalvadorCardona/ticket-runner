@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from . import store
+from . import state, store
 from . import schedules as schedules_module
 from . import voice as voice_module
 from .base import Base
@@ -34,6 +34,18 @@ class Recurrence(Base):
             return []
         settings = self.config.notion
         return [schedules_module.read(page, settings) for page in self.client.query(database)]
+
+    def born(self) -> list[dict]:
+        """`recur`, with each birth written into the history — none in a dry run.
+
+        Before the queue, so a ticket born at 09:00 is claimed by the very pass
+        that made it rather than by the next one. A birth is an entry of its own
+        kind: `ticket-runner history` shows it as it shows a merge.
+        """
+        newborns = [entry for entry in self.recur() if entry.get("status") != "dry-run"]
+        for entry in newborns:
+            state.record(entry)
+        return newborns
 
     def recur(self) -> list[dict]:
         """The schedules whose moment has come, turned into tickets.
