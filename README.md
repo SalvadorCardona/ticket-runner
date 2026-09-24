@@ -2168,10 +2168,14 @@ Notion lives, so that is the one seam in the code: `TICKET_RUNNER_NOTION_API`, r
 each request and unset in every installation.
 
 `.github/workflows/ci.yml` runs both suites on every pull request and on every push to
-`main` — the runner opens its own PRs, and none of them was checked before merge until
-this ran. A second job builds and lints `frontend/` the same way, but only when
-`frontend/**` changed. `.github/workflows/release.yml` is separate: it re-runs the suite
-once more, at the tagged commit, when a version is published.
+`main`, on Python 3.11 — the oldest the runner promises — and 3.13 — the runner opens its
+own PRs, and none of them was checked before merge until this ran. A second job builds and
+lints `frontend/` the same way, but only when `frontend/**` changed, and then fails if
+`src/ticket_runner/web/static` is not exactly what that build produces: the console is
+served from the committed build, so a change to the console without its build is a change
+nobody receives. The workflow only ever reads the repository (`permissions: contents:
+read`). `.github/workflows/release.yml` is separate: it re-runs both suites once more, at
+the tagged commit, when a version is published.
 
 ---
 
@@ -2212,7 +2216,7 @@ git commit -am "release: 0.2.0"
 git tag -a v0.2.0 -m "ticket-runner 0.2.0" && git push origin v0.2.0
 ```
 
-The tag push is the whole request. `.github/workflows/release.yml` re-runs the suite at
+The tag push is the whole request. `.github/workflows/release.yml` re-runs both suites at
 that commit and creates the GitHub release with the `## [0.2.0]` section as its body — so
 the release notes cannot say something the repository does not.
 

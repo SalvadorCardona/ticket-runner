@@ -1,12 +1,19 @@
 # Ce qui protège une pull request avant qu'elle ne devienne un commit sur
-# `main` — le runner ouvre lui-même ses PR, et les installations suivent
-# `main` commit par commit sans jamais attendre un tag.
+# `main` — le runner ouvre lui-même ses PR, et les installations qui suivent
+# `update_channel = "main"` prennent chaque commit sans attendre un tag.
 #
 # Le job cœur tourne toujours : les deux suites n'ont pas de dépendance, elles
 # n'ont pas de raison d'être sautées. `tests/functional.py` a besoin de `git`,
 # que le runner GitHub a déjà, et de rien d'autre : son Notion, son dépôt et son
-# `claude` sont à lui. Le job frontend ne tourne que si `frontend/**` a changé,
-# pour ne pas payer npm sur des tickets qui n'y touchent pas.
+# `claude` sont à lui. Il tourne sur la plus ancienne version de Python que le
+# runner promet (3.11) et sur la plus récente, parce qu'une installation prend
+# le `python3` de la machine, quel qu'il soit.
+#
+# Le job frontend ne tourne que si `frontend/**` a changé, pour ne pas payer npm
+# sur des tickets qui n'y touchent pas. Et il vérifie que `web/static/`, que le
+# runner sert tel qu'il est commité, est bien ce que le build produit : une
+# console modifiée sans son build commité serait une console que personne ne
+# reçoit.
 
 name: CI
 
@@ -16,15 +23,23 @@ on:
     branches:
       - main
 
+# Lire le dépôt, et rien d'autre : aucun job n'écrit quoi que ce soit.
+permissions:
+  contents: read
+
 jobs:
   core:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
 
       - name: La suite du cœur
         run: python3 tests/run.py
@@ -65,3 +80,14 @@ jobs:
         if: steps.changes.outputs.frontend == 'true'
         run: npm run build
         working-directory: frontend
+
+      - name: Le build commité est celui que le code produit
+        if: steps.changes.outputs.frontend == 'true'
+        run: |
+          git diff --exit-code -- src/ticket_runner/web/static
+          untracked="$(git status --porcelain -- src/ticket_runner/web/static)"
+          if [ -n "$untracked" ]; then
+            echo "src/ticket_runner/web/static n'est pas à jour : lancez npm run build et commitez le résultat"
+            echo "$untracked"
+            exit 1
+          fi
