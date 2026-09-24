@@ -189,6 +189,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         for name, value in (extra or {}).items():
             self.send_header(name, value)
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
@@ -310,7 +312,7 @@ class Handler(BaseHTTPRequestHandler):
         if route.startswith("/static/"):
             return self._static(route[len("/static/") :])
         if route == "/api/events":
-            return self._stream()
+            return self._stream((query.get("after") or [""])[0])
 
         try:
             if route == "/api/state":
@@ -355,6 +357,7 @@ class Handler(BaseHTTPRequestHandler):
         route = parsed.path.rstrip("/") or "/"
 
         if not self._host_is_ours():
+            self.close_connection = True
             return self._fail(421, "this console is not served under that name")
         # Two writes cannot be authorised beforehand, because they are what
         # produces the authorisation: signing in, and — on a console nobody has
@@ -364,11 +367,16 @@ class Handler(BaseHTTPRequestHandler):
         signing_in = route == "/api/login"
         opening = signing_in or route == "/api/setup"
         if not opening and not self._authorised(parse_qs(parsed.query)):
+            # The body is left unread, so the connection cannot be reused: the
+            # next request on it would begin with this one's `{}` — which is how
+            # a signed-out browser reloading the page got a 501 for "{}GET".
+            self.close_connection = True
             return self._fail(401, "token missing or wrong")
         # A cookie alone is not consent: a page you have open elsewhere can post
         # a form to this port with your cookie attached, but it cannot set a
         # header of its own without a preflight this server never answers.
         if self.headers.get(GUARD_HEADER) != "1":
+            self.close_connection = True
             return self._fail(403, "this request did not come from the console")
 
         payload = self._body()
@@ -520,10 +528,16 @@ class Handler(BaseHTTPRequestHandler):
             ).format(path=html.escape(str(configuration.path)))
         return f"<code>{html.escape(str(state_dir() / 'web' / 'token'))}</code>"
 
-    def _stream(self) -> None:
-        """One Server-Sent Events connection, for as long as the tab is open."""
+    def _stream(self, since: str = "") -> None:
+        """One Server-Sent Events connection, for as long as the tab is open.
+
+        Where to resume from comes as the header a browser sends when it
+        reconnects on its own, or as `?after=` from a console that had to open
+        the stream again itself — a refused stream is never retried by the
+        browser, and a new `EventSource` cannot set a header.
+        """
         try:
-            after = int(self.headers.get("Last-Event-ID") or 0)
+            after = int(self.headers.get("Last-Event-ID") or since or 0)
         except ValueError:
             after = 0
         channel = self.api.hub.subscribe(after)
@@ -572,12 +586,12 @@ _STYLE = """<style>
  :root{--bg:#0e0f13;--card:#16181e;--field:#1a1d24;--line:#262a34;--fg:#f1f2f4;--muted:#8d95a5;
        --accent:#d5f95a;--on-accent:#14180b;--bad:#f2685f;--good:#b8f24a;color-scheme:dark}
  @media (prefers-color-scheme: light){
-  :root{--bg:#fbfbf9;--card:#fff;--field:#f4f5f1;--line:#e4e5e0;--fg:#14161a;--muted:#5b6170;
+  :root{--bg:#fbfbf9;--card:#fff;--field:#f4f5f1;--line:#e4e5e0;--fg:#14161a;--muted:#5f6573;
         --accent:#46600f;--on-accent:#f4ffe0;--bad:#c8332a;--good:#4d7a10;color-scheme:light}
  }
  body{background:var(--bg);color:var(--fg);font:15px/1.6 "DM Sans",ui-sans-serif,system-ui,sans-serif;
       display:grid;place-items:center;min-height:100vh;margin:0}
- form{width:min(28rem,90vw);background:var(--card);border:1px solid var(--line);border-radius:14px;padding:1.6rem}
+ form{box-sizing:border-box;width:min(28rem,92vw);background:var(--card);border:1px solid var(--line);border-radius:14px;padding:1.6rem}
  h1{font-size:1.1rem;margin:0 0 .4rem} p{color:var(--muted);margin:.2rem 0 1.2rem;font-size:.9rem}
  label{display:block;font-size:.85rem;font-weight:600;margin:.8rem 0 .3rem}
  input{width:100%;box-sizing:border-box;background:var(--field);border:1px solid var(--line);color:inherit;
@@ -585,7 +599,7 @@ _STYLE = """<style>
  input:focus-visible,textarea:focus-visible,button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
  button{margin-top:1.1rem;width:100%;background:var(--accent);color:var(--on-accent);border:0;border-radius:9px;
         padding:.7rem;font:inherit;font-weight:600;cursor:pointer}
- code{background:var(--field);padding:.15rem .4rem;border-radius:6px;color:var(--fg);word-break:break-all}
+ code{background:var(--field);padding:.15rem .4rem;border-radius:6px;color:var(--fg);overflow-wrap:anywhere}
  .said{color:var(--bad);margin:.9rem 0 0;min-height:1.2em}
 </style>
 """

@@ -5318,6 +5318,43 @@ def the_gate_says_where_this_machines_token_actually_is():
 
 
 @case
+def a_write_refused_before_its_body_is_read_closes_the_connection():
+    """A POST turned away unread must not leave its body on a reused connection.
+
+    The browser reuses a keep-alive connection: the `{}` of a refused
+    `/api/refresh` was read as the start of the next request, and a signed-out
+    page that reloaded itself got "501 Unsupported method ('{}GET')" instead of
+    the sign-in.
+    """
+    import socket as sockets
+
+    from ticket_runner.web import server as web_server
+
+    api = _bare_api(_TalkClient([]))
+    console = web_server.Console(("127.0.0.1", 0), web_server.Handler, api, "tok")
+    thread = threading.Thread(target=console.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = console.server_address[1]
+        with sockets.create_connection(("127.0.0.1", port), timeout=5) as connection:
+            connection.sendall(
+                b"POST /api/refresh HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Ticket-Runner: 1\r\n"
+                b"Content-Type: application/json\r\nContent-Length: 2\r\n\r\n{}"
+                b"GET /api/state HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+            )
+            answer = b""
+            while chunk := connection.recv(65536):
+                answer += chunk
+    finally:
+        console.shutdown()
+        console.server_close()
+    said = answer.decode("utf-8", "replace")
+    assert said.startswith("HTTP/1.1 401"), said[:80]
+    assert "Connection: close" in said
+    assert "501" not in said, "the body was read as the next request"
+
+
+@case
 def an_example_token_is_not_a_token_the_settings_call_set():
     """The `ntn_xxxx…` the example file ships with is where a token goes, not one."""
     assert web_settings._preview(C.PLACEHOLDER) == ""
