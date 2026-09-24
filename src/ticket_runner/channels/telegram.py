@@ -15,6 +15,11 @@ One rule worth stating out loud, because it is the security of the whole
 channel: **only the configured chat is read.** A bot token is a public address —
 anyone who guesses your bot's name can write to it — and a message from any
 other chat is dropped before it can become a comment on your board.
+
+A group is the exception that rule does not cover: everybody in it writes in
+the configured chat. An answer becomes a comment, and a comment wakes a ticket
+whose session runs with `bypassPermissions` — so a group member is somebody who
+can run commands on the machine. `allowed_users` narrows it to named people.
 """
 
 from __future__ import annotations
@@ -31,9 +36,10 @@ LIMIT = 3900
 class Telegram(Channel):
     name = "telegram"
 
-    def __init__(self, token: str, chat: str) -> None:
+    def __init__(self, token: str, chat: str, allowed: frozenset[str] = frozenset()) -> None:
         self._token = token
         self._chat = str(chat).strip()
+        self.allowed = frozenset(allowed)
 
     def _url(self, method: str) -> str:
         return f"{API}/bot{self._token}/{method}"
@@ -86,6 +92,9 @@ class Telegram(Channel):
                 continue
             author = message.get("from") or {}
             if author.get("is_bot"):
+                continue
+            if self.allowed and str(author.get("id", "")) not in self.allowed:
+                # Somebody in the group, and not somebody allowed to answer.
                 continue
             replied = message.get("reply_to_message") or {}
             incoming.append(

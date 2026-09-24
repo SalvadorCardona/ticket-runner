@@ -11,6 +11,11 @@ expected: that is how two tickets can be waiting at once without their answers
 being confused. A message typed in the channel itself still counts — it answers
 the last question asked — because that is what people do.
 
+Anybody in the channel can answer, unless `allowed_users` names who may: a
+reply becomes a comment, and a comment wakes a ticket whose session runs with
+`bypassPermissions`. In a channel a whole team reads, that list is what keeps
+"can post in #general" from meaning "can run commands on the runner's machine".
+
 The bot needs `chat:write` to speak, and the history scope matching where you
 put it: `channels:history` for a public channel, `groups:history` for a private
 one, `im:history` for a direct message. And it has to be *in* the channel:
@@ -43,9 +48,10 @@ class Slack(Channel):
     # an answer here — or the ticket, named in the message.
     fallback = False
 
-    def __init__(self, token: str, channel: str) -> None:
+    def __init__(self, token: str, channel: str, allowed: frozenset[str] = frozenset()) -> None:
         self._token = token
         self._channel = str(channel).strip()
+        self.allowed = frozenset(allowed)
 
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self._token}"}
@@ -134,6 +140,8 @@ class Slack(Channel):
         """
         if message.get("bot_id") or message.get("subtype") or not message.get("user"):
             return None
+        if self.allowed and str(message.get("user")) not in self.allowed:
+            return None  # somebody in the channel, not somebody allowed to answer
         stamp = str(message.get("ts", ""))
         if not stamp or (cursor and stamp <= cursor):
             return None

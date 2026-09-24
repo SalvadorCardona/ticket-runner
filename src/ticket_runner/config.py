@@ -916,4 +916,13 @@ def _channel(raw: object) -> dict[str, str]:
     """
     if not isinstance(raw, dict):
         return {}
-    return {str(key): str(value).strip() for key, value in raw.items()}
+    return {
+        # A list — `allowed_users` — is kept as one comma-separated string, so
+        # the table stays the flat mapping every reader of it expects.
+        str(key): (
+            ",".join(str(item).strip() for item in value)
+            if isinstance(value, (list, tuple))
+            else str(value)
+        ).strip()
+        for key, value in raw.items()
+    }

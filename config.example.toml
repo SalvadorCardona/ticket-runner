@@ -516,6 +516,12 @@ events = ["blocked", "failed", "done"]
 [notify.telegram]
 token = ""
 chat = ""
+# Who may answer, by Telegram user id (the numbers, not the @names). Empty:
+# anybody who can write in `chat` — only you in a private chat, but every member
+# in a group, and an answer becomes a comment that can wake a ticket whose
+# session runs with bypassPermissions. `ticket-runner doctor` warns about a
+# group with nobody named here.
+# allowed_users = [123456789]
 
 # Slack — the same conversation, where the team already is. A question is posted
 # to the channel and answered in its thread, so two tickets can wait at once —
@@ -530,6 +536,11 @@ chat = ""
 [notify.slack]
 token = ""
 channel = ""
+# Who may answer, by Slack member id (profile → ··· → Copy member ID, "U…").
+# Empty: anybody in the channel — and an answer becomes a comment that can wake
+# a ticket whose session runs with bypassPermissions. `ticket-runner doctor`
+# warns while it is empty.
+# allowed_users = ["U0123ABCD"]
 
 # ---------------------------------------------------------------------------
 # The web console — ticket-runner serve

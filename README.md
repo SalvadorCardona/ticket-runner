@@ -1331,7 +1331,18 @@ channel that installs on a laptop behind a NAT.
 
 Only that chat is ever read. A bot token is a public address — anyone who guesses the
 bot's name can write to it — so a message from any other chat is dropped before it can
-become a comment on your board.
+become a comment on your board. In a **group**, though, everybody in it writes in that
+chat: name who may answer with their Telegram user ids —
+
+```toml
+[notify.telegram]
+allowed_users = [123456789]
+```
+
+— and everybody else's messages are read past. Empty is the old behaviour, and it is
+fine in a private chat, where only you write; see
+[who can write a ticket](#who-can-write-a-ticket-can-run-commands-on-that-machine) for
+why it is not in a group.
 
 ### Slack — where the team already is
 
@@ -1347,6 +1358,9 @@ conversations in it, and a colleague's "ok" is not an approval of anything.
 3. *Install to Workspace*, copy the `xoxb-` token into `[notify.slack] token`;
 4. `/invite @your-bot` in the channel — the step everyone forgets — and put the channel ID
    (`···` → *View channel details*, at the bottom) in `channel`.
+5. `allowed_users = ["U0123ABCD"]` — the member ids of the people whose answers count
+   (profile → `···` → *Copy member ID*). Empty, anybody in the channel can answer, and
+   `ticket-runner doctor` says so.
 
 ### What gets sent, and what does not
 
@@ -2104,6 +2118,15 @@ database someone else can edit — it is a different proposition. What makes it 
   comments of a ticket reach the prompt too, and since answering a ticket the runner has
   already handled starts a run of its own, that includes **comment-only** collaborators:
   on a shared board, they are the same permission.
+
+The same holds of the **messaging channels**, one step removed: an answer typed in
+Telegram or Slack becomes a comment on the ticket, and a comment wakes it. With
+`allowed_users` empty — the default, and the old behaviour — anybody who can write where
+the runner reads can do that: only you in a private Telegram chat, but every member of a
+Telegram group or of the Slack channel. On anything shared, fill in
+`[notify.telegram] allowed_users` and `[notify.slack] allowed_users` with the ids of the
+people you would let run a command on that machine; `ticket-runner doctor` warns about a
+channel that answers to anybody.
 
 Setting `permission_mode = "acceptEdits"` narrows it further, at the cost of sessions that
 stall the first time one needs to run the test suite. It is the right setting for a shared

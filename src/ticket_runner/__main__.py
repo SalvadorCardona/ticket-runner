@@ -719,6 +719,7 @@ def command_doctor(args: argparse.Namespace) -> int:
         except channels.ChannelError as error:
             bad(f"{channel.name} — {error}")
             problems += 1
+        _doctor_answerers(channel, settings)
     if live:
         moments = ", ".join(settings.events) or "nothing"
         print(f"  {DIM}sent on: {moments}{RESET}")
@@ -945,6 +946,32 @@ def command_doctor(args: argparse.Namespace) -> int:
         return 1
     print(f"\n{GREEN}Everything is in place.{RESET}")
     return 0
+
+
+def _doctor_answerers(channel: channels.Channel, settings: config_module.Notify) -> None:
+    """Who may answer on this channel — said, because an answer can run code.
+
+    An answer becomes a comment, a comment wakes a ticket, and a ticket runs a
+    session with `bypassPermissions`. Nobody named is anybody who can write
+    there: fine in a private chat, a door left open in a group or a channel.
+    """
+    if not settings.replies:
+        return
+    table = f"notify.{channel.name}"
+    if channel.allowed:
+        ok(
+            f"{channel.name} — answers read from {len(channel.allowed)} user(s) only "
+            f"({table}.allowed_users)"
+        )
+        return
+    chat = str(settings.telegram.get("chat", "")) if channel.name == "telegram" else ""
+    if channel.name == "telegram" and chat and not chat.startswith("-"):
+        print(f"  {DIM}telegram — a private chat: only you write in it{RESET}")
+        return
+    warn(
+        f"{channel.name} — anybody who can write there can answer, and an answer can wake "
+        f"a ticket: {table}.allowed_users narrows it to named people"
+    )
 
 
 def _doctor_schedules(
